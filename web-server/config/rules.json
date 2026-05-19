@@ -1,0 +1,10 @@
+{
+  "whitelist": [
+    {"tool_name": "get_cpu_info", "description": "读取 CPU 信息"},
+    {"tool_name": "get_memory_info", "description": "读取内存信息"}
+  ],
+  "blacklist": [
+    {"tool_name": "shutdown_system", "description": "禁止关机操作"},
+    {"tool_name": "drop_database", "description": "禁止删除数据库"}
+  ]
+}

@@ -1,0 +1,78 @@
+services:
+  # 前端 (Vue 3 静态页面 + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+    restart: "no"
+    network_mode: bridge
+    ports:
+      - "80:80"
+    depends_on:
+      - web-server
+
+  # 核心编排层（Mock LLM）
+  web-server:
+    build:
+      context: ./web-server
+    container_name: web-server-test
+    restart: "no"
+    working_dir: /app
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - MCP_TOOL_SERVER_URL=http://tool-server:8001
+      - MCP_RAG_SERVER_URL=http://rag-server:8002
+      - LLM_MOCK=true
+      - TOOL_REQUEST_TIMEOUT_SECONDS=3
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./web-server/config:/app/config:ro,Z
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    network_mode: bridge
+    ports:
+      - "8000:8000"
+    depends_on:
+      - tool-server
+      - rag-server
+
+  # 工具执行层（临时文件系统，无宿主机挂载）
+  tool-server:
+    build:
+      context: ./tool-server
+    container_name: tool-server-test
+    restart: "no"
+    working_dir: /app
+    environment:
+      - PROC_PATH=/tmp/test-proc
+      - SYS_PATH=/tmp/test-sys
+      - LOG_PATH=/tmp/test-log
+      - SANDBOX_ROOT=/tmp/sandbox
+      - LOG_LEVEL=DEBUG
+    read_only: false
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /tmp/test-proc:size=16m,mode=1777
+      - /tmp/test-sys:size=16m,mode=1777
+      - /tmp/test-log:size=16m,mode=1777
+    network_mode: bridge
+    ports:
+      - "8001:8001"
+
+  # 运维经验库（ChromaDB 内存模式）
+  rag-server:
+    build:
+      context: ./rag-server
+    container_name: rag-server-test
+    restart: "no"
+    working_dir: /app
+    environment:
+      - CHROMA_MODE=memory
+      - LOG_LEVEL=DEBUG
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    network_mode: bridge
+    ports:
+      - "8002:8002"

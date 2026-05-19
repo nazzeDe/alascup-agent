@@ -1,0 +1,146 @@
+services:
+  # 前端 Web 界面 (Alpine.js 静态页面 + Nginx)
+  frontend:
+    platform: linux/loong64
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "80:80"
+    depends_on:
+      - web-server
+
+  # 核心编排层
+  web-server:
+    platform: linux/loong64
+    build:
+      context: ./web-server
+    container_name: web-server
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://alascup:alascup@postgres:5432/alascup
+      - MCP_TOOL_SERVER_URL=http://tool-server:8001
+      - MCP_RAG_SERVER_URL=http://rag-server:8002
+    volumes:
+      - ./web-server/config:/app/config:ro,Z
+      - ./logs/web-server:/app/logs:Z
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: "0.50"
+    network_mode: bridge
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+      - tool-server
+      - rag-server
+
+  # 数据库
+  postgres:
+    image: ghcr.io/loong64/postgres:18-trixie
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=alascup
+      - POSTGRES_PASSWORD=alascup
+      - POSTGRES_DB=alascup
+    volumes:
+      - pgdata:/var/lib/postgresql/data:Z
+    read_only: false
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run/postgresql:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "1.00"
+    network_mode: bridge
+    expose:
+      - "5432"
+
+  # 工具执行层（感知 + 运维操作）
+  tool-server:
+    platform: linux/loong64
+    build:
+      context: ./tool-server
+    container_name: tool-server
+    restart: unless-stopped
+    volumes:
+      - /var/log:/host/var/log:ro,Z
+      - /proc:/host/proc:ro,Z
+      - /sys:/host/sys:ro,Z
+      - ./logs/tool-server:/app/logs:Z
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    privileged: false
+    cap_add:
+      # --- 进程工具 ---
+      - SYS_PTRACE      # strace, /proc/<pid>/exe 读取
+      - KILL            # kill, systemctl stop
+      # --- 网络工具 ---
+      - NET_ADMIN       # ss, 网络命名空间操作
+      - NET_RAW         # tcpdump, ping
+      # --- 文件访问 ---
+      - DAC_READ_SEARCH # 读取宿主机只读挂载（/proc, /sys, /var/log）
+      # --- 系统服务管理 ---
+      - SYS_ADMIN       # systemctl start/stop/restart/daemon-reload（注释即禁用）
+      # --- 内核诊断 ---
+      - SYSLOG          # dmesg
+    pid: "host"
+    pids_limit: 512
+    mem_limit: 768m
+    cpus: "1.00"
+    network_mode: bridge
+    expose:
+      - "8001"
+
+  # 运维经验库
+  rag-server:
+    platform: linux/loong64
+    build:
+      context: ./rag-server
+    container_name: rag-server
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - rag-data:/app/data:Z
+      - ./logs/rag-server:/app/logs:Z
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "0.50"
+    network_mode: bridge
+    expose:
+      - "8002"
+
+volumes:
+  rag-data:
+  pgdata:

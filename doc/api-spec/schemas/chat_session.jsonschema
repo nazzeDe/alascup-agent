@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatSession",
+  "type": "object",
+  "required": ["chat_id", "messages", "timestamp"],
+  "properties": {
+    "chat_id": {"type": "string"},
+    "messages": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "executed_tool_list": {"type": "array", "items": {"type": "string"}},
+    "timestamp": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}

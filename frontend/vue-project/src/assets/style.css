@@ -1,0 +1,97 @@
+.chat-messages {
+  background: #f8f9fa;
+}
+
+.chat-bubble {
+  word-break: break-word;
+}
+
+.chat-bubble-assistant pre {
+  background: #e9ecef;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.chat-bubble-assistant code {
+  font-size: 0.875em;
+}
+
+.tool-call-card {
+  font-size: 0.9rem;
+}
+
+.session-list {
+  min-width: 200px;
+}
+
+.session-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.chat-bubble-assistant h1,
+.chat-bubble-assistant h2,
+.chat-bubble-assistant h3 {
+  font-size: 1.1rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-bubble-assistant ul,
+.chat-bubble-assistant ol {
+  padding-left: 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-bubble-assistant p {
+  margin-bottom: 0.25rem;
+}
+
+.chat-bubble-assistant blockquote {
+  border-left: 3px solid #dee2e6;
+  padding-left: 0.75rem;
+  color: #6c757d;
+  margin: 0.25rem 0;
+}
+
+.modal {
+  z-index: 1055;
+}
+
+.navbar-brand {
+  font-size: 1.1rem;
+}
+
+/* isMeta messages */
+.chat-meta {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* Streaming status bar */
+.streaming-status {
+  font-size: 0.85rem;
+}
+
+/* Chat loading overlay */
+.chat-loading-overlay {
+  z-index: 10;
+}
+
+/* Toast styles */
+.toast-container {
+  min-width: 320px;
+}
+
+.toast-container .toast {
+  min-width: 280px;
+}
+
+/* Code highlighting in assistant messages */
+.chat-bubble-assistant pre {
+  position: relative;
+}
+
+.chat-bubble-assistant pre code.hljs {
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}

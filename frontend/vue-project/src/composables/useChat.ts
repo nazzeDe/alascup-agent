@@ -1,0 +1,273 @@
+import { ref, type Ref } from 'vue'
+import type {
+  Message,
+  ToolCallInfo,
+  AssistantEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+  ToolApprovalRequiredEvent,
+  ErrorEvent,
+  DoneEvent,
+  ChatSession,
+} from '@/types'
+import { useSSE } from './useSSE'
+import { useSessions } from './useSessions'
+import { useToast } from './useToast'
+
+interface QueuedEvent {
+  type: 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'done'
+  data: unknown
+}
+
+export function useChat() {
+  const { connect, abort: sseAbort, isStreaming } = useSSE()
+  const { activeChatId, loadSessions } = useSessions()
+  const { showToast } = useToast()
+
+  const messages: Ref<Message[]> = ref([])
+  const toolCalls: Ref<Map<string, ToolCallInfo>> = ref(new Map())
+  const isLoadingHistory: Ref<boolean> = ref(false)
+
+  const approvalPending: Ref<{
+    request_id: string
+    tool_name: string
+    params: Record<string, unknown>
+    reason: string
+    chat_id: string
+  } | null> = ref(null)
+
+  let isApprovalPaused = false
+  let queuedEvents: QueuedEvent[] = []
+
+  function sendMessage(text: string, options?: { model?: string; maxTurns?: number }): void {
+    const chatId = activeChatId.value
+
+    const userMsg: Message = {
+      messageID: crypto.randomUUID(),
+      chatID: chatId ?? '',
+      timestamp: new Date().toISOString(),
+      type: 'user',
+      content: text,
+    }
+    messages.value = [...messages.value, userMsg]
+
+    let currentAssistantMsgId = ''
+    let assistantBuffer = ''
+
+    connect(
+      { chatId, message: text, model: options?.model, maxTurns: options?.maxTurns },
+      {
+        onAssistant(data: AssistantEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'assistant', data })
+            return
+          }
+          if (!currentAssistantMsgId) {
+            currentAssistantMsgId = data.message_id
+            const msg: Message = {
+              messageID: data.message_id,
+              chatID: data.chat_id,
+              timestamp: new Date().toISOString(),
+              type: 'assistant',
+              content: '',
+            }
+            messages.value = [...messages.value, msg]
+          }
+          assistantBuffer += data.delta
+          const idx = messages.value.findIndex(m => m.messageID === currentAssistantMsgId)
+          if (idx !== -1) {
+            const updated = [...messages.value]
+            updated[idx] = { ...updated[idx]!, content: assistantBuffer }
+            messages.value = updated
+          }
+        },
+
+        onToolCall(data: ToolCallEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'tool_call', data })
+            return
+          }
+          const tc: ToolCallInfo = {
+            messageID: data.message_id,
+            chatID: data.chat_id,
+            tool_name: data.tool_name,
+            isReadOnly: data.isReadOnly,
+            params: data.params,
+            execution_status: 'RUNNING',
+            timestamp: new Date().toISOString(),
+          }
+          const updated = new Map(toolCalls.value)
+          updated.set(data.message_id, tc)
+          toolCalls.value = updated
+        },
+
+        onToolResult(data: ToolResultEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'tool_result', data })
+            return
+          }
+          const existing = toolCalls.value.get(data.message_id)
+          if (existing) {
+            const updated = new Map(toolCalls.value)
+            updated.set(data.message_id, {
+              ...existing,
+              execution_status: data.execution_status,
+              output: data.output,
+              ...(data.error ? { error: data.error } : {}),
+            })
+            toolCalls.value = updated
+          }
+        },
+
+        onToolApprovalRequired(data: ToolApprovalRequiredEvent) {
+          approvalPending.value = { ...data }
+          isApprovalPaused = true
+
+          const tc: ToolCallInfo = {
+            messageID: crypto.randomUUID(),
+            chatID: data.chat_id,
+            tool_name: data.tool_name,
+            isReadOnly: false,
+            params: data.params,
+            request_id: data.request_id,
+            approval_status: 'PENDING',
+            execution_status: 'PENDING_APPROVAL',
+            timestamp: new Date().toISOString(),
+          }
+          const updated = new Map(toolCalls.value)
+          updated.set(tc.messageID, tc)
+          toolCalls.value = updated
+        },
+
+        onError(data: ErrorEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'error', data })
+            return
+          }
+          // FE-014: transient errors go to toast
+          showToast('error', `${data.code}: ${data.message}`, data.code)
+        },
+
+        onDone(_data: DoneEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'done', data: _data })
+            return
+          }
+          if (!activeChatId.value && _data.chat_id) {
+            activeChatId.value = _data.chat_id
+            loadSessions()
+          }
+        },
+      },
+    )
+  }
+
+  function drainQueue(): void {
+    // Process queued events in order; re-dispatched through the same callbacks would re-queue, so process directly
+    const events = queuedEvents
+    queuedEvents = []
+    isApprovalPaused = false
+
+    for (const evt of events) {
+      // Re-inject through the public callbacks by simulating inline dispatch
+      switch (evt.type) {
+        case 'assistant': {
+          const d = evt.data as AssistantEvent
+          // Find or create assistant message
+          const idx = messages.value.findIndex(m => m.messageID === d.message_id)
+          if (idx !== -1) {
+            const updated = [...messages.value]
+            updated[idx] = { ...updated[idx]!, content: updated[idx]!.content + d.delta }
+            messages.value = updated
+          } else {
+            messages.value = [...messages.value, {
+              messageID: d.message_id,
+              chatID: d.chat_id,
+              timestamp: new Date().toISOString(),
+              type: 'assistant',
+              content: d.delta,
+            }]
+          }
+          break
+        }
+        case 'done': {
+          const d = evt.data as DoneEvent
+          if (!activeChatId.value && d.chat_id) {
+            activeChatId.value = d.chat_id
+            loadSessions()
+          }
+          break
+        }
+      }
+    }
+  }
+
+  async function submitApproval(requestId: string, status: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
+    try {
+      const res = await fetch(`/api/tool-requests/${requestId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approval_status: status, reason }),
+      })
+      if (res.ok) {
+        const pending = approvalPending.value
+        approvalPending.value = null
+
+        // FE-016: drain queued events after approval
+        if (pending) {
+          drainQueue()
+        }
+
+        // Show meta message
+        const action = status === 'APPROVED' ? 'approved' : 'rejected'
+        messages.value = [...messages.value, {
+          messageID: crypto.randomUUID(),
+          chatID: pending?.chat_id ?? activeChatId.value ?? '',
+          timestamp: new Date().toISOString(),
+          type: 'system',
+          content: `Tool execution ${action}`,
+          isMeta: true,
+        }]
+      } else {
+        // FE-015: keep modal open on server error, show toast
+        showToast('error', `Approval failed: server returned ${res.status}`)
+      }
+    } catch (err: unknown) {
+      // FE-015: keep modal open on network error, show toast
+      showToast('error', `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
+  }
+
+  async function loadHistory(chatId: string): Promise<void> {
+    isLoadingHistory.value = true
+    try {
+      const res = await fetch(`/api/sessions/${chatId}`)
+      if (!res.ok) return
+      const session: ChatSession = await res.json()
+      messages.value = session.messages ?? []
+      const map = new Map<string, ToolCallInfo>()
+      if (session.executed_tool_list) {
+        for (const tc of session.executed_tool_list) {
+          map.set(tc.messageID, tc)
+        }
+      }
+      toolCalls.value = map
+    } catch {
+      // silently fail
+    } finally {
+      isLoadingHistory.value = false
+    }
+  }
+
+  return {
+    messages,
+    toolCalls,
+    isStreaming,
+    approvalPending,
+    isLoadingHistory,
+    sendMessage,
+    submitApproval,
+    loadHistory,
+    abort: sseAbort,
+  }
+}

@@ -1,0 +1,416 @@
+openapi: 3.0.3
+info:
+  title: alascup-agent API
+  version: 0.1.0
+  description: web-server OpenAPI 规范，定义前端与后端的全部 REST 契约。
+servers:
+  - url: /api
+paths:
+  /health:
+    get:
+      summary: 健康检查
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 0.1.0
+
+  /chat-turn:
+    post:
+      summary: LLM 聊天回合入口（SSE 流式响应）
+      description: |
+        前端发送用户消息，web-server 驱动 LangGraph Agent 循环，
+        通过 SSE 流式返回 assistant message、tool_call、tool_result、审批请求等事件。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                chat_id:
+                  type: string
+                  description: 已存在会话的 ID；不传则自动创建新会话
+                message:
+                  type: string
+                  description: 用户输入文本
+                model:
+                  type: string
+                  description: 可选，指定大模型标识
+                options:
+                  type: object
+                  description: 传递给 LLMAdapter 的可选运行时参数（max_tokens 等）
+                max_turns:
+                  type: integer
+                  description: 最大循环轮次，默认 30。超过后自动终止
+                  default: 30
+      responses:
+        '200':
+          description: SSE 事件流（text/event-stream）
+        '400':
+          description: 请求参数错误
+
+  /sessions:
+    get:
+      summary: 列出全部会话
+      responses:
+        '200':
+          description: 会话摘要列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChatSession'
+    post:
+      summary: 创建新会话
+      responses:
+        '201':
+          description: 会话已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+
+  /sessions/{chat_id}:
+    get:
+      summary: 获取会话详情（messages + executed_tool_list）
+      parameters:
+        - in: path
+          name: chat_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ChatSession
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSession'
+        '404':
+          description: 会话不存在
+
+  /tools:
+    get:
+      summary: 列出全部可用工具
+      description: 返回 tool-server 和 rag-server 注册的全部 MCP 工具元数据
+      responses:
+        '200':
+          description: 工具列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tool'
+
+  /tool-requests/{request_id}:
+    get:
+      summary: 查询工具请求状态
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ToolRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolRequest'
+        '404':
+          description: 请求不存在
+
+  /tool-requests/{request_id}/approval:
+    post:
+      summary: 审批工具请求（批准或拒绝）
+      description: 前端用户对高风险 tool_call 做出批准或拒绝决定
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolApproval'
+      responses:
+        '200':
+          description: 审批已处理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolRequest'
+        '404':
+          description: 请求不存在或已过期
+
+components:
+  schemas:
+    Message:
+      type: object
+      required: [messageID, chatID, timestamp, type, content]
+      properties:
+        messageID:
+          type: string
+          format: uuid
+        chatID:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        type:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system]
+        content:
+          type: string
+        isMeta:
+          type: boolean
+          default: false
+          description: 是否为对话状态的描述性消息（如"审批已通过"）
+
+    Tool:
+      type: object
+      required: [name, server, description, isReadOnly, isRollbackable]
+      properties:
+        name:
+          type: string
+          description: 工具唯一名称
+        server:
+          type: string
+          enum: [tool-server, rag-server]
+          description: 所属 MCP Server
+        description:
+          type: string
+          description: LLM 可见的工具描述
+        isReadOnly:
+          type: boolean
+          description: 由 tool-server 根据参数内容动态判定是否只读
+        isRollbackable:
+          type: boolean
+          description: 由 tool-server 根据参数内容动态判定是否可回滚
+        paramsSchema:
+          type: object
+          description: JSON Schema，定义工具参数
+
+    ToolCall:
+      allOf:
+        - $ref: '#/components/schemas/Tool'
+        - type: object
+          required: [chatID, messageID, params, approval_status, execution_status, timestamp]
+          properties:
+            chatID:
+              type: string
+              format: uuid
+            messageID:
+              type: string
+              format: uuid
+            params:
+              type: object
+            request_id:
+              type: string
+              format: uuid
+              description: 仅高风险操作需要
+            approval_status:
+              type: string
+              enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+            execution_status:
+              type: string
+              enum: [PENDING_APPROVAL, RUNNING, SUCCEEDED, FAILED]
+            error:
+              type: object
+              description: 执行失败时的错误信息
+            timestamp:
+              type: string
+              format: date-time
+
+    ToolRequest:
+      allOf:
+        - $ref: '#/components/schemas/Tool'
+        - type: object
+          required: [chatID, messageID, request_id, params, approval_status, created_at]
+          properties:
+            chatID:
+              type: string
+              format: uuid
+            messageID:
+              type: string
+              format: uuid
+            request_id:
+              type: string
+              format: uuid
+            params:
+              type: object
+            approval_status:
+              type: string
+              enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+            created_at:
+              type: string
+              format: date-time
+            approved_at:
+              type: string
+              format: date-time
+            expired_at:
+              type: string
+              format: date-time
+
+    ToolApproval:
+      type: object
+      required: [approval_status]
+      properties:
+        approval_status:
+          type: string
+          enum: [APPROVED, REJECTED]
+        reason:
+          type: string
+          description: 审批备注（可选）
+
+    ToolResult:
+      type: object
+      required: [execution_status]
+      properties:
+        execution_status:
+          type: string
+          enum: [SUCCEEDED, FAILED]
+        backup_ref:
+          type: string
+          description: 可回滚操作的备份引用
+        output:
+          type: object
+        error:
+          type: object
+
+    ChatSession:
+      type: object
+      required: [chatID, messages, executed_tool_list, timestamp]
+      properties:
+        chatID:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        executed_tool_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        timestamp:
+          type: string
+          format: date-time
+
+    AssistantEventData:
+      type: object
+      required: [chat_id, message_id, delta]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        delta:
+          type: string
+          description: LLM 文本增量
+
+    ToolCallEventData:
+      type: object
+      required: [chat_id, message_id, tool_name, params, isReadOnly]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        params:
+          type: object
+        isReadOnly:
+          type: boolean
+
+    ToolResultEventData:
+      type: object
+      required: [chat_id, message_id, tool_name, execution_status]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        message_id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        execution_status:
+          type: string
+          enum: [SUCCEEDED, FAILED]
+        output:
+          type: object
+
+    ToolApprovalRequiredEventData:
+      type: object
+      required: [chat_id, request_id, tool_name, params, reason]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        request_id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        params:
+          type: object
+        reason:
+          type: string
+          description: 需要审批的原因说明
+
+    ErrorEventData:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    DoneEventData:
+      type: object
+      required: [chat_id]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+
+    SSEEvent:
+      type: object
+      description: SSE 流事件。event 字段由 SSE 协议 line 承载，data 为 JSON 序列化 payload。
+      properties:
+        event:
+          type: string
+          enum: [assistant, tool_call, tool_result, tool_approval_required, error, done]
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/AssistantEventData'
+            - $ref: '#/components/schemas/ToolCallEventData'
+            - $ref: '#/components/schemas/ToolResultEventData'
+            - $ref: '#/components/schemas/ToolApprovalRequiredEventData'
+            - $ref: '#/components/schemas/ErrorEventData'
+            - $ref: '#/components/schemas/DoneEventData'

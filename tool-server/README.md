@@ -1,0 +1,61 @@
+# tool-server
+
+工具执行层。提供系统感知工具和运维操作工具，通过 fastmcp 暴露 MCP 接口。
+
+## 职责
+
+- 暴露系统感知 MCP 工具（CPU/内存/磁盘/网络/进程/日志采集）
+- 暴露运维操作 MCP 工具（bash、systemd）
+- 根据工具参数动态判定操作安全分级（classify_tool：isReadOnly / isRollbackable）
+- 执行前二次安全校验（验证 approval_status + request_id）
+- 返回统一结构的 ToolResult
+
+## 非目标
+
+- 不参与 Agent 推理
+- 不处理用户消息
+- 不做知识检索
+- 不做审批状态管理——审批流程由 web-server 负责
+
+## 技术栈
+
+| 依赖 | 用途 |
+|------|------|
+| fastmcp | MCP Server 框架 |
+| psutil | 系统指标采集（CPU/内存/磁盘/网络/进程） |
+| systemd-python | systemd 服务管理 |
+
+## 目录结构
+
+```
+tool-server/src/
+  tools/
+    perception/     # 感知工具（cpu, memory, disk, network, process, log_reader）
+    operation/      # 操作工具（bash, systemd）
+  security/         # 二次校验
+  cache/            # 工具结果缓存
+  error/            # 错误定义与格式化
+  main.py           # 入口
+```
+
+## 安全校验
+
+tool-server 收到 tool_call 时执行防御性校验（不查询 web-server 状态机）：
+
+| 校验项 | 规则 |
+|--------|------|
+| `approval_status` | 必须为 `APPROVED` |
+| `request_id` | 非空，符合 UUID 格式 |
+| 高风险工具 | `isReadOnly=false` 必须携带 `request_id` |
+
+未通过 → 返回 `SECURITY_VIOLATION`（CRITICAL），拒绝执行。
+
+## 依赖注入
+
+```
+class ToolServerConfig:
+    proc_path: str       # 注入；生产 /proc，测试 /tmp/test-proc
+    sys_path: str        # 注入；生产 /sys，测试 /tmp/test-sys
+    log_path: str        # 注入；生产 /var/log，测试 /tmp/test-log
+    sandbox_root: str    # 注入；生产独立路径，测试临时目录
+```

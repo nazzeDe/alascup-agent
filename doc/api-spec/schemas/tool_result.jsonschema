@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ToolResult",
+  "type": "object",
+  "required": ["request_id", "success", "timestamp"],
+  "properties": {
+    "request_id": {"type": "string"},
+    "success": {"type": "boolean"},
+    "output": {"type": ["object","string","null"]},
+    "error": {"type": ["object","null"]},
+    "timestamp": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}
