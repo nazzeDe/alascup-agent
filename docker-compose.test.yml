@@ -20,8 +20,7 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - MCP_TOOL_SERVER_URL=http://tool-server:8001
-      - MCP_RAG_SERVER_URL=http://rag-server:8002
+      - DATABASE_URL=postgresql+asyncpg://alascup:alascup@postgres:5432/alascup
       - LLM_MOCK=true
       - TOOL_REQUEST_TIMEOUT_SECONDS=3
       - LOG_LEVEL=DEBUG
@@ -34,6 +33,7 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      - postgres
       - tool-server
       - rag-server
 
@@ -69,6 +69,8 @@ services:
     working_dir: /app
     environment:
       - CHROMA_MODE=memory
+      - EMBEDDING_API_BASE=http://web-server:8000/v1
+      - EMBEDDING_API_KEY=mock-key
       - LOG_LEVEL=DEBUG
     read_only: true
     tmpfs:
@@ -76,3 +78,18 @@ services:
     network_mode: bridge
     ports:
       - "8002:8002"
+
+  postgres:
+    image: ghcr.io/loong64/postgres:18-trixie
+    container_name: postgres-test
+    restart: "no"
+    environment:
+      - POSTGRES_USER=alascup
+      - POSTGRES_PASSWORD=alascup
+      - POSTGRES_DB=alascup
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /run/postgresql:size=16m,mode=1777
+    network_mode: bridge
+    ports:
+      - "5432:5432"

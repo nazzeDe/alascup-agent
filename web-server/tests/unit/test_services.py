@@ -46,14 +46,14 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_message(self):
-        from src.services.session_manager import InMemorySessionManager
         from src.models.message import Message, MessageType
+        from src.services.session_manager import InMemorySessionManager
 
         mgr = InMemorySessionManager()
         session = await mgr.create_session()
         msg = Message(
             message_id=uuid.uuid4(),
-            session_id=session.id,
+            chat_id=session.id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             type=MessageType.USER,
             content="hello",
@@ -109,10 +109,10 @@ class TestContextManager:
         async def fake_summarizer(messages):
             return "summarized content"
 
-        cm = ContextManager(window_size=10, threshold=0.5, summarizer=fake_summarizer, keep_recent=2)
-        messages = [
-            {"role": "user", "content": f"msg{i}"} for i in range(10)
-        ]
+        cm = ContextManager(
+            window_size=10, threshold=0.5, summarizer=fake_summarizer, keep_recent=2
+        )
+        messages = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
         result = await cm.compress(messages)
 
         assert len(result) < len(messages)
@@ -123,9 +123,7 @@ class TestContextManager:
         from src.services.context_manager import ContextManager
 
         cm = ContextManager()
-        messages = [
-            {"role": "user", "content": f"msg{i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
         result = await cm.compress(messages)
 
         assert len(result) == len(messages)
@@ -197,7 +195,9 @@ class TestContextManagerCompression:
             return "should not be called"
 
         cm = ContextManager(
-            window_size=500, threshold=0.7, max_result_chars=10,
+            window_size=500,
+            threshold=0.7,
+            max_result_chars=10,
             compact_llm=mock_compact_llm,
         )
         messages = [
@@ -220,8 +220,11 @@ class TestContextManagerCompression:
             return "summarized conversation"
 
         cm = ContextManager(
-            window_size=500, threshold=0.7, max_result_chars=50,
-            compact_llm=mock_compact_llm, keep_recent=2,
+            window_size=500,
+            threshold=0.7,
+            max_result_chars=50,
+            compact_llm=mock_compact_llm,
+            keep_recent=2,
         )
         messages = []
         for i in range(15):
@@ -242,8 +245,11 @@ class TestContextManagerCompression:
             return "summary"
 
         cm = ContextManager(
-            window_size=500, threshold=0.7, max_result_chars=30,
-            compact_llm=mock_compact_llm, keep_recent=3,
+            window_size=500,
+            threshold=0.7,
+            max_result_chars=30,
+            compact_llm=mock_compact_llm,
+            keep_recent=3,
         )
         messages = []
         for i in range(12):
@@ -283,8 +289,11 @@ class TestContextManagerCompression:
             return "brief summary"
 
         cm = ContextManager(
-            window_size=1000, threshold=0.7, max_result_chars=50,
-            compact_llm=mock_compact_llm, keep_recent=2,
+            window_size=1000,
+            threshold=0.7,
+            max_result_chars=50,
+            compact_llm=mock_compact_llm,
+            keep_recent=2,
         )
         # 构造大量长消息，token 远超阈值
         messages = []

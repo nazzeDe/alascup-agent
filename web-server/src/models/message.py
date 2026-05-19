@@ -14,7 +14,7 @@ class MessageType(StrEnum):
 
 class Message(BaseModel):
     message_id: UUID
-    session_id: UUID
+    chat_id: UUID
     timestamp: str
     type: MessageType
     content: str

@@ -39,22 +39,24 @@ async def approve_tool_request(
     try:
         status = ApprovalStatus(body.approval_status)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"invalid approval_status: {body.approval_status}")
+        raise HTTPException(
+            status_code=400, detail=f"invalid approval_status: {body.approval_status}"
+        )
 
     if not bridge:
         raise HTTPException(status_code=500, detail="approval bridge not configured")
 
-    session_id_str = bridge.get_session_id(str(request_id))
-    if not session_id_str:
+    chat_id_str = bridge.get_chat_id(str(request_id))
+    if not chat_id_str:
         raise HTTPException(status_code=404, detail="request not found")
 
-    session_id = UUID(session_id_str)
+    chat_id = UUID(chat_id_str)
     agent = Query(
         llm=llm,
         graph=graph,
         context_manager=context_mgr,
         audit_logger=audit_logger,
-        session_id=session_id,
+        chat_id=chat_id,
     )
 
     decisions = [status.value]
@@ -71,12 +73,12 @@ async def approve_tool_request(
     if full_text:
         assistant_msg = Message(
             message_id=uuid4(),
-            session_id=session_id,
+            chat_id=chat_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             type=MessageType.ASSISTANT,
             content=full_text,
         )
-        await session_mgr.add_message(session_id, assistant_msg)
+        await session_mgr.add_message(chat_id, assistant_msg)
 
     return {
         "approval_status": status.value,

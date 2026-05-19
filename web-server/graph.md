@@ -304,9 +304,7 @@ graph LR
     node_granted --> node_tools
     node_think --> node_done["done"]
     node_think --> context_compacted["context_compacted"]
-    node_think --> model_fallback["model_fallback"]
     context_compacted --> node_think
-    model_fallback --> node_think
     node_think --> error_exit["error_exit"]
 ```
 
@@ -440,14 +438,8 @@ flowchart TD
     mot_inject["恢复成功<br/>清理流式中间状态<br/>注入 'continue' meta message<br/>创建新回合<br/>（用户无感知）"]
     mot_surface["恢复链耗尽<br/>yield error 事件<br/>记录 llm_traces.error_type"]
 
-    %% model_unavailable / server_error（可恢复：fallback model）
-    overload["model_unavailable<br/>或 server_error<br/>（留置：不推送 error）"]
-    fallback{"有 fallback model？"}
-    fallback_switch["恢复成功<br/>清理流式中间状态<br/>切换到 fallback model<br/>重试一次<br/>（用户无感知）"]
-    overload_surface["恢复链耗尽<br/>yield error 事件<br/>记录 llm_traces.error_type"]
-
     %% 不可恢复类型
-    other["rate_limit<br/>auth_failed<br/>timeout<br/>unknown<br/>（不可恢复，直接展示）"]
+    other["rate_limit<br/>auth_failed<br/>model_unavailable<br/>server_error<br/>timeout<br/>unknown<br/>（不可恢复，直接展示）"]
     other_surface["yield error 事件<br/>记录 llm_traces.error_type"]
 
     audit["记录 audit_events<br/>LLM_RATE_LIMITED / LLM_AUTH_FAILED /<br/>LLM_MODEL_UNAVAILABLE / LLM_TIMEOUT /<br/>LLM_PROMPT_TOO_LONG / LLM_CALL_FAILED"]
@@ -455,8 +447,7 @@ flowchart TD
 
     llm_error -- "prompt_too_long" --> ptl
     llm_error -- "max_output_tokens" --> mot
-    llm_error -- "model_unavailable<br/>server_error" --> overload
-    llm_error -- "其他不可恢复<br/>rate_limit / auth_failed /<br/>timeout / unknown" --> other
+    llm_error -- "其他不可恢复<br/>rate_limit / auth_failed /<br/>model_unavailable / server_error /<br/>timeout / unknown" --> other
 
     ptl --> compress_compact
     compress_compact -- "是" --> compact_ok
@@ -470,15 +461,10 @@ flowchart TD
     mot_recovery -- "是" --> mot_inject
     mot_recovery -- "否(≥3次)" --> mot_surface
 
-    overload --> fallback
-    fallback -- "是" --> fallback_switch
-    fallback -- "否" --> overload_surface
-
     other --> other_surface
 
     ptl_surface --> audit
     mot_surface --> audit
-    overload_surface --> audit
     other_surface --> audit
 
     audit --> exit_loop
@@ -492,8 +478,9 @@ flowchart TD
 |----------|------|----------|-------|-------|-------|-------------|
 | prompt_too_long | 可恢复 | 留置，恢复成功则继续 | 上下文压缩（截断→摘要），重试 | 更激进的压缩策略，重试 | 终止并展示错误 | 第1层：`has_compacted_this_turn`；第2层：`has_attempted_aggressive_compact`；新一轮重置 |
 | max_output_tokens | 可恢复 | 留置，恢复成功则继续 | 提升 token 上限透明重试 | 注入 "continue" 消息，最多 3 次 | 终止并展示错误 | 第1层：`max_tokens_escalated`；第2层：`output_token_recovery_count < 3` |
-| model_unavailable / server_error | 可恢复 | 留置，恢复成功则继续 | 切换 fallback model，重试一次 | — | 终止并展示错误 | 第1层：`fallback_attempted`；新一轮重置 |
 | rate_limit | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |
+| model_unavailable | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |
+| server_error | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |
 | auth_failed | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |
 | timeout | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |
 | unknown | 不可恢复 | 立即推送 error | 终止并展示错误 | — | — | — |

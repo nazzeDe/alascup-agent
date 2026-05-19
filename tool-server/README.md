@@ -23,7 +23,7 @@
 |------|------|
 | fastmcp | MCP Server 框架 |
 | psutil | 系统指标采集（CPU/内存/磁盘/网络/进程） |
-| systemd-python | systemd 服务管理 |
+| systemd-python | systemd 服务管理（首版：status + restart） |
 
 ## 目录结构
 
@@ -37,6 +37,17 @@ tool-server/src/
   error/            # 错误定义与格式化
   main.py           # 入口
 ```
+
+## 工具输出控制
+
+LLM 通过 prompt 指示词要求只获取必要信息（使用过滤参数如 `grep`、`since`、`top_n`）。工具层同时设置默认截断安全上限，防止大输出直接注入 LLM 上下文：
+
+| 工具 | 默认上限 | 可调参数 |
+|------|----------|----------|
+| `read_logs` | 1000 行 | `max_lines`, `grep`, `since` |
+| `get_process_list` | 50 个进程 | `top_n` |
+
+LLM 发现输出被截断时，可调整参数重新获取。
 
 ## 安全校验
 

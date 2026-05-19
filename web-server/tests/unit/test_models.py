@@ -13,7 +13,7 @@ class TestMessage:
 
         msg = Message(
             message_id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             timestamp=datetime.now(timezone.utc).isoformat(),
             type=MessageType.USER,
             content="hello",
@@ -26,7 +26,7 @@ class TestMessage:
 
         msg = Message(
             message_id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             timestamp=datetime.now(timezone.utc).isoformat(),
             type=MessageType.SYSTEM,
             content="approval passed",
@@ -49,7 +49,7 @@ class TestMessage:
         with pytest.raises(ValidationError):
             Message(
                 message_id=uuid.uuid4(),
-                session_id=uuid.uuid4(),
+                chat_id=uuid.uuid4(),
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 type="invalid",  # type: ignore
                 content="x",
@@ -59,17 +59,17 @@ class TestMessage:
         from src.models.message import Message, MessageType
 
         msg_id = uuid.uuid4()
-        session_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
         msg = Message(
             message_id=msg_id,
-            session_id=session_id,
+            chat_id=chat_id,
             timestamp="2026-05-10T12:00:00Z",
             type=MessageType.USER,
             content="test",
         )
         data = msg.model_dump(mode="json")
         assert data["message_id"] == str(msg_id)
-        assert data["session_id"] == str(session_id)
+        assert data["chat_id"] == str(chat_id)
         assert data["type"] == "user"
         assert data["is_meta"] is False
 
@@ -91,7 +91,7 @@ class TestTool:
         assert tool.is_read_only is True
 
     def test_tool_server_enum(self):
-        from src.models.tool import Tool, ServerName
+        from src.models.tool import ServerName, Tool
 
         tool = Tool(
             name="search",
@@ -106,7 +106,7 @@ class TestTool:
 
 class TestToolCall:
     def test_tool_call_extends_tool(self):
-        from src.models.tool import ToolCall, ApprovalStatus, ExecutionStatus
+        from src.models.tool import ApprovalStatus, ExecutionStatus, ToolCall
 
         call = ToolCall(
             name="delete_temp_files",
@@ -115,7 +115,7 @@ class TestToolCall:
             is_read_only=False,
             is_rollbackable=True,
             params_schema={"type": "object"},
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             message_id=uuid.uuid4(),
             params={"path": "/tmp"},
             approval_status=ApprovalStatus.PENDING,
@@ -128,7 +128,7 @@ class TestToolCall:
         assert call.request_id is None  # optional
 
     def test_tool_call_with_request_id(self):
-        from src.models.tool import ToolCall, ApprovalStatus, ExecutionStatus
+        from src.models.tool import ApprovalStatus, ExecutionStatus, ToolCall
 
         req_id = uuid.uuid4()
         call = ToolCall(
@@ -138,7 +138,7 @@ class TestToolCall:
             is_read_only=False,
             is_rollbackable=False,
             params_schema={},
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             message_id=uuid.uuid4(),
             params={"service": "nginx"},
             request_id=req_id,
@@ -149,7 +149,7 @@ class TestToolCall:
         assert call.request_id == req_id
 
     def test_tool_call_with_llm_trace_id(self):
-        from src.models.tool import ToolCall, ApprovalStatus, ExecutionStatus
+        from src.models.tool import ApprovalStatus, ExecutionStatus, ToolCall
 
         trace_id = uuid.uuid4()
         call = ToolCall(
@@ -159,7 +159,7 @@ class TestToolCall:
             is_read_only=True,
             is_rollbackable=False,
             params_schema={},
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             message_id=uuid.uuid4(),
             params={},
             llm_trace_id=trace_id,
@@ -172,7 +172,7 @@ class TestToolCall:
 
 class TestToolRequest:
     def test_tool_request_extends_tool(self):
-        from src.models.tool import ToolRequest, ApprovalStatus
+        from src.models.tool import ApprovalStatus, ToolRequest
 
         req_id = uuid.uuid4()
         tr = ToolRequest(
@@ -182,7 +182,7 @@ class TestToolRequest:
             is_read_only=False,
             is_rollbackable=True,
             params_schema={},
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             message_id=uuid.uuid4(),
             request_id=req_id,
             params={"path": "/tmp"},
@@ -194,7 +194,7 @@ class TestToolRequest:
         assert tr.approved_at is None
 
     def test_tool_request_with_rejected_reason(self):
-        from src.models.tool import ToolRequest, ApprovalStatus
+        from src.models.tool import ApprovalStatus, ToolRequest
 
         req_id = uuid.uuid4()
         tr = ToolRequest(
@@ -204,7 +204,7 @@ class TestToolRequest:
             is_read_only=False,
             is_rollbackable=False,
             params_schema={},
-            session_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
             message_id=uuid.uuid4(),
             request_id=req_id,
             params={"service": "nginx"},
@@ -258,13 +258,13 @@ class TestToolResult:
 
 class TestChatSession:
     def test_session_construction(self):
-        from src.models.session import ChatSession
         from src.models.message import Message, MessageType
+        from src.models.session import ChatSession
 
         chat_id = uuid.uuid4()
         msg = Message(
             message_id=uuid.uuid4(),
-            session_id=chat_id,
+            chat_id=chat_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             type=MessageType.USER,
             content="hello",
@@ -324,7 +324,7 @@ class TestAuditEvent:
             event="AUTO_APPROVED",
         )
         assert event.level == AuditLevel.INFO
-        assert event.session_id is None  # optional
+        assert event.chat_id is None  # optional
 
     def test_audit_level_enum(self):
         from src.models.audit import AuditLevel

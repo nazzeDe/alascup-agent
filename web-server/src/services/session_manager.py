@@ -14,34 +14,34 @@ class InMemorySessionManager:
         self._sessions: dict[uuid.UUID, ChatSession] = {}
 
     async def create_session(self) -> ChatSession:
-        session_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
         session = ChatSession(
-            id=session_id,
+            id=chat_id,
             messages=[],
             executed_tool_list=[],
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        self._sessions[session_id] = session
+        self._sessions[chat_id] = session
         return session
 
-    async def get_session(self, session_id: uuid.UUID) -> ChatSession:
+    async def get_session(self, chat_id: uuid.UUID) -> ChatSession:
         try:
-            return self._sessions[session_id]
+            return self._sessions[chat_id]
         except KeyError:
-            raise KeyError(f"session not found: {session_id}")
+            raise KeyError(f"session not found: {chat_id}")
 
     async def list_sessions(self) -> list[ChatSession]:
         return list(self._sessions.values())
 
-    async def add_message(self, session_id: uuid.UUID, msg: Message) -> None:
-        if session_id not in self._sessions:
-            raise KeyError(f"session not found: {session_id}")
-        self._sessions[session_id].messages.append(msg)
+    async def add_message(self, chat_id: uuid.UUID, msg: Message) -> None:
+        if chat_id not in self._sessions:
+            raise KeyError(f"session not found: {chat_id}")
+        self._sessions[chat_id].messages.append(msg)
 
-    async def add_tool_call(self, session_id: uuid.UUID, call: ToolCall) -> None:
-        if session_id not in self._sessions:
-            raise KeyError(f"session not found: {session_id}")
-        self._sessions[session_id].executed_tool_list.append(call)
+    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> None:
+        if chat_id not in self._sessions:
+            raise KeyError(f"session not found: {chat_id}")
+        self._sessions[chat_id].executed_tool_list.append(call)
 
 
 class PostgresSessionManager:
@@ -49,23 +49,28 @@ class PostgresSessionManager:
         self._db = db
 
     async def create_session(self) -> ChatSession:
-        session_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "INSERT INTO chat_sessions (id, created_at, updated_at) VALUES ($1, $2, $2)",
-            session_id, now,
+            chat_id,
+            now,
         )
-        return ChatSession(id=session_id, messages=[], executed_tool_list=[], timestamp=now)
+        return ChatSession(
+            id=chat_id, messages=[], executed_tool_list=[], timestamp=now
+        )
 
-    async def get_session(self, session_id: uuid.UUID) -> ChatSession:
-        row = await self._db.fetchrow("SELECT * FROM chat_sessions WHERE id = $1", session_id)
+    async def get_session(self, chat_id: uuid.UUID) -> ChatSession:
+        row = await self._db.fetchrow(
+            "SELECT * FROM chat_sessions WHERE id = $1", chat_id
+        )
         if row is None:
-            raise KeyError(f"session not found: {session_id}")
+            raise KeyError(f"session not found: {chat_id}")
         msgs = await self._db.fetch(
-            "SELECT * FROM messages WHERE chat_id = $1 ORDER BY timestamp", session_id
+            "SELECT * FROM messages WHERE chat_id = $1 ORDER BY timestamp", chat_id
         )
         calls = await self._db.fetch(
-            "SELECT * FROM tool_calls WHERE chat_id = $1 ORDER BY created_at", session_id
+            "SELECT * FROM tool_calls WHERE chat_id = $1 ORDER BY created_at", chat_id
         )
         return ChatSession(
             id=row["id"],
@@ -75,42 +80,67 @@ class PostgresSessionManager:
         )
 
     async def list_sessions(self) -> list[ChatSession]:
-        rows = await self._db.fetch("SELECT id, updated_at FROM chat_sessions ORDER BY updated_at DESC")
+        rows = await self._db.fetch(
+            "SELECT id, updated_at FROM chat_sessions ORDER BY updated_at DESC"
+        )
         return [
-            ChatSession(id=r["id"], messages=[], executed_tool_list=[], timestamp=r["updated_at"].isoformat())
+            ChatSession(
+                id=r["id"],
+                messages=[],
+                executed_tool_list=[],
+                timestamp=r["updated_at"].isoformat(),
+            )
             for r in rows
         ]
 
-    async def add_message(self, session_id: uuid.UUID, msg: Message) -> None:
+    async def add_message(self, chat_id: uuid.UUID, msg: Message) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta) VALUES ($1,$2,$3,$4,$5,$6)",
-            msg.message_id, session_id, msg.timestamp, msg.type.value, msg.content, msg.is_meta,
+            msg.message_id,
+            chat_id,
+            msg.timestamp,
+            msg.type.value,
+            msg.content,
+            msg.is_meta,
         )
         await self._db.execute(
-            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2", now, session_id,
+            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
+            now,
+            chat_id,
         )
 
-    async def add_tool_call(self, session_id: uuid.UUID, call: ToolCall) -> None:
+    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> None:
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             """INSERT INTO tool_calls (id, chat_id, message_id, tool_name, server_name,
                is_read_only, is_rollbackable, params, request_id, approval_status,
                execution_status, created_at)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
-            call.message_id, session_id, call.message_id, call.name, call.server.value,
-            call.is_read_only, call.is_rollbackable, json.dumps(call.params),
-            call.request_id, call.approval_status.value, call.execution_status.value, now,
+            call.message_id,
+            chat_id,
+            call.message_id,
+            call.name,
+            call.server.value,
+            call.is_read_only,
+            call.is_rollbackable,
+            json.dumps(call.params),
+            call.request_id,
+            call.approval_status.value,
+            call.execution_status.value,
+            now,
         )
         await self._db.execute(
-            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2", now, session_id,
+            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
+            now,
+            chat_id,
         )
 
 
 def _message_from_row(row) -> Message:
     return Message(
         message_id=row["id"],
-        session_id=row["chat_id"],
+        chat_id=row["chat_id"],
         timestamp=row["timestamp"].isoformat(),
         type=MessageType(row["type"]),
         content=row["content"],
@@ -126,12 +156,16 @@ def _tool_call_from_row(row) -> ToolCall:
         is_read_only=row["is_read_only"],
         is_rollbackable=row["is_rollbackable"],
         params_schema={},
-        session_id=row["chat_id"],
+        chat_id=row["chat_id"],
         message_id=row["message_id"],
-        params=json.loads(row["params"]) if isinstance(row["params"], str) else row["params"],
+        params=json.loads(row["params"])
+        if isinstance(row["params"], str)
+        else row["params"],
         request_id=row["request_id"],
         approval_status=ApprovalStatus(row["approval_status"]),
         execution_status=ExecutionStatus(row["execution_status"]),
-        error=json.loads(row["error"]) if isinstance(row.get("error"), str) else row.get("error"),
+        error=json.loads(row["error"])
+        if isinstance(row.get("error"), str)
+        else row.get("error"),
         timestamp=row["created_at"].isoformat(),
     )

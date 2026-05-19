@@ -44,11 +44,21 @@ rag-server/src/
 class RagServerConfig:
     chroma_client: ChromaClient      # 注入；生产持久化，测试内存模式
     embedding_fn: Callable[[str], list[float]]  # 注入；测试可替换为固定向量
-    embedding_api_base: str          # LLM Embedding API 地址（默认 http://localhost:8080/v1）
+    embedding_api_base: str          # LLM Embedding API 地址，通过 EMBEDDING_API_BASE 环境变量注入，无默认值
     similarity_threshold: float      # 可配置；去重阈值
 ```
 
-生产环境通过 `EMBEDDING_API_BASE` 环境变量指定 Embedding API 地址。
+`EMBEDDING_API_BASE` 和 `EMBEDDING_API_KEY` 为必须配置项，通过 docker-compose 或环境变量注入。chat API 和 embedding API 使用独立的认证凭证。
+
+## 工具分级
+
+rag-server 工具均为静态分级（注册时确定，不需要 classify 往返）：
+
+| 工具 | 分级 | 审批 |
+|------|------|------|
+| `search_experience` | 只读 | 自动通过 |
+| `save_experience` | 写操作 | 需用户确认 |
+| `mark_experience_invalid` | 写操作 | 需用户确认 |
 
 ## 知识生命周期
 

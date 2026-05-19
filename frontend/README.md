@@ -9,6 +9,7 @@
 | Vue 3 | 组件化 UI 框架 |
 | Bootstrap 5 | UI 样式与响应式布局 |
 | marked.js | Markdown → HTML 渲染 |
+| DOMPurify | HTML 清洗，防 XSS |
 | Nginx | 静态文件 serve + `/api/*` 反向代理 |
 
 Docker 镜像仅包含构建产物，不含 Bun 和 node_modules。前端在本地构建，无需考虑 loongarch64 兼容。

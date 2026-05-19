@@ -21,18 +21,27 @@ from src.agent.state import Transition
 
 
 class Query:
-    def __init__(self, llm, graph, context_manager,
-                 pending_approvals=None, audit_logger=None, error_recovery=None,
-                 session_id=None):
+    def __init__(
+        self,
+        llm,
+        graph,
+        context_manager,
+        pending_approvals=None,
+        audit_logger=None,
+        error_recovery=None,
+        chat_id=None,
+    ):
         self._llm = llm
         self._graph = graph
         self._context_manager = context_manager
         self._bridge = pending_approvals
         self._audit = audit_logger
         self._error_recovery = error_recovery
-        self._session_id = str(session_id) if session_id else str(uuid4())
+        self._chat_id = str(chat_id) if chat_id else str(uuid4())
 
-    async def run(self, messages: list[dict], available_tools: list, system: str | None = None):
+    async def run(
+        self, messages: list[dict], available_tools: list, system: str | None = None
+    ):
         """Run agent until interrupt or DONE. Yields SSE events."""
         await log_transition(self._audit, Transition.USER_MESSAGE)
 
@@ -54,7 +63,7 @@ class Query:
 
         result = await self._graph.ainvoke(
             Command(resume={"decisions": decisions}),
-            {"configurable": {"thread_id": self._session_id}},
+            {"configurable": {"thread_id": self._chat_id}},
         )
 
         orch = self._build_orchestrator()
@@ -69,5 +78,5 @@ class Query:
             audit_logger=self._audit,
             error_recovery=self._error_recovery,
             llm=self._llm,
-            session_id=self._session_id,
+            chat_id=self._chat_id,
         )

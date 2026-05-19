@@ -14,7 +14,7 @@ class AuditLevel(StrEnum):
 
 class AuditEvent(BaseModel):
     timestamp: str
-    session_id: UUID | None = None
+    chat_id: UUID | None = None
     request_id: UUID | None = None
     level: AuditLevel
     actor: str

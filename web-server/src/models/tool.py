@@ -34,7 +34,7 @@ class Tool(BaseModel):
 
 
 class ToolCall(Tool):
-    session_id: UUID
+    chat_id: UUID
     message_id: UUID
     llm_trace_id: UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
@@ -46,7 +46,7 @@ class ToolCall(Tool):
 
 
 class ToolRequest(Tool):
-    session_id: UUID
+    chat_id: UUID
     message_id: UUID
     request_id: UUID
     params: dict[str, Any] = Field(default_factory=dict)

@@ -4,8 +4,12 @@ from uuid import UUID, uuid4
 
 class Tracer:
     async def trace_llm_call(
-        self, session_id: UUID, model: str, messages: list[dict],
-        response: dict, latency_ms: int,
+        self,
+        chat_id: UUID,
+        model: str,
+        messages: list[dict],
+        response: dict,
+        latency_ms: int,
     ) -> None:
         raise NotImplementedError
 
@@ -20,8 +24,12 @@ class PostgresTracer(Tracer):
         self._db = db
 
     async def trace_llm_call(
-        self, session_id: UUID, model: str, messages: list[dict],
-        response: dict, latency_ms: int,
+        self,
+        chat_id: UUID,
+        model: str,
+        messages: list[dict],
+        response: dict,
+        latency_ms: int,
     ) -> None:
         completion = response.get("content", "")
         tool_calls = response.get("tool_calls")
@@ -34,7 +42,7 @@ class PostgresTracer(Tracer):
                prompt_tokens, completion_tokens, latency_ms)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
             uuid4(),
-            session_id,
+            chat_id,
             model,
             json.dumps(messages),
             json.dumps(completion_data) if completion else None,

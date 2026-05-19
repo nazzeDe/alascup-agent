@@ -50,10 +50,6 @@ paths:
                 options:
                   type: object
                   description: 传递给 LLMAdapter 的可选运行时参数（max_tokens 等）
-                max_turns:
-                  type: integer
-                  description: 最大循环轮次，默认 30。超过后自动终止
-                  default: 30
       responses:
         '200':
           description: SSE 事件流（text/event-stream）
@@ -164,12 +160,12 @@ components:
   schemas:
     Message:
       type: object
-      required: [messageID, chatID, timestamp, type, content]
+      required: [message_id, chat_id, timestamp, type, content]
       properties:
-        messageID:
+        message_id:
           type: string
           format: uuid
-        chatID:
+        chat_id:
           type: string
           format: uuid
         timestamp:
@@ -180,14 +176,14 @@ components:
           enum: [user, assistant, tool_call, tool_result, system]
         content:
           type: string
-        isMeta:
+        is_meta:
           type: boolean
           default: false
           description: 是否为对话状态的描述性消息（如"审批已通过"）
 
     Tool:
       type: object
-      required: [name, server, description, isReadOnly, isRollbackable]
+      required: [name, server, description, is_read_only, is_rollbackable]
       properties:
         name:
           type: string
@@ -199,13 +195,13 @@ components:
         description:
           type: string
           description: LLM 可见的工具描述
-        isReadOnly:
+        is_read_only:
           type: boolean
           description: 由 tool-server 根据参数内容动态判定是否只读
-        isRollbackable:
+        is_rollbackable:
           type: boolean
           description: 由 tool-server 根据参数内容动态判定是否可回滚
-        paramsSchema:
+        params_schema:
           type: object
           description: JSON Schema，定义工具参数
 
@@ -213,12 +209,12 @@ components:
       allOf:
         - $ref: '#/components/schemas/Tool'
         - type: object
-          required: [chatID, messageID, params, approval_status, execution_status, timestamp]
+          required: [chat_id, message_id, params, approval_status, execution_status, timestamp]
           properties:
-            chatID:
+            chat_id:
               type: string
               format: uuid
-            messageID:
+            message_id:
               type: string
               format: uuid
             params:
@@ -244,12 +240,12 @@ components:
       allOf:
         - $ref: '#/components/schemas/Tool'
         - type: object
-          required: [chatID, messageID, request_id, params, approval_status, created_at]
+          required: [chat_id, message_id, request_id, params, approval_status, created_at]
           properties:
-            chatID:
+            chat_id:
               type: string
               format: uuid
-            messageID:
+            message_id:
               type: string
               format: uuid
             request_id:
@@ -298,9 +294,9 @@ components:
 
     ChatSession:
       type: object
-      required: [chatID, messages, executed_tool_list, timestamp]
+      required: [chat_id, messages, executed_tool_list, timestamp]
       properties:
-        chatID:
+        chat_id:
           type: string
           format: uuid
         messages:
@@ -331,7 +327,7 @@ components:
 
     ToolCallEventData:
       type: object
-      required: [chat_id, message_id, tool_name, params, isReadOnly]
+      required: [chat_id, message_id, tool_name, params, is_read_only]
       properties:
         chat_id:
           type: string
@@ -343,7 +339,7 @@ components:
           type: string
         params:
           type: object
-        isReadOnly:
+        is_read_only:
           type: boolean
 
     ToolResultEventData:
@@ -366,7 +362,7 @@ components:
 
     ToolApprovalRequiredEventData:
       type: object
-      required: [chat_id, request_id, tool_name, params, reason]
+      required: [chat_id, request_id, tool_name, description, params, reason]
       properties:
         chat_id:
           type: string
@@ -376,11 +372,29 @@ components:
           format: uuid
         tool_name:
           type: string
+        description:
+          type: string
+          description: 工具功能描述
         params:
           type: object
+          description: 调用参数；可变工具（bash）包含完整 command 字段
         reason:
           type: string
           description: 需要审批的原因说明
+
+    TurnLimitReachedEventData:
+      type: object
+      required: [chat_id, turn_count, message]
+      properties:
+        chat_id:
+          type: string
+          format: uuid
+        turn_count:
+          type: integer
+          description: 当前已达轮次
+        message:
+          type: string
+          description: 提示用户确认是否继续推理
 
     ErrorEventData:
       type: object
@@ -405,12 +419,13 @@ components:
       properties:
         event:
           type: string
-          enum: [assistant, tool_call, tool_result, tool_approval_required, error, done]
+          enum: [assistant, tool_call, tool_result, tool_approval_required, turn_limit_reached, error, done]
         data:
           oneOf:
             - $ref: '#/components/schemas/AssistantEventData'
             - $ref: '#/components/schemas/ToolCallEventData'
             - $ref: '#/components/schemas/ToolResultEventData'
             - $ref: '#/components/schemas/ToolApprovalRequiredEventData'
+            - $ref: '#/components/schemas/TurnLimitReachedEventData'
             - $ref: '#/components/schemas/ErrorEventData'
             - $ref: '#/components/schemas/DoneEventData'

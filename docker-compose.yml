@@ -23,8 +23,6 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DATABASE_URL=postgresql+asyncpg://alascup:alascup@postgres:5432/alascup
-      - MCP_TOOL_SERVER_URL=http://tool-server:8001
-      - MCP_RAG_SERVER_URL=http://rag-server:8002
     volumes:
       - ./web-server/config:/app/config:ro,Z
       - ./logs/web-server:/app/logs:Z
@@ -124,6 +122,9 @@ services:
     container_name: rag-server
     restart: unless-stopped
     working_dir: /app
+    environment:
+      - EMBEDDING_API_BASE
+      - EMBEDDING_API_KEY
     volumes:
       - rag-data:/app/data:Z
       - ./logs/rag-server:/app/logs:Z

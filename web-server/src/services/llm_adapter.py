@@ -5,13 +5,16 @@ from httpx import AsyncClient
 from src.config.models import LLMConfig
 
 
-
-
-def classify_error(status_code: int, response_text: str, stop_reason: str | None = None) -> str | None:
+def classify_error(
+    status_code: int, response_text: str, stop_reason: str | None = None
+) -> str | None:
     """Classify LLM API errors into standardized error types."""
     if status_code == 200 and stop_reason == "max_tokens":
         return "max_output_tokens"
-    if status_code in (413, 400) and any(kw in response_text.lower() for kw in ("too large", "too long", "context", "token")):
+    if status_code in (413, 400) and any(
+        kw in response_text.lower()
+        for kw in ("too large", "too long", "context", "token")
+    ):
         return "prompt_too_long"
     if status_code == 429:
         return "rate_limit"
@@ -30,6 +33,7 @@ def classify_error(status_code: int, response_text: str, stop_reason: str | None
     if status_code >= 400:
         return "unknown"
     return None
+
 
 class LLMAdapter:
     def __init__(self, config: LLMConfig, transport=None, tracer=None) -> None:
@@ -60,10 +64,14 @@ class LLMAdapter:
         )
 
     async def generate(
-        self, messages: list[dict], tools: list[dict] | None = None, system: str | None = None
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        system: str | None = None,
     ) -> dict:
         import time
         import uuid
+
         start = time.monotonic()
         payload = self._build_payload(messages, tools, system, stream=False)
         async with self._client() as client:
@@ -79,7 +87,7 @@ class LLMAdapter:
         }
         if self._tracer:
             await self._tracer.trace_llm_call(
-                session_id=uuid.uuid4(),
+                chat_id=uuid.uuid4(),
                 model=self._config.model,
                 messages=messages,
                 response=result,
@@ -88,7 +96,10 @@ class LLMAdapter:
         return result
 
     async def generate_stream(
-        self, messages: list[dict], tools: list[dict] | None = None, system: str | None = None
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        system: str | None = None,
     ):
         payload = self._build_payload(messages, tools, system, stream=True)
         accumulated: dict[int, dict] = {}
@@ -97,7 +108,12 @@ class LLMAdapter:
             async with client.stream("POST", "/chat/completions", json=payload) as resp:
                 if resp.status_code != 200:
                     text = await resp.aread()
-                    yield {"event": "error", "data": json.dumps({"code": resp.status_code, "message": text.decode()})}
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(
+                            {"code": resp.status_code, "message": text.decode()}
+                        ),
+                    }
                     return
 
                 async for line in resp.aiter_lines():
@@ -121,15 +137,22 @@ class LLMAdapter:
                         for tc in tool_calls:
                             idx = tc.get("index", 0)
                             if idx not in accumulated:
-                                accumulated[idx] = {"function": {"name": "", "arguments": ""}}
+                                accumulated[idx] = {
+                                    "function": {"name": "", "arguments": ""}
+                                }
                             fn = tc.get("function", {})
                             if "name" in fn:
                                 accumulated[idx]["function"]["name"] += fn["name"]
                             if "arguments" in fn:
-                                accumulated[idx]["function"]["arguments"] += fn["arguments"]
+                                accumulated[idx]["function"]["arguments"] += fn[
+                                    "arguments"
+                                ]
 
                     if content:
-                        yield {"event": "assistant", "data": json.dumps({"delta": content})}
+                        yield {
+                            "event": "assistant",
+                            "data": json.dumps({"delta": content}),
+                        }
 
                 for tc in accumulated.values():
                     yield {"event": "tool_call", "data": json.dumps(tc)}
@@ -139,8 +162,14 @@ class LLMAdapter:
         payload = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "Summarize the following conversation concisely, preserving key facts and decisions."},
-                {"role": "user", "content": "\n".join(m.get("content", "") for m in messages)},
+                {
+                    "role": "system",
+                    "content": "Summarize the following conversation concisely, preserving key facts and decisions.",
+                },
+                {
+                    "role": "user",
+                    "content": "\n".join(m.get("content", "") for m in messages),
+                },
             ],
             "stream": False,
             "max_tokens": 1024,
@@ -153,14 +182,22 @@ class LLMAdapter:
         return data["choices"][0]["message"]["content"]
 
     def _build_payload(
-        self, messages: list[dict], tools: list[dict] | None, system: str | None, stream: bool
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        system: str | None,
+        stream: bool,
     ) -> dict:
         msgs: list[dict] = []
         if system:
             msgs.append({"role": "system", "content": system})
         msgs.extend(messages)
-        payload: dict = {"model": self._config.model, "messages": msgs, "stream": stream,
-                         "max_tokens": self._max_tokens}
+        payload: dict = {
+            "model": self._config.model,
+            "messages": msgs,
+            "stream": stream,
+            "max_tokens": self._max_tokens,
+        }
         if tools:
             payload["tools"] = tools
         return payload

@@ -145,7 +145,7 @@
 ### AL-001 全链路审计
 
 | 前置 | 完整高风险操作流程 |
-| 预期 | 审计事件链完整：AUTO_APPROVED → TOOL_REQUEST_CREATED → APPROVED → TOOL_EXECUTED；session_id 一致 |
+| 预期 | 审计事件链完整：AUTO_APPROVED → TOOL_REQUEST_CREATED → APPROVED → TOOL_EXECUTED；chat_id 一致 |
 
 ### API-001 SSE 流式响应
 

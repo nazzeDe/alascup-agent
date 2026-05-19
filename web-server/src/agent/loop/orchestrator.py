@@ -6,7 +6,11 @@ from typing import AsyncIterator
 from src.agent.loop.audit import log_transition
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers import handle_interrupt, handle_llm_error
-from src.agent.loop.transitions import clear_transient_fields, get_transition, has_interrupt
+from src.agent.loop.transitions import (
+    clear_transient_fields,
+    get_transition,
+    has_interrupt,
+)
 from src.agent.state import Transition
 
 
@@ -19,16 +23,25 @@ class LoopOrchestrator:
     state dict).
     """
 
-    def __init__(self, *, graph, context_manager, bridge, audit_logger,
-                 error_recovery, llm, session_id: str):
+    def __init__(
+        self,
+        *,
+        graph,
+        context_manager,
+        bridge,
+        audit_logger,
+        error_recovery,
+        llm,
+        chat_id: str,
+    ):
         self._graph = graph
         self._context_manager = context_manager
         self._bridge = bridge
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._llm = llm
-        self._config = {"configurable": {"thread_id": session_id}}
-        self._session_id = session_id
+        self._config = {"configurable": {"thread_id": chat_id}}
+        self._chat_id = chat_id
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute the ReAct loop until interrupt or DONE."""
@@ -52,7 +65,7 @@ class LoopOrchestrator:
                     result,
                     bridge=self._bridge,
                     audit_logger=self._audit,
-                    session_id=self._session_id,
+                    chat_id=self._chat_id,
                 ):
                     yield event
                 return
@@ -72,10 +85,13 @@ class LoopOrchestrator:
                     llm_error = state["llm_error"]
                     yield {
                         "event": "error",
-                        "data": json.dumps({
-                            "code": llm_error.get("code", 500),
-                            "message": "Recovery exhausted",
-                        }, default=str),
+                        "data": json.dumps(
+                            {
+                                "code": llm_error.get("code", 500),
+                                "message": "Recovery exhausted",
+                            },
+                            default=str,
+                        ),
                     }
                     await log_transition(self._audit, Transition.ERROR_EXIT)
                     return

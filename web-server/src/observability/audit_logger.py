@@ -26,7 +26,7 @@ class PostgresAuditLogger(AuditLogger):
                event, tool_name, params, model, decision, execution_status, backup_ref, error)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
             event.timestamp,
-            event.session_id,
+            event.chat_id,
             event.request_id,
             event.level.value,
             event.actor,

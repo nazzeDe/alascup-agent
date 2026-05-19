@@ -27,9 +27,9 @@ class ChatTurnRequest(BaseModel):
     model: str | None = None
 
 
-@router.post("/sessions/{session_id}/messages")
+@router.post("/sessions/{chat_id}/messages")
 async def chat_turn(
-    session_id: UUID,
+    chat_id: UUID,
     body: ChatTurnRequest,
     request: Request,
     session_mgr=Depends(session_manager),
@@ -42,7 +42,7 @@ async def chat_turn(
     graph=Depends(graph),
 ):
     try:
-        session = await session_mgr.get_session(session_id)
+        session = await session_mgr.get_session(chat_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="session not found")
 
@@ -57,12 +57,12 @@ async def chat_turn(
     # 追加当前用户消息
     user_msg = Message(
         message_id=uuid4(),
-        session_id=session_id,
+        chat_id=chat_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
         type=MessageType.USER,
         content=body.message,
     )
-    await session_mgr.add_message(session_id, user_msg)
+    await session_mgr.add_message(chat_id, user_msg)
 
     system_prompt = prompt_mgr.build_system_prompt()
     agent = Query(
@@ -71,7 +71,7 @@ async def chat_turn(
         context_manager=context_mgr,
         pending_approvals=bridge,
         audit_logger=audit_logger,
-        session_id=session_id,
+        chat_id=chat_id,
     )
 
     available_tools = await executor.list_tools()
@@ -80,7 +80,9 @@ async def chat_turn(
     async def event_generator():
         collected_text: list[str] = []
         try:
-            async for event in agent.run(messages, available_tools, system=system_prompt):
+            async for event in agent.run(
+                messages, available_tools, system=system_prompt
+            ):
                 if await request.is_disconnected():
                     break
                 if event.get("event") == "assistant":
@@ -95,11 +97,13 @@ async def chat_turn(
             if full_text:
                 assistant_msg = Message(
                     message_id=uuid4(),
-                    session_id=session_id,
+                    chat_id=chat_id,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     type=MessageType.ASSISTANT,
                     content=full_text,
                 )
-                await session_mgr.add_message(session_id, assistant_msg)
+                await session_mgr.add_message(chat_id, assistant_msg)
 
-    return EventSourceResponse(event_generator(), headers={"X-Session-ID": str(session_id)})
+    return EventSourceResponse(
+        event_generator(), headers={"X-Session-ID": str(chat_id)}
+    )

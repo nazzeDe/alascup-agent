@@ -37,15 +37,16 @@ class _MockToolExecutor:
 
 def _build_test_services():
     from langgraph.checkpoint.memory import MemorySaver
+
     from src.agent.graph import build_graph
     from src.config.models import RulesConfig
+    from src.observability.audit_logger import InMemoryAuditLogger
     from src.security.pending import ApprovalBridge
     from src.security.rule_engine import RuleEngine
     from src.services.container import Services
-    from src.services.session_manager import InMemorySessionManager
-    from src.services.prompt_manager import PromptManager
     from src.services.context_manager import ContextManager
-    from src.observability.audit_logger import InMemoryAuditLogger
+    from src.services.prompt_manager import PromptManager
+    from src.services.session_manager import InMemorySessionManager
 
     llm_adapter = _MockLLMAdapter()
     executor = _MockToolExecutor()
@@ -55,9 +56,12 @@ def _build_test_services():
     checkpointer = MemorySaver()
 
     graph = build_graph(
-        llm=llm_adapter, executor=executor,
-        classifier=classifier, rule_engine=rule_engine,
-        audit_logger=audit_logger, checkpointer=checkpointer,
+        llm=llm_adapter,
+        executor=executor,
+        classifier=classifier,
+        rule_engine=rule_engine,
+        audit_logger=audit_logger,
+        checkpointer=checkpointer,
     )
 
     return Services(
@@ -78,6 +82,7 @@ def _build_test_services():
 @pytest.fixture
 def app():
     from src.main import app
+
     app.state.services = _build_test_services()
     return app
 
@@ -117,9 +122,9 @@ class TestChatTurnSSE:
     @pytest.mark.asyncio
     async def test_chat_turn_returns_sse(self, client):
         r = await client.post("/api/sessions")
-        session_id = r.json()["id"]
+        chat_id = r.json()["id"]
 
-        url = f"/api/sessions/{session_id}/messages"
+        url = f"/api/sessions/{chat_id}/messages"
         async with client.stream("POST", url, json={"message": "hello"}) as response:
             assert response.status_code == 200
             assert "text/event-stream" in response.headers.get("content-type", "")
@@ -137,8 +142,8 @@ class TestChatTurnSSE:
     @pytest.mark.asyncio
     async def test_chat_turn_missing_message(self, client):
         r = await client.post("/api/sessions")
-        session_id = r.json()["id"]
-        response = await client.post(f"/api/sessions/{session_id}/messages", json={})
+        chat_id = r.json()["id"]
+        response = await client.post(f"/api/sessions/{chat_id}/messages", json={})
         assert response.status_code == 422
 
 
@@ -151,19 +156,23 @@ class TestSessionLifecycle:
         # 1. 创建会话
         r = await client.post("/api/sessions")
         assert r.status_code == 201
-        session_id = r.json()["id"]
+        chat_id = r.json()["id"]
 
         # 2. 发送消息
-        async with client.stream("POST", f"/api/sessions/{session_id}/messages", json={
-            "message": "hello",
-        }) as response:
+        async with client.stream(
+            "POST",
+            f"/api/sessions/{chat_id}/messages",
+            json={
+                "message": "hello",
+            },
+        ) as response:
             assert response.status_code == 200
             async for line in response.aiter_lines():
                 if line == "event: done":
                     break
 
         # 3. 获取详情——应有消息
-        r = await client.get(f"/api/sessions/{session_id}")
+        r = await client.get(f"/api/sessions/{chat_id}")
         assert r.status_code == 200
         session = r.json()
         assert len(session["messages"]) >= 2  # user + assistant
@@ -172,46 +181,58 @@ class TestSessionLifecycle:
     async def test_new_chat_creates_session_with_header(self, client):
         """发送消息 → 响应头含 X-Session-ID。"""
         r = await client.post("/api/sessions")
-        session_id = r.json()["id"]
+        chat_id = r.json()["id"]
 
-        async with client.stream("POST", f"/api/sessions/{session_id}/messages", json={
-            "message": "hello",
-        }) as response:
+        async with client.stream(
+            "POST",
+            f"/api/sessions/{chat_id}/messages",
+            json={
+                "message": "hello",
+            },
+        ) as response:
             assert response.status_code == 200
-            assert response.headers.get("X-Session-ID") == session_id
+            assert response.headers.get("X-Session-ID") == chat_id
             async for line in response.aiter_lines():
                 if line == "event: done":
                     break
 
         # 确认会话已创建且含消息
-        r = await client.get(f"/api/sessions/{session_id}")
+        r = await client.get(f"/api/sessions/{chat_id}")
         assert r.status_code == 200
         assert len(r.json()["messages"]) >= 2
 
     @pytest.mark.asyncio
     async def test_continuing_conversation_loads_history(self, client):
-        """同一 session_id 追加消息——历史被加载。"""
+        """同一 chat_id 追加消息——历史被加载。"""
         # 创建会话 + 第一轮
         r = await client.post("/api/sessions")
-        session_id = r.json()["id"]
+        chat_id = r.json()["id"]
 
-        async with client.stream("POST", f"/api/sessions/{session_id}/messages", json={
-            "message": "first message",
-        }) as response:
+        async with client.stream(
+            "POST",
+            f"/api/sessions/{chat_id}/messages",
+            json={
+                "message": "first message",
+            },
+        ) as response:
             async for line in response.aiter_lines():
                 if line == "event: done":
                     break
 
-        # 第二轮——同 session_id
-        async with client.stream("POST", f"/api/sessions/{session_id}/messages", json={
-            "message": "second message",
-        }) as response:
+        # 第二轮——同 chat_id
+        async with client.stream(
+            "POST",
+            f"/api/sessions/{chat_id}/messages",
+            json={
+                "message": "second message",
+            },
+        ) as response:
             async for line in response.aiter_lines():
                 if line == "event: done":
                     break
 
         # 详情应包含多轮消息
-        r = await client.get(f"/api/sessions/{session_id}")
+        r = await client.get(f"/api/sessions/{chat_id}")
         session = r.json()
         user_msgs = [m for m in session["messages"] if m["type"] == "user"]
         assert len(user_msgs) == 2

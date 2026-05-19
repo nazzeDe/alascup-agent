@@ -83,7 +83,7 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 
 ### Prompt Section 默认值
 
-每个 section 的内置默认内容。可通过 `prompt.md` 按 section 名覆盖。
+每个 section 的内置默认内容。可通过 `config/prompt/<section>.md` 覆盖对应 section。
 
 **identity**
 > 你是 AI 运维 Agent，负责诊断系统问题、分析性能指标、执行审批通过的修复操作。先收集信息，再给出判断。
@@ -98,19 +98,22 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 > 工具调用规范：
 > - 先收集信息再行动——优先使用只读工具了解系统状态
 > - 并行调用独立的只读工具以加速信息收集
+> - 使用过滤参数（grep、since、top_n）只获取必要信息，避免获取全量数据
 > - 验证每个工具的执行结果，失败时分析原因并调整策略
 > - 高风险操作先输出计划再请求执行
 
 **environment**
 
-由 tool-server 启动时上报，PromptManager 构建。包含：
+由 tool-server 启动时上报，PromptManager 在 chat-turn 开始时拉取。拉取失败用上一次成功的缓存值；首次启动无缓存时填 `"unknown"`，不阻塞对话。
+
+只包含基本不变的系统信息，动态指标（CPU、内存、磁盘等）由 LLM 通过工具按需获取，不注入 prompt。
 
 | 字段 | 说明 |
 |------|------|
 | `target_host` | 目标主机 hostname |
 | `target_os` | 操作系统及版本（如 `Linux 7.0 (loongarch64)`） |
 | `mount_scope` | Agent 可访问的系统资源（只读挂载点：`/proc`, `/sys`, `/var/log`） |
-| `system_time` | 目标系统当前时间（ISO 格式） |
+| `permissions` | tool-server 容器拥有的 Linux capabilities |
 
 **memory**
 > （由 PromptManager 从记忆系统加载，无持久记忆时为空字符串。格式见 `doc/详细设计.md` 的 System Prompt 结构）
@@ -128,9 +131,19 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | `approval_rejected` | 审批拒绝 |
 | `context_compacted` | 上下文压缩后重试 |
 | `max_output_tokens_recovery` | token 上限恢复重试 |
-| `model_fallback` | 模型降级重试 |
+| `turn_limit_reached` | 循环轮次达阈值，暂停等确认 |
+| `turn_limit_continue` | 用户确认继续推理 |
+| `turn_limit_stop` | 用户选择停止推理 |
 | `done` | LLM 判断结束 |
 | `error_exit` | 异常退出 |
+
+### 循环轮次确认
+
+循环轮次达到阈值（默认 15 轮）时，推送 `turn_limit_reached` 事件并暂停 SSE 流，等待用户确认。用户选择"继续"后恢复循环，每继续 10 轮再次弹窗。用户选择"停止"或 SSE 超时则终止循环。
+
+### 会话并发
+
+同一 chat_id 同一时间只允许一个活跃的 Agent 循环。新消息到达时，若已有 SSE 流在进行中，则中断旧流（飞行中的工具执行自然跑完，结果保留；等待中的审批自动拒绝），发起新的 Agent 循环。
 
 ### 退出条件
 
@@ -138,6 +151,7 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 |------|------|
 | LLM 无 tool_call 且 stop_reason=end | transition=`done`，退出 |
 | abort / 连续失败 | transition=`error_exit`，退出 |
+| 用户拒绝继续 | transition=`done`，退出 |
 
 ### 流式工具执行
 
@@ -234,18 +248,25 @@ LLM 流式输出 token
 | `assistant` | `{chat_id, message_id, delta}` | LLM 文本流式输出 |
 | `tool_call` | `{chat_id, message_id, tool_name, params, isReadOnly}` | LLM 请求调用工具 |
 | `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?}` | 工具执行结果 |
-| `tool_approval_required` | `{chat_id, request_id, tool_name, params, reason}` | 高风险工具需审批，流暂停 |
+| `tool_approval_required` | `{chat_id, request_id, tool_name, description, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
+| `turn_limit_reached` | `{chat_id, turn_count, message}` | 循环轮次达阈值，流暂停等用户确认 |
 | `error` | `{code, message}` | 异常 |
 | `done` | `{chat_id}` | 流结束 |
 
 只读工具 `tool_call`/`tool_result` 流式推送。高风险触发 `tool_approval_required` 后 SSE 暂停，`POST /api/tool-requests/{request_id}/approval` 回调后流继续。
+
+## MCP 客户端
+
+- 懒连接：首次 chat-turn 时才连接 tool-server / rag-server，避免启动顺序依赖
+- 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）。工具调用失败（tool not found）时刷新列表
+- tool-server 未就绪时首次 chat-turn 返回友好错误，不崩溃
 
 ## 配置
 
 运行时需 `config/` 目录包含：
 
 - `servers.json` — MCP Server 连接配置
-- `prompt.md` — System prompt 模板（可选，按 section 名覆盖默认值，未覆盖的 section 使用内置默认值）
+- `prompt/` — System prompt section 文件（可选），每个 `.md` 文件对应一个 section。不存在的文件使用内置默认值
 - `rules.json` — 工具调用安全规则（可选）
 - `llm.json` — LLM 接入配置
 
