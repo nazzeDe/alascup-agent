@@ -45,7 +45,7 @@ class PostgresTracer(Tracer):
             chat_id,
             model,
             json.dumps(messages),
-            json.dumps(completion_data) if completion else None,
+            json.dumps(completion_data) if (completion or tool_calls) else None,
             _estimate_tokens(messages),
             _estimate_tokens([{"content": completion}]),
             latency_ms,

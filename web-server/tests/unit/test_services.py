@@ -63,6 +63,75 @@ class TestSessionManager:
         assert len(retrieved.messages) == 1
 
 
+    @pytest.mark.asyncio
+    async def test_add_message_to_nonexistent_session(self):
+        from src.models.message import Message, MessageType
+        from src.services.session_manager import InMemorySessionManager
+
+        mgr = InMemorySessionManager()
+        msg = Message(
+            message_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            type=MessageType.USER,
+            content="hello",
+        )
+        with pytest.raises(KeyError, match="session not found"):
+            await mgr.add_message(uuid.uuid4(), msg)
+
+    @pytest.mark.asyncio
+    async def test_add_tool_call(self):
+        from src.models.tool import (ApprovalStatus, ExecutionStatus,
+                                      ServerName, ToolCall)
+        from src.services.session_manager import InMemorySessionManager
+
+        mgr = InMemorySessionManager()
+        session = await mgr.create_session()
+        call = ToolCall(
+            name="get_cpu",
+            server=ServerName.TOOL_SERVER,
+            description="",
+            is_read_only=True,
+            is_rollbackable=False,
+            params_schema={},
+            chat_id=session.id,
+            message_id=uuid.uuid4(),
+            params={},
+            request_id=None,
+            approval_status=ApprovalStatus.APPROVED,
+            execution_status=ExecutionStatus.SUCCEEDED,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        await mgr.add_tool_call(session.id, call)
+        retrieved = await mgr.get_session(session.id)
+        assert len(retrieved.executed_tool_list) == 1
+
+    @pytest.mark.asyncio
+    async def test_add_tool_call_to_nonexistent_session(self):
+        from src.models.tool import (ApprovalStatus, ExecutionStatus,
+                                      ServerName, ToolCall)
+        from src.services.session_manager import InMemorySessionManager
+
+        mgr = InMemorySessionManager()
+        call = ToolCall(
+            name="get_cpu",
+            server=ServerName.TOOL_SERVER,
+            description="",
+            is_read_only=True,
+            is_rollbackable=False,
+            params_schema={},
+            chat_id=uuid.uuid4(),
+            message_id=uuid.uuid4(),
+            params={},
+            request_id=None,
+            approval_status=ApprovalStatus.APPROVED,
+            execution_status=ExecutionStatus.SUCCEEDED,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        with pytest.raises(KeyError, match="session not found"):
+            await mgr.add_tool_call(uuid.uuid4(), call)
+
+
 class TestPromptManager:
     def test_load_prompt(self, tmp_path):
         from src.services.prompt_manager import PromptManager
