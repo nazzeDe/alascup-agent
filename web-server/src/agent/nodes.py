@@ -56,54 +56,13 @@ async def think_node(state: AgentState, *, llm, executor=None, classifier=None):
         result["messages"] = [{"role": "assistant", "content": text}]
 
     # AG-007: 分类 tool_call blocks——只读的立即执行，其余保留走审查
-    pending_tool_calls: list[dict] = []
-    pre_executed: list[dict] = []
-
     if executor is not None and classifier is not None and tool_call_blocks:
-        exec_calls = []
-        for tc in tool_call_blocks:
-            fn = tc.get("function", {})
-            name = fn.get("name", "")
-            args = _parse_args(fn.get("arguments", "{}"))
-            exec_calls.append((tc, name, args))
-
-        if exec_calls:
-            classifications = []
-            for _, name, args in exec_calls:
-                try:
-                    c = await classifier.classify(name, args)
-                except Exception:
-                    logger.opt(exception=True).warning(
-                        "classify failed for tool={tool}, falling back to readonly",
-                        tool=name,
-                    )
-                    c = {"is_read_only": True, "is_rollbackable": False, "_classify_fallback": True}
-                classifications.append(c)
-
-            dispatch: list[dict] = []
-            for i, (tc, name, args) in enumerate(exec_calls):
-                is_read_only = classifications[i].get("is_read_only", True)
-                if is_read_only:
-                    dispatch.append({
-                        "tool_name": name,
-                        "arguments": args,
-                        "is_read_only": True,
-                    })
-                else:
-                    tc["is_read_only"] = False
-                    pending_tool_calls.append(tc)
-
-            if dispatch:
-                from asyncio import gather
-                disp_results = await executor.execute_parallel(dispatch)
-                for i, dr in enumerate(disp_results):
-                    pre_executed.append({
-                        "tool_name": dispatch[i]["tool_name"],
-                        "result": dr,
-                        "tool_call_id": str(uuid4()),
-                    })
+        pending_tool_calls, pre_executed = await _classify_and_dispatch(
+            tool_call_blocks, executor, classifier
+        )
     else:
         pending_tool_calls = tool_call_blocks
+        pre_executed = []
 
     result["tool_calls"] = pending_tool_calls
     result["streaming_tool_results"] = pre_executed
@@ -339,6 +298,59 @@ def _format_tools(tools: list) -> list[dict]:
             "function": {"name": name, "description": desc, "parameters": params},
         })
     return result
+
+
+async def _classify_and_dispatch(
+    tool_call_blocks: list[dict], executor, classifier
+) -> tuple[list[dict], list[dict]]:
+    """Classify tool calls and pre-execute readonly ones.
+
+    Returns (pending_tool_calls, pre_executed_results).
+    """
+    exec_calls = []
+    for tc in tool_call_blocks:
+        fn = tc.get("function", {})
+        name = fn.get("name", "")
+        args = _parse_args(fn.get("arguments", "{}"))
+        exec_calls.append((tc, name, args))
+
+    classifications = []
+    for _, name, args in exec_calls:
+        try:
+            c = await classifier.classify(name, args)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "classify failed for tool={tool}, falling back to readonly",
+                tool=name,
+            )
+            c = {"is_read_only": True, "is_rollbackable": False, "_classify_fallback": True}
+        classifications.append(c)
+
+    pending: list[dict] = []
+    dispatch: list[dict] = []
+    for i, (tc, name, args) in enumerate(exec_calls):
+        is_read_only = classifications[i].get("is_read_only", True)
+        if is_read_only:
+            dispatch.append({
+                "tool_name": name,
+                "arguments": args,
+                "is_read_only": True,
+            })
+        else:
+            tc["is_read_only"] = False
+            pending.append(tc)
+
+    pre_executed: list[dict] = []
+    if dispatch:
+        disp_results = await executor.execute_parallel(dispatch)
+        for i, dr in enumerate(disp_results):
+            pre_executed.append({
+                "tool_name": dispatch[i]["tool_name"],
+                "result": dr,
+                "tool_call_id": str(uuid4()),
+            })
+
+    return pending, pre_executed
 
 
 def _parse_args(args: str) -> dict:

@@ -9,29 +9,32 @@ def classify_error(
     status_code: int, response_text: str, stop_reason: str | None = None
 ) -> str | None:
     """Classify LLM API errors into standardized error types."""
-    if status_code == 200 and stop_reason == "max_tokens":
-        return "max_output_tokens"
+    if status_code == 200:
+        return "max_output_tokens" if stop_reason == "max_tokens" else None
+
+    if status_code == 0:
+        return "timeout"
+
     if status_code in (413, 400) and any(
         kw in response_text.lower()
         for kw in ("too large", "too long", "context", "token")
     ):
         return "prompt_too_long"
-    if status_code == 429:
-        return "rate_limit"
-    if status_code in (401, 403):
-        return "auth_failed"
-    if status_code == 404:
-        return "model_unavailable"
-    if status_code in (500, 502, 503, 529):
-        return "server_error"
-    if status_code == 200 and stop_reason is None:
-        return None
-    if status_code == 0:
-        return "timeout"
-    if status_code >= 500:
-        return "server_error"
-    if status_code >= 400:
-        return "unknown"
+
+    match status_code:
+        case 429:
+            return "rate_limit"
+        case 401 | 403:
+            return "auth_failed"
+        case 404:
+            return "model_unavailable"
+        case 500 | 502 | 503 | 529:
+            return "server_error"
+        case _ if status_code >= 500:
+            return "server_error"
+        case _ if status_code >= 400:
+            return "unknown"
+
     return None
 
 

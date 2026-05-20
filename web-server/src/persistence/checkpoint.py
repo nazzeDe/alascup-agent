@@ -123,7 +123,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
             if row is None:
                 return None
 
-            checkpoint: Checkpoint = pickle.loads(row["checkpoint"])
+            checkpoint: Checkpoint = pickle.loads(row["checkpoint"])  # noqa: S301
             import json
             metadata: CheckpointMetadata = json.loads(row["metadata"])
             parent_checkpoint_id: str | None = row["parent_checkpoint_id"]
@@ -137,7 +137,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
                 thread_id, checkpoint_ns, checkpoint["id"],
             )
             pending_writes = [
-                (wr["task_id"], wr["channel"], pickle.loads(wr["value"]))
+                (wr["task_id"], wr["channel"], pickle.loads(wr["value"]))  # noqa: S301
                 for wr in write_rows
             ]
 
@@ -197,7 +197,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
             for row in rows:
-                checkpoint: Checkpoint = pickle.loads(row["checkpoint"])
+                checkpoint: Checkpoint = pickle.loads(row["checkpoint"])  # noqa: S301
                 import json
                 metadata: CheckpointMetadata = json.loads(row["metadata"])
                 resolved_config = {
@@ -224,14 +224,14 @@ class PostgresCheckpointer(BaseCheckpointSaver):
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         raise NotImplementedError("Use aget_tuple for async operations")
 
-    def put(self, config, checkpoint, metadata, new_versions):
+    def put(self, config, checkpoint, metadata, _new_versions):
         raise NotImplementedError("Use aput for async operations")
 
-    def put_writes(self, config, writes, task_id, task_path=""):
+    def put_writes(self, config, writes, task_id, _task_path=""):
         raise NotImplementedError("Use aput_writes for async operations")
 
     def delete_thread(self, thread_id: str) -> None:
         raise NotImplementedError("Use adelete_thread for async operations")
 
-    def list(self, config, *, filter=None, before=None, limit=None):
+    def list(self, config, *, _filter=None, _before=None, limit=None):
         raise NotImplementedError("Use alist for async operations")

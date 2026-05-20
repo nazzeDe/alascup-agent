@@ -1,8 +1,5 @@
 """OB-001, OB-002: 调试日志门控 + 剖析器门控。"""
 
-import os
-from pathlib import Path
-
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -99,7 +96,7 @@ class TestDebugLogger:
         log_dir = tmp_path / "logs" / "debug"
         log_dir.mkdir(parents=True)
 
-        from src.observability.debug_log import DebugLogger, Path as _Path
+        from src.observability.debug_log import DebugLogger
 
         logger = DebugLogger()
         # Redirect file output to tmp_path
