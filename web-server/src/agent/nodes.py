@@ -9,19 +9,20 @@ from src.agent.state import AgentState, Transition
 from src.models.audit import AuditEvent, AuditLevel
 
 
-async def think_node(state: AgentState, *, llm, executor=None, classifier=None):
-    """流式调用 LLM，返回 assistant 文本、tool_calls 列表和流式执行结果。
+async def think_node(state: AgentState, *, llm, executor=None):
+    """Stream LLM, return assistant text, pending tool_calls, and streaming results.
 
-    AG-007: 流结束后立即分类并执行只读 tool_call，结果放入
-    streaming_tool_results 供 observe_node 直接消费，跳过 review/act。
+    AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
+    Mutable and write tools stay in tool_calls for review_node.
 
-    返回:
-      - messages: assistant 文本消息
-      - tool_calls: 非只读 tool_use block（需走 review → act）
-      - streaming_tool_results: 只读工具预执行结果
-      - transition: DONE（无产出时）或 None
+    Returns:
+      - messages: assistant text
+      - tool_calls: non-readonly tool_use blocks (go to review → act)
+      - streaming_tool_results: readonly pre-executed results
+      - transition: DONE (no output) or None
     """
-    tools = _format_tools(state.get("available_tools", []))
+    available_tools = state.get("available_tools", [])
+    tools = _format_tools(available_tools)
     messages = _messages(state)
     system = state.get("system")
 
@@ -55,10 +56,9 @@ async def think_node(state: AgentState, *, llm, executor=None, classifier=None):
     if text:
         result["messages"] = [{"role": "assistant", "content": text}]
 
-    # AG-007: 分类 tool_call blocks——只读的立即执行，其余保留走审查
-    if executor is not None and classifier is not None and tool_call_blocks:
+    if executor is not None and tool_call_blocks:
         pending_tool_calls, pre_executed = await _classify_and_dispatch(
-            tool_call_blocks, executor, classifier
+            tool_call_blocks, executor, available_tools
         )
     else:
         pending_tool_calls = tool_call_blocks
@@ -73,11 +73,9 @@ async def think_node(state: AgentState, *, llm, executor=None, classifier=None):
 
 
 async def act_node(state: AgentState, *, executor, audit_logger=None):
-    """执行 approved_tool_calls。
+    """Execute approved_tool_calls concurrently.
 
-    并发执行所有已审批工具（只读并行，高风险由 review_node 保证串行）。
-
-    对应 tests/README.md AG-001、AG-003、AL-001。
+    Each call carries server_name, approval_status, and request_id.
     """
     tool_calls = state.get("approved_tool_calls", []) or []
     if not tool_calls:
@@ -89,8 +87,9 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
         calls.append({
             "tool_name": fn.get("name", ""),
             "arguments": _parse_args(fn.get("arguments", "{}")),
-            "is_read_only": tc.get("is_read_only", True),
-            "approval_status": tc.get("approval_status"),
+            "server_name": tc.get("server_name", ""),
+            "approval_status": tc.get("approval_status", "APPROVED"),
+            "request_id": tc.get("request_id", str(uuid4())),
         })
 
     results = await executor.execute_parallel(calls)
@@ -102,22 +101,23 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
             "result": r,
             "tool_call_id": str(uuid4()),
         })
-        await _log_act(audit_logger, calls[i]["tool_name"],
-                       is_read_only=calls[i]["is_read_only"],
-                       execution_status=r.get("execution_status", "UNKNOWN"))
+        await _log_act(
+            audit_logger, calls[i]["tool_name"],
+            execution_status=r.get("execution_status", "UNKNOWN"),
+        )
 
     return {"tool_results": formatted}
 
 
-async def review_node(state: AgentState, *, classifier, rule_engine, audit_logger):
-    """审查所有 tool_call：分级 → 规则匹配 → 决策。
+async def review_node(state: AgentState, *, executor, rule_engine, audit_logger):
+    """Review all tool_calls: classify mutable tools → rule match → decide.
 
-    1. 调 classifier.classify 获取 is_read_only / is_rollbackable
-    2. 调 rule_engine.evaluate 匹配规则（黑名单/白名单/按分级）
-    3. 只读/白名单 → 加入 approved_tool_calls
-    4. 黑名单 → 加入 rejected_tool_calls，写审计日志
-    5. 高风险 → 待审批列表，如有则调用 interrupt() 暂停
-    6. interrupt 恢复后，处理用户审批结果
+    1. Mutable tools: call executor.classify() for dynamic is_read_only/is_rollbackable
+    2. Non-mutable tools: use static is_read_only from tool_call metadata
+    3. rule_engine.evaluate() → REJECT / AUTO_APPROVE / NEEDS_APPROVAL
+    4. Readonly/whitelist → approved_tool_calls
+    5. Blacklist → rejected_tool_calls + audit
+    6. High-risk → interrupt() for user approval
     """
     tool_calls = state.get("tool_calls", []) or []
     approved: list[dict] = []
@@ -129,8 +129,21 @@ async def review_node(state: AgentState, *, classifier, rule_engine, audit_logge
         name = fn.get("name", "")
         args = _parse_args(fn.get("arguments", "{}"))
 
-        classification = await classifier.classify(name, args)
-        is_read_only = classification.get("is_read_only", True)
+        if tc.get("mutable"):
+            try:
+                classification = await executor.classify(name, args, tc.get("server_name", ""))
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "classify failed for tool={tool}, treating as dangerous", tool=name,
+                )
+                classification = {"is_read_only": False, "is_rollbackable": False, "_classify_fallback": True}
+        else:
+            classification = {
+                "is_read_only": tc.get("is_read_only", False),
+                "is_rollbackable": tc.get("is_rollbackable", False),
+            }
+
+        is_read_only = classification.get("is_read_only", False)
         is_rollbackable = classification.get("is_rollbackable", False)
 
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
@@ -141,6 +154,7 @@ async def review_node(state: AgentState, *, classifier, rule_engine, audit_logge
 
         elif decision == "AUTO_APPROVE":
             tc["is_read_only"] = is_read_only
+            tc["request_id"] = str(uuid4())
             approved.append(tc)
             await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO)
 
@@ -161,6 +175,7 @@ async def review_node(state: AgentState, *, classifier, rule_engine, audit_logge
             user_decision = decisions[i] if i < len(decisions) else "EXPIRED"
             if user_decision == "APPROVED":
                 tc["approval_status"] = "APPROVED"
+                tc["request_id"] = request_id
                 approved.append(tc)
                 await _log_review(audit_logger, "TOOL_APPROVED",
                             tc.get("function", {}).get("name", ""),
@@ -196,13 +211,13 @@ async def _log_review(audit_logger, event: str, tool_name: str, level=None, **kw
     ))
 
 
-async def _log_act(audit_logger, tool_name: str, is_read_only: bool = True,
+async def _log_act(audit_logger, tool_name: str,
              execution_status: str = "UNKNOWN") -> None:
     if audit_logger is None:
         return
     await audit_logger.log(AuditEvent(
         timestamp=datetime.now(timezone.utc).isoformat(),
-        level=AuditLevel.INFO if is_read_only else AuditLevel.WARN,
+        level=AuditLevel.INFO,
         actor="system",
         event="TOOL_EXECUTED",
         tool_name=tool_name,
@@ -287,56 +302,77 @@ def _format_tools(tools: list) -> list[dict]:
     for t in tools:
         if isinstance(t, dict):
             name = t.get("name", "")
+            server = t.get("server_name", "")
             desc = t.get("description", "")
             params = t.get("params_schema", {})
         else:
             name = getattr(t, "name", "")
+            server = getattr(t, "server_name", "")
             desc = getattr(t, "description", "")
             params = getattr(t, "params_schema", {})
+        full_name = f"{server}/{name}" if server else name
         result.append({
             "type": "function",
-            "function": {"name": name, "description": desc, "parameters": params},
+            "function": {"name": full_name, "description": desc, "parameters": params},
         })
     return result
 
 
 async def _classify_and_dispatch(
-    tool_call_blocks: list[dict], executor, classifier
+    tool_call_blocks: list[dict], executor, available_tools: list[dict]
 ) -> tuple[list[dict], list[dict]]:
-    """Classify tool calls and pre-execute readonly ones.
+    """Parse server_name prefix, attach metadata, pre-execute safe-pool tools.
+
+    - Mutable tools → pending (classify_tool called later in review_node)
+    - Non-mutable readonly → pre-executed via executor.execute_parallel
+    - Non-mutable write → pending (needs approval in review_node)
 
     Returns (pending_tool_calls, pre_executed_results).
     """
-    exec_calls = []
-    for tc in tool_call_blocks:
-        fn = tc.get("function", {})
-        name = fn.get("name", "")
-        args = _parse_args(fn.get("arguments", "{}"))
-        exec_calls.append((tc, name, args))
-
-    classifications = []
-    for _, name, args in exec_calls:
-        try:
-            c = await classifier.classify(name, args)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "classify failed for tool={tool}, falling back to readonly",
-                tool=name,
-            )
-            c = {"is_read_only": True, "is_rollbackable": False, "_classify_fallback": True}
-        classifications.append(c)
+    # Build lookup keyed by "server_name/tool_name" and bare name
+    tool_index: dict[str, dict] = {}
+    for t in available_tools:
+        server = t.get("server_name", "")
+        name = t.get("name", "")
+        if server and name:
+            tool_index[f"{server}/{name}"] = t
+            tool_index[name] = t  # fallback for tools without prefix
 
     pending: list[dict] = []
     dispatch: list[dict] = []
-    for i, (tc, name, args) in enumerate(exec_calls):
-        is_read_only = classifications[i].get("is_read_only", True)
-        if is_read_only:
+    for tc in tool_call_blocks:
+        fn = tc.get("function", {})
+        full_name = fn.get("name", "")
+        args = _parse_args(fn.get("arguments", "{}"))
+
+        # Parse "server_name/tool_name" prefix (Q24)
+        if "/" in full_name:
+            server_name, tool_name = full_name.split("/", 1)
+        else:
+            server_name = ""
+            tool_name = full_name
+
+        tc["server_name"] = server_name
+        tc["function"]["name"] = tool_name  # restore bare name for MCP call
+
+        meta = tool_index.get(full_name, {})
+        is_mutable = meta.get("mutable", False)
+        is_read_only = meta.get("is_read_only", False)
+
+        if is_mutable:
+            tc["mutable"] = True
+            tc["is_read_only"] = None  # determined by classify_tool
+            pending.append(tc)
+        elif is_read_only:
             dispatch.append({
-                "tool_name": name,
+                "tool_name": tool_name,
                 "arguments": args,
-                "is_read_only": True,
+                "server_name": server_name,
+                "approval_status": "APPROVED",
+                "request_id": str(uuid4()),
             })
         else:
+            tc["mutable"] = False
             tc["is_read_only"] = False
             pending.append(tc)
 

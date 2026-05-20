@@ -1,0 +1,5854 @@
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> src/persistence/checkpoint.py:126:38
+    |
+124 |                 return None
+125 |
+126 |             checkpoint: Checkpoint = pickle.loads(row["checkpoint"])
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+127 |             import json
+128 |             metadata: CheckpointMetadata = json.loads(row["metadata"])
+    |
+
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> src/persistence/checkpoint.py:140:48
+    |
+138 |             )
+139 |             pending_writes = [
+140 |                 (wr["task_id"], wr["channel"], pickle.loads(wr["value"]))
+    |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^
+141 |                 for wr in write_rows
+142 |             ]
+    |
+
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> src/persistence/checkpoint.py:200:42
+    |
+198 |             rows = await conn.fetch(query, *params)
+199 |             for row in rows:
+200 |                 checkpoint: Checkpoint = pickle.loads(row["checkpoint"])
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+201 |                 import json
+202 |                 metadata: CheckpointMetadata = json.loads(row["metadata"])
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:101:9
+    |
+ 99 |     async def test_health_returns_ok(self, client):
+100 |         response = await client.get("/api/health")
+101 |         assert response.status_code == 200
+    |         ^^^^^^
+102 |         data = response.json()
+103 |         assert data["status"] == "ok"
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:103:9
+    |
+101 |         assert response.status_code == 200
+102 |         data = response.json()
+103 |         assert data["status"] == "ok"
+    |         ^^^^^^
+104 |         assert data["version"] == "0.1.0"
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:104:9
+    |
+102 |         data = response.json()
+103 |         assert data["status"] == "ok"
+104 |         assert data["version"] == "0.1.0"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:111:9
+    |
+109 |     async def test_list_sessions_empty(self, client):
+110 |         response = await client.get("/api/sessions")
+111 |         assert response.status_code == 200
+    |         ^^^^^^
+112 |         assert isinstance(response.json(), list)
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:112:9
+    |
+110 |         response = await client.get("/api/sessions")
+111 |         assert response.status_code == 200
+112 |         assert isinstance(response.json(), list)
+    |         ^^^^^^
+113 |
+114 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:117:9
+    |
+115 |     async def test_create_session(self, client):
+116 |         response = await client.post("/api/sessions")
+117 |         assert response.status_code == 201
+    |         ^^^^^^
+118 |         assert "id" in response.json()
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:118:9
+    |
+116 |         response = await client.post("/api/sessions")
+117 |         assert response.status_code == 201
+118 |         assert "id" in response.json()
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:129:13
+    |
+127 |         url = f"/api/sessions/{chat_id}/messages"
+128 |         async with client.stream("POST", url, json={"message": "hello"}) as response:
+129 |             assert response.status_code == 200
+    |             ^^^^^^
+130 |             assert "text/event-stream" in response.headers.get("content-type", "")
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:130:13
+    |
+128 |         async with client.stream("POST", url, json={"message": "hello"}) as response:
+129 |             assert response.status_code == 200
+130 |             assert "text/event-stream" in response.headers.get("content-type", "")
+    |             ^^^^^^
+131 |
+132 |             events = []
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:139:13
+    |
+137 |                     break
+138 |
+139 |             assert any("assistant" in e for e in events)
+    |             ^^^^^^
+140 |             assert any("done" in e for e in events)
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:140:13
+    |
+139 |             assert any("assistant" in e for e in events)
+140 |             assert any("done" in e for e in events)
+    |             ^^^^^^
+141 |
+142 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:147:9
+    |
+145 |         chat_id = r.json()["id"]
+146 |         response = await client.post(f"/api/sessions/{chat_id}/messages", json={})
+147 |         assert response.status_code == 422
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:158:9
+    |
+156 |         # 1. 创建会话
+157 |         r = await client.post("/api/sessions")
+158 |         assert r.status_code == 201
+    |         ^^^^^^
+159 |         chat_id = r.json()["id"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:169:13
+    |
+167 |             },
+168 |         ) as response:
+169 |             assert response.status_code == 200
+    |             ^^^^^^
+170 |             async for line in response.aiter_lines():
+171 |                 if line == "event: done":
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:176:9
+    |
+174 |         # 3. 获取详情——应有消息
+175 |         r = await client.get(f"/api/sessions/{chat_id}")
+176 |         assert r.status_code == 200
+    |         ^^^^^^
+177 |         session = r.json()
+178 |         assert len(session["messages"]) >= 2  # user + assistant
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:178:9
+    |
+176 |         assert r.status_code == 200
+177 |         session = r.json()
+178 |         assert len(session["messages"]) >= 2  # user + assistant
+    |         ^^^^^^
+179 |
+180 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:193:13
+    |
+191 |             },
+192 |         ) as response:
+193 |             assert response.status_code == 200
+    |             ^^^^^^
+194 |             assert response.headers.get("X-Session-ID") == chat_id
+195 |             async for line in response.aiter_lines():
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:194:13
+    |
+192 |         ) as response:
+193 |             assert response.status_code == 200
+194 |             assert response.headers.get("X-Session-ID") == chat_id
+    |             ^^^^^^
+195 |             async for line in response.aiter_lines():
+196 |                 if line == "event: done":
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:201:9
+    |
+199 |         # 确认会话已创建且含消息
+200 |         r = await client.get(f"/api/sessions/{chat_id}")
+201 |         assert r.status_code == 200
+    |         ^^^^^^
+202 |         assert len(r.json()["messages"]) >= 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:202:9
+    |
+200 |         r = await client.get(f"/api/sessions/{chat_id}")
+201 |         assert r.status_code == 200
+202 |         assert len(r.json()["messages"]) >= 2
+    |         ^^^^^^
+203 |
+204 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:238:9
+    |
+236 |         session = r.json()
+237 |         user_msgs = [m for m in session["messages"] if m["type"] == "user"]
+238 |         assert len(user_msgs) == 2
+    |         ^^^^^^
+239 |         assert user_msgs[0]["content"] == "first message"
+240 |         assert user_msgs[1]["content"] == "second message"
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:239:9
+    |
+237 |         user_msgs = [m for m in session["messages"] if m["type"] == "user"]
+238 |         assert len(user_msgs) == 2
+239 |         assert user_msgs[0]["content"] == "first message"
+    |         ^^^^^^
+240 |         assert user_msgs[1]["content"] == "second message"
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:240:9
+    |
+238 |         assert len(user_msgs) == 2
+239 |         assert user_msgs[0]["content"] == "first message"
+240 |         assert user_msgs[1]["content"] == "second message"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/integration/test_api.py:250:9
+    |
+248 |             json={"approval_status": "APPROVED"},
+249 |         )
+250 |         assert response.status_code == 404
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_agent_state.py:22:9
+   |
+20 |         }
+21 |         actual = {t.value for t in Transition}
+22 |         assert actual == expected
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_agent_state.py:33:9
+   |
+31 |             transition=None,
+32 |         )
+33 |         assert state["messages"][0]["content"] == "hello"
+   |         ^^^^^^
+34 |         assert state["available_tools"] == []
+35 |         assert state["transition"] is None
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_agent_state.py:34:9
+   |
+32 |         )
+33 |         assert state["messages"][0]["content"] == "hello"
+34 |         assert state["available_tools"] == []
+   |         ^^^^^^
+35 |         assert state["transition"] is None
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_agent_state.py:35:9
+   |
+33 |         assert state["messages"][0]["content"] == "hello"
+34 |         assert state["available_tools"] == []
+35 |         assert state["transition"] is None
+   |         ^^^^^^
+36 |
+37 |     def test_transition_is_writable(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_agent_state.py:44:9
+   |
+42 |             transition=Transition.USER_MESSAGE,
+43 |         )
+44 |         assert state["transition"] == "user_message"
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:108:13
+    |
+106 |                 json={"approval_status": "INVALID_STATUS"},
+107 |             )
+108 |             assert r.status_code == 400
+    |             ^^^^^^
+109 |             assert "invalid approval_status" in r.json()["detail"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:109:13
+    |
+107 |             )
+108 |             assert r.status_code == 400
+109 |             assert "invalid approval_status" in r.json()["detail"]
+    |             ^^^^^^
+110 |
+111 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:124:13
+    |
+122 |                 json={"approval_status": "APPROVED"},
+123 |             )
+124 |             assert r.status_code == 404
+    |             ^^^^^^
+125 |
+126 |     async def _setup_session(self, app_with_bridge, chat_id: str, bridge, req_id: str):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:158:13
+    |
+156 |                 json={"approval_status": "APPROVED", "reason": "looks safe"},
+157 |             )
+158 |             assert r.status_code == 200
+    |             ^^^^^^
+159 |             data = r.json()
+160 |             assert data["approval_status"] == "APPROVED"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:160:13
+    |
+158 |             assert r.status_code == 200
+159 |             data = r.json()
+160 |             assert data["approval_status"] == "APPROVED"
+    |             ^^^^^^
+161 |             assert data["agent_resumed"] is True
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:161:13
+    |
+159 |             data = r.json()
+160 |             assert data["approval_status"] == "APPROVED"
+161 |             assert data["agent_resumed"] is True
+    |             ^^^^^^
+162 |
+163 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:178:13
+    |
+176 |                 json={"approval_status": "REJECTED"},
+177 |             )
+178 |             assert r.status_code == 200
+    |             ^^^^^^
+179 |             data = r.json()
+180 |             assert data["approval_status"] == "REJECTED"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:180:13
+    |
+178 |             assert r.status_code == 200
+179 |             data = r.json()
+180 |             assert data["approval_status"] == "REJECTED"
+    |             ^^^^^^
+181 |
+182 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_approval.py:197:13
+    |
+195 |                 json={"approval_status": "APPROVED"},
+196 |             )
+197 |             assert r.status_code == 200
+    |             ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_checkpoint.py:50:9
+   |
+49 |         cp = PostgresCheckpointer(mock_db)
+50 |         assert cp._db is mock_db
+   |         ^^^^^^
+51 |
+52 |     def test_pool_raises_when_not_connected(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:114:9
+    |
+112 |         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
+113 |         conn.execute.assert_called_once()
+114 |         assert result["configurable"]["thread_id"] == "t1"
+    |         ^^^^^^
+115 |         assert result["configurable"]["checkpoint_id"] == "ckpt-1"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:115:9
+    |
+113 |         conn.execute.assert_called_once()
+114 |         assert result["configurable"]["thread_id"] == "t1"
+115 |         assert result["configurable"]["checkpoint_id"] == "ckpt-1"
+    |         ^^^^^^
+116 |
+117 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:129:9
+    |
+127 |         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
+128 |         sql = conn.execute.call_args[0][0]
+129 |         assert "ON CONFLICT" in sql
+    |         ^^^^^^
+130 |         assert "DO UPDATE" in sql
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:130:9
+    |
+128 |         sql = conn.execute.call_args[0][0]
+129 |         assert "ON CONFLICT" in sql
+130 |         assert "DO UPDATE" in sql
+    |         ^^^^^^
+131 |
+132 |     @pytest.mark.asyncio
+    |
+
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> tests/unit/test_checkpoint.py:146:20
+    |
+144 |         # args: query, thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, pickled, meta_json
+145 |         pickled = args[5]
+146 |         restored = pickle.loads(pickled)
+    |                    ^^^^^^^^^^^^^^^^^^^^^
+147 |         assert restored["channel_values"] == {"messages": ["msg1", "msg2"]}
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:147:9
+    |
+145 |         pickled = args[5]
+146 |         restored = pickle.loads(pickled)
+147 |         assert restored["channel_values"] == {"messages": ["msg1", "msg2"]}
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:163:9
+    |
+161 |         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
+162 |         calls = conn.execute.call_args_list
+163 |         assert len(calls) == 3  # 1 DELETE + 2 INSERTs
+    |         ^^^^^^
+164 |         assert "DELETE FROM graph_writes" in calls[0][0][0]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:164:9
+    |
+162 |         calls = conn.execute.call_args_list
+163 |         assert len(calls) == 3  # 1 DELETE + 2 INSERTs
+164 |         assert "DELETE FROM graph_writes" in calls[0][0][0]
+    |         ^^^^^^
+165 |
+166 |     @pytest.mark.asyncio
+    |
+
+S301 `pickle` and modules that wrap it can be unsafe when used to deserialize untrusted data, possible security issue
+   --> tests/unit/test_checkpoint.py:180:20
+    |
+178 |         insert_args = conn.execute.call_args_list[1][0]
+179 |         pickled_value = insert_args[7]
+180 |         restored = pickle.loads(pickled_value)
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+181 |         assert restored == {"nested": "data"}
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:181:9
+    |
+179 |         pickled_value = insert_args[7]
+180 |         restored = pickle.loads(pickled_value)
+181 |         assert restored == {"nested": "data"}
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:195:9
+    |
+193 |         config = _config(thread_id="t1", checkpoint_id="ckpt-1")
+194 |         result = await cp.aget_tuple(config)
+195 |         assert result is None
+    |         ^^^^^^
+196 |
+197 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:216:9
+    |
+214 |         result = await cp.aget_tuple(config)
+215 |
+216 |         assert result is not None
+    |         ^^^^^^
+217 |         assert result.checkpoint["id"] == "ckpt-1"
+218 |         assert result.metadata["source"] == "test"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:217:9
+    |
+216 |         assert result is not None
+217 |         assert result.checkpoint["id"] == "ckpt-1"
+    |         ^^^^^^
+218 |         assert result.metadata["source"] == "test"
+219 |         assert result.parent_config["configurable"]["checkpoint_id"] == "parent-1"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:218:9
+    |
+216 |         assert result is not None
+217 |         assert result.checkpoint["id"] == "ckpt-1"
+218 |         assert result.metadata["source"] == "test"
+    |         ^^^^^^
+219 |         assert result.parent_config["configurable"]["checkpoint_id"] == "parent-1"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:219:9
+    |
+217 |         assert result.checkpoint["id"] == "ckpt-1"
+218 |         assert result.metadata["source"] == "test"
+219 |         assert result.parent_config["configurable"]["checkpoint_id"] == "parent-1"
+    |         ^^^^^^
+220 |
+221 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:239:9
+    |
+237 |         result = await cp.aget_tuple(config)
+238 |
+239 |         assert result.checkpoint["id"] == "latest-ckpt"
+    |         ^^^^^^
+240 |         # Should use ORDER BY created_at DESC LIMIT 1
+241 |         sql = conn.fetchrow.call_args[0][0]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:242:9
+    |
+240 |         # Should use ORDER BY created_at DESC LIMIT 1
+241 |         sql = conn.fetchrow.call_args[0][0]
+242 |         assert "ORDER BY created_at DESC LIMIT 1" in sql
+    |         ^^^^^^
+243 |
+244 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:265:9
+    |
+263 |         result = await cp.aget_tuple(config)
+264 |
+265 |         assert result.pending_writes is not None
+    |         ^^^^^^
+266 |         assert len(result.pending_writes) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:266:9
+    |
+265 |         assert result.pending_writes is not None
+266 |         assert len(result.pending_writes) == 2
+    |         ^^^^^^
+267 |
+268 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:286:9
+    |
+284 |         result = await cp.aget_tuple(config)
+285 |
+286 |         assert result.pending_writes is None
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:310:9
+    |
+308 |         results = [item async for item in cp.alist(config)]
+309 |
+310 |         assert len(results) == 1
+    |         ^^^^^^
+311 |         assert results[0].checkpoint["id"] == "ckpt-1"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:311:9
+    |
+310 |         assert len(results) == 1
+311 |         assert results[0].checkpoint["id"] == "ckpt-1"
+    |         ^^^^^^
+312 |
+313 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:325:9
+    |
+324 |         sql = conn.fetch.call_args[0][0]
+325 |         assert "LIMIT $3" in sql
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:337:9
+    |
+336 |         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
+337 |         assert conn.execute.call_count == 2
+    |         ^^^^^^
+338 |         delete_calls = [c[0][0] for c in conn.execute.call_args_list]
+339 |         assert any("graph_writes" in sql for sql in delete_calls)
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:339:9
+    |
+337 |         assert conn.execute.call_count == 2
+338 |         delete_calls = [c[0][0] for c in conn.execute.call_args_list]
+339 |         assert any("graph_writes" in sql for sql in delete_calls)
+    |         ^^^^^^
+340 |         assert any("graph_checkpoints" in sql for sql in delete_calls)
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_checkpoint.py:340:9
+    |
+338 |         delete_calls = [c[0][0] for c in conn.execute.call_args_list]
+339 |         assert any("graph_writes" in sql for sql in delete_calls)
+340 |         assert any("graph_checkpoints" in sql for sql in delete_calls)
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:16:9
+   |
+14 |             detail="retry count 3",
+15 |         )
+16 |         assert e.error_code == "TIMEOUT"
+   |         ^^^^^^
+17 |         assert e.message == "connection timed out"
+18 |         assert e.status_code == 504
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:17:9
+   |
+15 |         )
+16 |         assert e.error_code == "TIMEOUT"
+17 |         assert e.message == "connection timed out"
+   |         ^^^^^^
+18 |         assert e.status_code == 504
+19 |         assert e.detail == "retry count 3"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:18:9
+   |
+16 |         assert e.error_code == "TIMEOUT"
+17 |         assert e.message == "connection timed out"
+18 |         assert e.status_code == 504
+   |         ^^^^^^
+19 |         assert e.detail == "retry count 3"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:19:9
+   |
+17 |         assert e.message == "connection timed out"
+18 |         assert e.status_code == 504
+19 |         assert e.detail == "retry count 3"
+   |         ^^^^^^
+20 |
+21 |     def test_default_status_code(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:25:9
+   |
+24 |         e = McpClientApiError(error_code="ERR", message="msg")
+25 |         assert e.status_code == 400
+   |         ^^^^^^
+26 |
+27 |     def test_default_detail_empty(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:31:9
+   |
+30 |         e = McpClientApiError(error_code="ERR", message="msg")
+31 |         assert e.detail == ""
+   |         ^^^^^^
+32 |
+33 |     def test_is_exception(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:37:9
+   |
+36 |         e = McpClientApiError(error_code="ERR", message="msg")
+37 |         assert isinstance(e, Exception)
+   |         ^^^^^^
+38 |
+39 |     def test_str_uses_message(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:43:9
+   |
+42 |         e = McpClientApiError(error_code="ERR", message="something broke")
+43 |         assert str(e) == "something broke"
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:51:9
+   |
+50 |         result = _normalize_classification({"isReadOnly": False, "isRollbackable": True})
+51 |         assert result == {"is_read_only": False, "is_rollbackable": True}
+   |         ^^^^^^
+52 |
+53 |     def test_snake_case_keys_preserved(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:57:9
+   |
+56 |         result = _normalize_classification({"is_read_only": False, "is_rollbackable": True})
+57 |         assert result == {"is_read_only": False, "is_rollbackable": True}
+   |         ^^^^^^
+58 |
+59 |     def test_missing_keys_use_defaults(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:63:9
+   |
+62 |         result = _normalize_classification({})
+63 |         assert result == {"is_read_only": True, "is_rollbackable": False}
+   |         ^^^^^^
+64 |
+65 |     def test_partial_camelcase_keys(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:69:9
+   |
+68 |         result = _normalize_classification({"isReadOnly": False})
+69 |         assert result == {"is_read_only": False, "is_rollbackable": False}
+   |         ^^^^^^
+70 |
+71 |     def test_partial_snake_keys(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:75:9
+   |
+74 |         result = _normalize_classification({"is_rollbackable": True})
+75 |         assert result == {"is_read_only": True, "is_rollbackable": True}
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:83:9
+   |
+82 |         c = ToolClassifier(tool_server_url="http://tool:8001", rag_server_url="http://rag:8002")
+83 |         assert c._tool_server_url == "http://tool:8001"
+   |         ^^^^^^
+84 |         assert c._rag_server_url == "http://rag:8002"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_classifier.py:84:9
+   |
+82 |         c = ToolClassifier(tool_server_url="http://tool:8001", rag_server_url="http://rag:8002")
+83 |         assert c._tool_server_url == "http://tool:8001"
+84 |         assert c._rag_server_url == "http://rag:8002"
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:107:9
+    |
+105 |             result = await c.classify("get_cpu", {})
+106 |
+107 |         assert result["is_read_only"] is True
+    |         ^^^^^^
+108 |         assert result["is_rollbackable"] is False
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:108:9
+    |
+107 |         assert result["is_read_only"] is True
+108 |         assert result["is_rollbackable"] is False
+    |         ^^^^^^
+109 |
+110 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:129:13
+    |
+127 |             await c.classify("search_experience", {}, server="rag-server")
+128 |             # Should have used rag_server_url
+129 |             assert mock_cls.call_args[0][0] == "http://rag:8002"
+    |             ^^^^^^
+130 |
+131 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:150:13
+    |
+148 |         with patch("src.mcp_client.classifier.Client", return_value=mock_client) as mock_cls:
+149 |             await c.classify("some_tool", {}, server="other-server")
+150 |             assert mock_cls.call_args[0][0] == "http://rag:8002"
+    |             ^^^^^^
+151 |
+152 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:171:9
+    |
+169 |             result = await c.classify("get_cpu", {})
+170 |
+171 |         assert result == {"is_read_only": True, "is_rollbackable": False}
+    |         ^^^^^^
+172 |
+173 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_classifier.py:192:9
+    |
+190 |             result = await c.classify("get_cpu", {})
+191 |
+192 |         assert result == {"is_read_only": True, "is_rollbackable": False}
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:22:9
+   |
+21 |         result = load_llm_config(tmp_config_dir / "llm.json")
+22 |         assert result.api_key == "sk-test"
+   |         ^^^^^^
+23 |         assert result.model == "deepseek-v4"
+24 |         assert result.summary_model is None
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:23:9
+   |
+21 |         result = load_llm_config(tmp_config_dir / "llm.json")
+22 |         assert result.api_key == "sk-test"
+23 |         assert result.model == "deepseek-v4"
+   |         ^^^^^^
+24 |         assert result.summary_model is None
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:24:9
+   |
+22 |         assert result.api_key == "sk-test"
+23 |         assert result.model == "deepseek-v4"
+24 |         assert result.summary_model is None
+   |         ^^^^^^
+25 |
+26 |     def test_load_with_summary_model(self, tmp_config_dir):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:33:9
+   |
+32 |         result = load_llm_config(tmp_config_dir / "llm.json")
+33 |         assert result.summary_model == "deepseek-v4-flash"
+   |         ^^^^^^
+34 |
+35 |     def test_file_not_found(self, tmp_config_dir):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:53:9
+   |
+52 |         result = load_rules_config(tmp_config_dir / "rules.json")
+53 |         assert len(result.whitelist) == 1
+   |         ^^^^^^
+54 |         assert result.whitelist[0].tool_name == "delete_temp_files"
+55 |         assert len(result.blacklist) == 1
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:54:9
+   |
+52 |         result = load_rules_config(tmp_config_dir / "rules.json")
+53 |         assert len(result.whitelist) == 1
+54 |         assert result.whitelist[0].tool_name == "delete_temp_files"
+   |         ^^^^^^
+55 |         assert len(result.blacklist) == 1
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:55:9
+   |
+53 |         assert len(result.whitelist) == 1
+54 |         assert result.whitelist[0].tool_name == "delete_temp_files"
+55 |         assert len(result.blacklist) == 1
+   |         ^^^^^^
+56 |
+57 |     def test_load_empty_rules(self, tmp_config_dir):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:63:9
+   |
+62 |         result = load_rules_config(tmp_config_dir / "rules.json")
+63 |         assert result.whitelist == []
+   |         ^^^^^^
+64 |         assert result.blacklist == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:64:9
+   |
+62 |         result = load_rules_config(tmp_config_dir / "rules.json")
+63 |         assert result.whitelist == []
+64 |         assert result.blacklist == []
+   |         ^^^^^^
+65 |
+66 |     def test_file_not_found_returns_default(self, tmp_config_dir):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:70:9
+   |
+69 |         result = load_rules_config(tmp_config_dir / "nonexistent.json")
+70 |         assert result.whitelist == []
+   |         ^^^^^^
+71 |         assert result.blacklist == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:71:9
+   |
+69 |         result = load_rules_config(tmp_config_dir / "nonexistent.json")
+70 |         assert result.whitelist == []
+71 |         assert result.blacklist == []
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:85:9
+   |
+84 |         result = load_servers_config(tmp_config_dir / "servers.json")
+85 |         assert result.tool_server.url == "http://tool-server:8001"
+   |         ^^^^^^
+86 |         assert result.rag_server.url == "http://rag-server:8002"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_config.py:86:9
+   |
+84 |         result = load_servers_config(tmp_config_dir / "servers.json")
+85 |         assert result.tool_server.url == "http://tool-server:8001"
+86 |         assert result.rag_server.url == "http://rag-server:8002"
+   |         ^^^^^^
+87 |
+88 |     def test_file_not_found(self, tmp_config_dir):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_config.py:103:9
+    |
+101 |             tool_request_timeout_seconds=300,
+102 |         )
+103 |         assert cfg.context_window_size == 128000
+    |         ^^^^^^
+104 |         assert cfg.tool_request_timeout_seconds == 300
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_config.py:104:9
+    |
+102 |         )
+103 |         assert cfg.context_window_size == 128000
+104 |         assert cfg.tool_request_timeout_seconds == 300
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_container.py:31:9
+   |
+29 |             graph=None,
+30 |         )
+31 |         assert svc.db is None
+   |         ^^^^^^
+32 |
+33 |     def test_db_can_be_set(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_container.py:51:9
+   |
+49 |             db=db,
+50 |         )
+51 |         assert svc.db is db
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_container.py:68:9
+   |
+67 |         result = session_manager(mock_request)
+68 |         assert result is mock_sm
+   |         ^^^^^^
+69 |
+70 |     def test_audit_logger_dep(self, mock_request):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_container.py:83:9
+   |
+82 |         result = audit_logger(mock_request)
+83 |         assert result is mock_al
+   |         ^^^^^^
+84 |
+85 |     def test_approval_bridge_dep(self, mock_request):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_container.py:98:9
+    |
+ 97 |         result = approval_bridge(mock_request)
+ 98 |         assert result is mock_ab
+    |         ^^^^^^
+ 99 |
+100 |     def test_llm_adapter_dep(self, mock_request):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_container.py:113:9
+    |
+112 |         result = llm_adapter(mock_request)
+113 |         assert result is mock_llm
+    |         ^^^^^^
+114 |
+115 |     def test_rule_engine_dep(self, mock_request):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_container.py:128:9
+    |
+127 |         result = rule_engine(mock_request)
+128 |         assert result is mock_re
+    |         ^^^^^^
+129 |
+130 |     def test_classifier_dep(self, mock_request):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_container.py:143:9
+    |
+142 |         result = classifier(mock_request)
+143 |         assert result is mock_cl
+    |         ^^^^^^
+144 |
+145 |     def test_graph_dep(self, mock_request):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_container.py:158:9
+    |
+157 |         result = graph(mock_request)
+158 |         assert result is mock_g
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:11:9
+   |
+10 |         error_type = classify_error(413, "Request too large")
+11 |         assert error_type == "prompt_too_long"
+   |         ^^^^^^
+12 |
+13 |     def test_classify_max_output_tokens(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:17:9
+   |
+16 |         error_type = classify_error(200, "", stop_reason="max_tokens")
+17 |         assert error_type == "max_output_tokens"
+   |         ^^^^^^
+18 |
+19 |     def test_classify_rate_limit(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:23:9
+   |
+22 |         error_type = classify_error(429, "Rate limit exceeded")
+23 |         assert error_type == "rate_limit"
+   |         ^^^^^^
+24 |
+25 |     def test_classify_auth_failed(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:28:9
+   |
+26 |         from src.services.llm_adapter import classify_error
+27 |
+28 |         assert classify_error(401, "") == "auth_failed"
+   |         ^^^^^^
+29 |         assert classify_error(403, "") == "auth_failed"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:29:9
+   |
+28 |         assert classify_error(401, "") == "auth_failed"
+29 |         assert classify_error(403, "") == "auth_failed"
+   |         ^^^^^^
+30 |
+31 |     def test_classify_model_unavailable(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:35:9
+   |
+34 |         error_type = classify_error(404, "model not found")
+35 |         assert error_type == "model_unavailable"
+   |         ^^^^^^
+36 |
+37 |     def test_classify_server_error(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:40:9
+   |
+38 |         from src.services.llm_adapter import classify_error
+39 |
+40 |         assert classify_error(500, "") == "server_error"
+   |         ^^^^^^
+41 |         assert classify_error(503, "") == "server_error"
+42 |         assert classify_error(529, "") == "server_error"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:41:9
+   |
+40 |         assert classify_error(500, "") == "server_error"
+41 |         assert classify_error(503, "") == "server_error"
+   |         ^^^^^^
+42 |         assert classify_error(529, "") == "server_error"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:42:9
+   |
+40 |         assert classify_error(500, "") == "server_error"
+41 |         assert classify_error(503, "") == "server_error"
+42 |         assert classify_error(529, "") == "server_error"
+   |         ^^^^^^
+43 |
+44 |     def test_classify_timeout(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:48:9
+   |
+47 |         error_type = classify_error(0, "connection timeout")
+48 |         assert error_type == "timeout"
+   |         ^^^^^^
+49 |
+50 |     def test_classify_success_returns_none(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:53:9
+   |
+51 |         from src.services.llm_adapter import classify_error
+52 |
+53 |         assert classify_error(200, "") is None
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:62:9
+   |
+60 |         recovery = ErrorRecovery()
+61 |         strategy = recovery.get_strategy("prompt_too_long")
+62 |         assert strategy["recoverable"] is True
+   |         ^^^^^^
+63 |         assert strategy["layer"] == 1
+64 |         assert strategy["action"] == "compress_context"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:63:9
+   |
+61 |         strategy = recovery.get_strategy("prompt_too_long")
+62 |         assert strategy["recoverable"] is True
+63 |         assert strategy["layer"] == 1
+   |         ^^^^^^
+64 |         assert strategy["action"] == "compress_context"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:64:9
+   |
+62 |         assert strategy["recoverable"] is True
+63 |         assert strategy["layer"] == 1
+64 |         assert strategy["action"] == "compress_context"
+   |         ^^^^^^
+65 |
+66 |     def test_prompt_too_long_aggressive_recovery(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:72:9
+   |
+70 |         recovery.record_attempt("prompt_too_long", "compress_context")
+71 |         strategy = recovery.get_strategy("prompt_too_long")
+72 |         assert strategy["action"] == "aggressive_compress"
+   |         ^^^^^^
+73 |
+74 |     def test_prompt_too_long_exhausted(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:81:9
+   |
+79 |         recovery.record_attempt("prompt_too_long", "aggressive_compress")
+80 |         strategy = recovery.get_strategy("prompt_too_long")
+81 |         assert strategy["recoverable"] is False
+   |         ^^^^^^
+82 |
+83 |     def test_max_output_tokens_escalate(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:88:9
+   |
+86 |         recovery = ErrorRecovery()
+87 |         strategy = recovery.get_strategy("max_output_tokens")
+88 |         assert strategy["recoverable"] is True
+   |         ^^^^^^
+89 |         assert strategy["action"] == "escalate_token_limit"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:89:9
+   |
+87 |         strategy = recovery.get_strategy("max_output_tokens")
+88 |         assert strategy["recoverable"] is True
+89 |         assert strategy["action"] == "escalate_token_limit"
+   |         ^^^^^^
+90 |
+91 |     def test_max_output_tokens_continue_inject(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_error_recovery.py:97:9
+   |
+95 |         recovery.record_attempt("max_output_tokens", "escalate_token_limit")
+96 |         strategy = recovery.get_strategy("max_output_tokens")
+97 |         assert strategy["action"] == "continue_inject"
+   |         ^^^^^^
+98 |
+99 |     def test_max_output_tokens_continue_limit(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:107:9
+    |
+105 |             recovery.record_attempt("max_output_tokens", "continue_inject")
+106 |         strategy = recovery.get_strategy("max_output_tokens")
+107 |         assert strategy["recoverable"] is False
+    |         ^^^^^^
+108 |
+109 |     def test_model_fallback_recovery(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:114:9
+    |
+112 |         recovery = ErrorRecovery()
+113 |         strategy = recovery.get_strategy("model_unavailable")
+114 |         assert strategy["recoverable"] is True
+    |         ^^^^^^
+115 |         assert strategy["action"] == "switch_fallback_model"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:115:9
+    |
+113 |         strategy = recovery.get_strategy("model_unavailable")
+114 |         assert strategy["recoverable"] is True
+115 |         assert strategy["action"] == "switch_fallback_model"
+    |         ^^^^^^
+116 |
+117 |     def test_model_fallback_already_attempted(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:123:9
+    |
+121 |         recovery.record_attempt("server_error", "switch_fallback_model")
+122 |         strategy = recovery.get_strategy("server_error")
+123 |         assert strategy["recoverable"] is False
+    |         ^^^^^^
+124 |
+125 |     def test_non_recoverable_errors(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:131:13
+    |
+129 |         for error_type in ["rate_limit", "auth_failed", "timeout", "unknown"]:
+130 |             strategy = recovery.get_strategy(error_type)
+131 |             assert strategy["recoverable"] is False
+    |             ^^^^^^
+132 |
+133 |     def test_reset_on_new_turn(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_error_recovery.py:140:9
+    |
+138 |         recovery.reset_turn()
+139 |         strategy = recovery.get_strategy("prompt_too_long")
+140 |         assert strategy["layer"] == 1
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:13:9
+   |
+11 |         from src.tools.feature_time_tracker import _normalize_feature_name
+12 |
+13 |         assert _normalize_feature_name("  my-feature  ") == "my-feature"
+   |         ^^^^^^
+14 |
+15 |     def test_empty_raises(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:32:9
+   |
+30 |         from src.tools.feature_time_tracker import _format_duration_ms
+31 |
+32 |         assert _format_duration_ms(123.456) == "123.46"
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:40:9
+   |
+39 |         r = FeatureDurationRecord(feature_name="test", duration_ms=100.0, status="success")
+40 |         assert r.feature_name == "test"
+   |         ^^^^^^
+41 |         assert r.duration_ms == 100.0
+42 |         assert r.status == "success"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:41:9
+   |
+39 |         r = FeatureDurationRecord(feature_name="test", duration_ms=100.0, status="success")
+40 |         assert r.feature_name == "test"
+41 |         assert r.duration_ms == 100.0
+   |         ^^^^^^
+42 |         assert r.status == "success"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:42:9
+   |
+40 |         assert r.feature_name == "test"
+41 |         assert r.duration_ms == 100.0
+42 |         assert r.status == "success"
+   |         ^^^^^^
+43 |
+44 |         with pytest.raises(Exception):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:56:9
+   |
+54 |         time.sleep(0.01)
+55 |         duration = tracker.complete_feature("my-op")
+56 |         assert duration > 0
+   |         ^^^^^^
+57 |
+58 |     def test_start_and_complete_with_different_spacing(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:64:9
+   |
+62 |         tracker.start_feature("  my-op  ")
+63 |         duration = tracker.complete_feature("my-op")
+64 |         assert duration >= 0
+   |         ^^^^^^
+65 |
+66 |     def test_complete_unstarted_raises(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_feature_time_tracker.py:90:9
+   |
+88 |         tracker.complete_feature("op", status="")
+89 |         records = tracker._records
+90 |         assert records[-1].status == "success"
+   |         ^^^^^^
+91 |
+92 |     def test_complete_whitespace_status_defaults_to_success(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:98:9
+    |
+ 96 |         tracker.start_feature("op")
+ 97 |         tracker.complete_feature("op", status="   ")
+ 98 |         assert tracker._records[-1].status == "success"
+    |         ^^^^^^
+ 99 |
+100 |     def test_complete_custom_status_preserved(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:106:9
+    |
+104 |         tracker.start_feature("op")
+105 |         tracker.complete_feature("op", status="failed")
+106 |         assert tracker._records[-1].status == "failed"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:114:9
+    |
+113 |         tracker = FeatureTimeTracker()
+114 |         assert tracker.summarize_feature_durations() == {}
+    |         ^^^^^^
+115 |
+116 |     def test_single_feature_single_run(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:123:9
+    |
+121 |         tracker.complete_feature("op")
+122 |         summary = tracker.summarize_feature_durations()
+123 |         assert "op" in summary
+    |         ^^^^^^
+124 |         assert summary["op"] > 0
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:124:9
+    |
+122 |         summary = tracker.summarize_feature_durations()
+123 |         assert "op" in summary
+124 |         assert summary["op"] > 0
+    |         ^^^^^^
+125 |
+126 |     def test_single_feature_multiple_runs_averages(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:139:9
+    |
+137 |         summary = tracker.summarize_feature_durations()
+138 |         avg = summary["op"]
+139 |         assert avg == pytest.approx((d1 + d2) / 2, rel=0.2)
+    |         ^^^^^^
+140 |
+141 |     def test_multiple_features_separate(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:151:9
+    |
+150 |         summary = tracker.summarize_feature_durations()
+151 |         assert "op-a" in summary
+    |         ^^^^^^
+152 |         assert "op-b" in summary
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:152:9
+    |
+150 |         summary = tracker.summarize_feature_durations()
+151 |         assert "op-a" in summary
+152 |         assert "op-b" in summary
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:176:9
+    |
+174 |             t.join()
+175 |
+176 |         assert len(errors) == 0
+    |         ^^^^^^
+177 |         summary = tracker.summarize_feature_durations()
+178 |         assert len(summary) == 20
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:178:9
+    |
+176 |         assert len(errors) == 0
+177 |         summary = tracker.summarize_feature_durations()
+178 |         assert len(summary) == 20
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:187:9
+    |
+185 |         t1 = get_tracker()
+186 |         t2 = get_tracker()
+187 |         assert t1 is t2
+    |         ^^^^^^
+188 |
+189 |     def test_module_level_convenience_functions(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:198:9
+    |
+196 |         start_feature("mod-op")
+197 |         duration = complete_feature("mod-op")
+198 |         assert duration > 0
+    |         ^^^^^^
+199 |
+200 |         summary = summarize_feature_durations()
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_feature_time_tracker.py:201:9
+    |
+200 |         summary = summarize_feature_durations()
+201 |         assert "mod-op" in summary
+    |         ^^^^^^
+202 |
+203 |     def test_module_level_complete_unstarted_raises(self):
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_llm_adapter.py:57:9
+   |
+55 |         result = await adapter.generate([{"role": "user", "content": "hi"}])
+56 |
+57 |         assert result["content"] == "Hello, world!"
+   |         ^^^^^^
+58 |         assert result["tool_calls"] is None
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_llm_adapter.py:58:9
+   |
+57 |         assert result["content"] == "Hello, world!"
+58 |         assert result["tool_calls"] is None
+   |         ^^^^^^
+59 |
+60 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_llm_adapter.py:78:9
+   |
+76 |         result = await adapter.generate([{"role": "user", "content": "check cpu"}])
+77 |
+78 |         assert result["tool_calls"] is not None
+   |         ^^^^^^
+79 |         assert len(result["tool_calls"]) == 1
+80 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu_info"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_llm_adapter.py:79:9
+   |
+78 |         assert result["tool_calls"] is not None
+79 |         assert len(result["tool_calls"]) == 1
+   |         ^^^^^^
+80 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu_info"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_llm_adapter.py:80:9
+   |
+78 |         assert result["tool_calls"] is not None
+79 |         assert len(result["tool_calls"]) == 1
+80 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu_info"
+   |         ^^^^^^
+81 |
+82 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:100:9
+    |
+ 98 |         call_args = mock_client.post.call_args
+ 99 |         body = call_args.kwargs["json"]
+100 |         assert body["messages"][0]["role"] == "system"
+    |         ^^^^^^
+101 |         assert body["messages"][0]["content"] == "You are helpful."
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:101:9
+    |
+ 99 |         body = call_args.kwargs["json"]
+100 |         assert body["messages"][0]["role"] == "system"
+101 |         assert body["messages"][0]["content"] == "You are helpful."
+    |         ^^^^^^
+102 |
+103 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:122:9
+    |
+120 |         call_args = mock_client.post.call_args
+121 |         body = call_args.kwargs["json"]
+122 |         assert body["tools"] == tools
+    |         ^^^^^^
+123 |
+124 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:166:9
+    |
+164 |             parts.append(event)
+165 |
+166 |         assert any("Hello" in p.get("data", "") for p in parts if p.get("event") == "assistant")
+    |         ^^^^^^
+167 |         assert any(p["event"] == "done" for p in parts)
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:167:9
+    |
+166 |         assert any("Hello" in p.get("data", "") for p in parts if p.get("event") == "assistant")
+167 |         assert any(p["event"] == "done" for p in parts)
+    |         ^^^^^^
+168 |
+169 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:190:9
+    |
+189 |         tool_call_events = [e for e in events if e.get("event") == "tool_call"]
+190 |         assert len(tool_call_events) >= 1
+    |         ^^^^^^
+191 |
+192 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:213:17
+    |
+211 |         ):
+212 |             if event.get("event") == "assistant":
+213 |                 assert "ok" in event["data"]
+    |                 ^^^^^^
+214 |                 found = True
+215 |         assert found
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:215:9
+    |
+213 |                 assert "ok" in event["data"]
+214 |                 found = True
+215 |         assert found
+    |         ^^^^^^
+216 |
+217 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_llm_adapter.py:234:9
+    |
+232 |             events.append(event)
+233 |
+234 |         assert any(e["event"] == "error" for e in events)
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:30:9
+   |
+28 |         state = {"messages": [{"role": "assistant", "content": "CPU normal."}]}
+29 |         events = emit_events(state)
+30 |         assert len(events) == 1
+   |         ^^^^^^
+31 |         assert events[0]["event"] == "assistant"
+32 |         assert "CPU normal." in events[0]["data"]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:31:9
+   |
+29 |         events = emit_events(state)
+30 |         assert len(events) == 1
+31 |         assert events[0]["event"] == "assistant"
+   |         ^^^^^^
+32 |         assert "CPU normal." in events[0]["data"]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:32:9
+   |
+30 |         assert len(events) == 1
+31 |         assert events[0]["event"] == "assistant"
+32 |         assert "CPU normal." in events[0]["data"]
+   |         ^^^^^^
+33 |
+34 |     def test_multiple_assistant_messages_all_emitted(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:42:9
+   |
+40 |         }
+41 |         events = emit_events(state)
+42 |         assert len(events) == 2
+   |         ^^^^^^
+43 |         assert all(e["event"] == "assistant" for e in events)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:43:9
+   |
+41 |         events = emit_events(state)
+42 |         assert len(events) == 2
+43 |         assert all(e["event"] == "assistant" for e in events)
+   |         ^^^^^^
+44 |
+45 |     def test_non_assistant_messages_skipped(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:53:9
+   |
+51 |         }
+52 |         events = emit_events(state)
+53 |         assert events == []
+   |         ^^^^^^
+54 |
+55 |     def test_tool_calls_emitted(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:62:9
+   |
+60 |         }
+61 |         events = emit_events(state)
+62 |         assert len(events) == 1
+   |         ^^^^^^
+63 |         assert events[0]["event"] == "tool_call"
+64 |         data = json.loads(events[0]["data"])
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:63:9
+   |
+61 |         events = emit_events(state)
+62 |         assert len(events) == 1
+63 |         assert events[0]["event"] == "tool_call"
+   |         ^^^^^^
+64 |         data = json.loads(events[0]["data"])
+65 |         assert data["tool_name"] == "get_cpu"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:65:9
+   |
+63 |         assert events[0]["event"] == "tool_call"
+64 |         data = json.loads(events[0]["data"])
+65 |         assert data["tool_name"] == "get_cpu"
+   |         ^^^^^^
+66 |         assert "percent" in data["params"]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:66:9
+   |
+64 |         data = json.loads(events[0]["data"])
+65 |         assert data["tool_name"] == "get_cpu"
+66 |         assert "percent" in data["params"]
+   |         ^^^^^^
+67 |
+68 |     def test_tool_results_emitted(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:75:9
+   |
+73 |         }
+74 |         events = emit_events(state)
+75 |         assert len(events) == 1
+   |         ^^^^^^
+76 |         assert events[0]["event"] == "tool_result"
+77 |         data = json.loads(events[0]["data"])
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:76:9
+   |
+74 |         events = emit_events(state)
+75 |         assert len(events) == 1
+76 |         assert events[0]["event"] == "tool_result"
+   |         ^^^^^^
+77 |         data = json.loads(events[0]["data"])
+78 |         assert data["execution_status"] == "SUCCEEDED"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:78:9
+   |
+76 |         assert events[0]["event"] == "tool_result"
+77 |         data = json.loads(events[0]["data"])
+78 |         assert data["execution_status"] == "SUCCEEDED"
+   |         ^^^^^^
+79 |
+80 |     def test_streaming_tool_results_emit_pair(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:88:9
+   |
+86 |         }
+87 |         events = emit_events(state)
+88 |         assert len(events) == 2
+   |         ^^^^^^
+89 |         assert events[0]["event"] == "tool_call"
+90 |         assert events[1]["event"] == "tool_result"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:89:9
+   |
+87 |         events = emit_events(state)
+88 |         assert len(events) == 2
+89 |         assert events[0]["event"] == "tool_call"
+   |         ^^^^^^
+90 |         assert events[1]["event"] == "tool_result"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_loop.py:90:9
+   |
+88 |         assert len(events) == 2
+89 |         assert events[0]["event"] == "tool_call"
+90 |         assert events[1]["event"] == "tool_result"
+   |         ^^^^^^
+91 |
+92 |     def test_mixed_state_emits_in_order(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:113:9
+    |
+111 |         events = emit_events(state)
+112 |         event_types = [e["event"] for e in events]
+113 |         assert event_types == [
+    |         ^^^^^^
+114 |             "assistant",
+115 |             "tool_call",
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:122:9
+    |
+121 |     def test_empty_state_returns_empty_list(self):
+122 |         assert emit_events({}) == []
+    |         ^^^^^^
+123 |
+124 |     def test_messages_is_missing_returns_empty(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:125:9
+    |
+124 |     def test_messages_is_missing_returns_empty(self):
+125 |         assert emit_events({}) == []
+    |         ^^^^^^
+126 |
+127 |     def test_langgraph_message_objects_handled(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:136:9
+    |
+134 |         state = {"messages": [FakeLangGraphMessage()]}
+135 |         events = emit_events(state)
+136 |         assert len(events) == 1
+    |         ^^^^^^
+137 |         assert events[0]["event"] == "assistant"
+138 |         assert "Hello from AI" in events[0]["data"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:137:9
+    |
+135 |         events = emit_events(state)
+136 |         assert len(events) == 1
+137 |         assert events[0]["event"] == "assistant"
+    |         ^^^^^^
+138 |         assert "Hello from AI" in events[0]["data"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:138:9
+    |
+136 |         assert len(events) == 1
+137 |         assert events[0]["event"] == "assistant"
+138 |         assert "Hello from AI" in events[0]["data"]
+    |         ^^^^^^
+139 |
+140 |     def test_tool_result_without_output(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:154:9
+    |
+152 |         }
+153 |         events = emit_events(state)
+154 |         assert len(events) == 1
+    |         ^^^^^^
+155 |         assert events[0]["event"] == "tool_result"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:155:9
+    |
+153 |         events = emit_events(state)
+154 |         assert len(events) == 1
+155 |         assert events[0]["event"] == "tool_result"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:166:13
+    |
+164 |         clear_transient_fields(state)
+165 |         for k in TRANSIENT_FIELDS:
+166 |             assert state[k] == []
+    |             ^^^^^^
+167 |
+168 |     def test_non_transient_fields_untouched(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:178:9
+    |
+176 |         }
+177 |         clear_transient_fields(state)
+178 |         assert state["messages"] == [{"role": "user", "content": "hi"}]
+    |         ^^^^^^
+179 |         assert state["available_tools"] == ["get_cpu"]
+180 |         assert state["system"] == "you are a helpful assistant"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:179:9
+    |
+177 |         clear_transient_fields(state)
+178 |         assert state["messages"] == [{"role": "user", "content": "hi"}]
+179 |         assert state["available_tools"] == ["get_cpu"]
+    |         ^^^^^^
+180 |         assert state["system"] == "you are a helpful assistant"
+181 |         assert state["transition"] == Transition.DONE
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:180:9
+    |
+178 |         assert state["messages"] == [{"role": "user", "content": "hi"}]
+179 |         assert state["available_tools"] == ["get_cpu"]
+180 |         assert state["system"] == "you are a helpful assistant"
+    |         ^^^^^^
+181 |         assert state["transition"] == Transition.DONE
+182 |         assert state["llm_error"] == {"code": 500}
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:181:9
+    |
+179 |         assert state["available_tools"] == ["get_cpu"]
+180 |         assert state["system"] == "you are a helpful assistant"
+181 |         assert state["transition"] == Transition.DONE
+    |         ^^^^^^
+182 |         assert state["llm_error"] == {"code": 500}
+183 |         assert state["tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:182:9
+    |
+180 |         assert state["system"] == "you are a helpful assistant"
+181 |         assert state["transition"] == Transition.DONE
+182 |         assert state["llm_error"] == {"code": 500}
+    |         ^^^^^^
+183 |         assert state["tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:183:9
+    |
+181 |         assert state["transition"] == Transition.DONE
+182 |         assert state["llm_error"] == {"code": 500}
+183 |         assert state["tool_calls"] == []
+    |         ^^^^^^
+184 |
+185 |     def test_missing_transient_fields_set_to_empty(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:190:13
+    |
+188 |         clear_transient_fields(state)
+189 |         for k in TRANSIENT_FIELDS:
+190 |             assert state[k] == []
+    |             ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:198:9
+    |
+196 | class TestHasInterrupt:
+197 |     def test_with_interrupt_returns_true(self):
+198 |         assert has_interrupt({"__interrupt__": [{"event": "approval"}]}) is True
+    |         ^^^^^^
+199 |
+200 |     def test_without_interrupt_returns_false(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:201:9
+    |
+200 |     def test_without_interrupt_returns_false(self):
+201 |         assert has_interrupt({}) is False
+    |         ^^^^^^
+202 |
+203 |     def test_empty_interrupt_list_returns_false(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:204:9
+    |
+203 |     def test_empty_interrupt_list_returns_false(self):
+204 |         assert has_interrupt({"__interrupt__": []}) is False
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:212:9
+    |
+210 | class TestGetTransition:
+211 |     def test_returns_transition_when_present(self):
+212 |         assert get_transition({"transition": Transition.DONE}) == Transition.DONE
+    |         ^^^^^^
+213 |
+214 |     def test_returns_none_when_absent(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:215:9
+    |
+214 |     def test_returns_none_when_absent(self):
+215 |         assert get_transition({}) is None
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:254:9
+    |
+252 |             events.append(e)
+253 |
+254 |         assert len(events) == 1
+    |         ^^^^^^
+255 |         assert events[0]["event"] == "tool_approval_required"
+256 |         data = json.loads(events[0]["data"])
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:255:9
+    |
+254 |         assert len(events) == 1
+255 |         assert events[0]["event"] == "tool_approval_required"
+    |         ^^^^^^
+256 |         data = json.loads(events[0]["data"])
+257 |         assert data["request_id"] == "req-1"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:257:9
+    |
+255 |         assert events[0]["event"] == "tool_approval_required"
+256 |         data = json.loads(events[0]["data"])
+257 |         assert data["request_id"] == "req-1"
+    |         ^^^^^^
+258 |
+259 |     async def test_bridge_gets_request_session_mapping(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:271:9
+    |
+269 |             pass
+270 |
+271 |         assert bridge.created == [("req-abc", "session-123")]
+    |         ^^^^^^
+272 |
+273 |     async def test_no_bridge_no_crash(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:281:9
+    |
+279 |         ):
+280 |             events.append(e)
+281 |         assert events[0]["event"] == "tool_approval_required"
+    |         ^^^^^^
+282 |
+283 |     async def test_logs_approval_pending_transition(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:296:9
+    |
+294 |             e.transition for e in audit.events if e.event == "LOOP_TRANSITION"
+295 |         ]
+296 |         assert "approval_pending" in transitions
+    |         ^^^^^^
+297 |
+298 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:305:13
+    |
+303 |             state, bridge=None, audit_logger=None, chat_id="s1"
+304 |         ):
+305 |             assert e["event"] == "tool_approval_required"
+    |             ^^^^^^
+306 |
+307 |     async def test_interrupt_with_value_attribute(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:318:13
+    |
+316 |         ):
+317 |             data = json.loads(e["data"])
+318 |             assert data["request_id"] == "req-via-attr"
+    |             ^^^^^^
+319 |
+320 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:327:13
+    |
+325 |             state, bridge=None, audit_logger=None, chat_id="s1"
+326 |         ):
+327 |             assert e["event"] == "tool_approval_required"
+    |             ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:390:9
+    |
+388 |             audit_logger=audit,
+389 |         )
+390 |         assert result is True
+    |         ^^^^^^
+391 |         assert ctx_mgr.compressed_count == 1
+392 |         assert state["messages"] == [{"role": "system", "content": "[compressed]"}]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:391:9
+    |
+389 |         )
+390 |         assert result is True
+391 |         assert ctx_mgr.compressed_count == 1
+    |         ^^^^^^
+392 |         assert state["messages"] == [{"role": "system", "content": "[compressed]"}]
+393 |         assert state["llm_error"] is None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:392:9
+    |
+390 |         assert result is True
+391 |         assert ctx_mgr.compressed_count == 1
+392 |         assert state["messages"] == [{"role": "system", "content": "[compressed]"}]
+    |         ^^^^^^
+393 |         assert state["llm_error"] is None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:393:9
+    |
+391 |         assert ctx_mgr.compressed_count == 1
+392 |         assert state["messages"] == [{"role": "system", "content": "[compressed]"}]
+393 |         assert state["llm_error"] is None
+    |         ^^^^^^
+394 |
+395 |     async def test_prompt_too_long_second_attempt_aggressive_compress(
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:411:9
+    |
+409 |             audit_logger=audit,
+410 |         )
+411 |         assert result is True
+    |         ^^^^^^
+412 |         assert ctx_mgr.compressed_count == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:412:9
+    |
+410 |         )
+411 |         assert result is True
+412 |         assert ctx_mgr.compressed_count == 1
+    |         ^^^^^^
+413 |
+414 |     async def test_prompt_too_long_exhausted_returns_false(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:429:9
+    |
+427 |             audit_logger=audit,
+428 |         )
+429 |         assert result is False
+    |         ^^^^^^
+430 |         assert state["llm_error"] is not None  # unchanged
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:430:9
+    |
+428 |         )
+429 |         assert result is False
+430 |         assert state["llm_error"] is not None  # unchanged
+    |         ^^^^^^
+431 |
+432 |     async def test_max_output_tokens_escalates(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:445:9
+    |
+443 |             audit_logger=audit,
+444 |         )
+445 |         assert result is True
+    |         ^^^^^^
+446 |         assert llm.escalated is True
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:446:9
+    |
+444 |         )
+445 |         assert result is True
+446 |         assert llm.escalated is True
+    |         ^^^^^^
+447 |
+448 |     async def test_model_unavailable_switches_fallback(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:461:9
+    |
+459 |             audit_logger=audit,
+460 |         )
+461 |         assert result is True
+    |         ^^^^^^
+462 |         assert llm.fallback_switched is True
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:462:9
+    |
+460 |         )
+461 |         assert result is True
+462 |         assert llm.fallback_switched is True
+    |         ^^^^^^
+463 |
+464 |     async def test_rate_limit_non_recoverable(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:477:9
+    |
+475 |             audit_logger=audit,
+476 |         )
+477 |         assert result is False
+    |         ^^^^^^
+478 |
+479 |     async def test_auth_failed_non_recoverable(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:492:9
+    |
+490 |             audit_logger=audit,
+491 |         )
+492 |         assert result is False
+    |         ^^^^^^
+493 |
+494 |     async def test_unknown_error_returns_false(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:507:9
+    |
+505 |             audit_logger=audit,
+506 |         )
+507 |         assert result is False
+    |         ^^^^^^
+508 |
+509 |     async def test_no_error_recovery_skips(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:529:9
+    |
+527 |             audit_logger=audit,
+528 |         )
+529 |         assert result is True
+    |         ^^^^^^
+530 |         assert llm.fallback_switched is True
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:530:9
+    |
+528 |         )
+529 |         assert result is True
+530 |         assert llm.fallback_switched is True
+    |         ^^^^^^
+531 |
+532 |     async def test_logs_context_compacted_transition(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:548:9
+    |
+546 |             e.transition for e in audit.events if e.event == "LOOP_TRANSITION"
+547 |         ]
+548 |         assert "context_compacted" in transitions
+    |         ^^^^^^
+549 |
+550 |     async def test_max_output_tokens_continue_inject(self, llm, ctx_mgr, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:565:9
+    |
+563 |             audit_logger=audit,
+564 |         )
+565 |         assert result is True
+    |         ^^^^^^
+566 |         last_msg = state["messages"][-1]
+567 |         assert last_msg["role"] == "user"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:567:9
+    |
+565 |         assert result is True
+566 |         last_msg = state["messages"][-1]
+567 |         assert last_msg["role"] == "user"
+    |         ^^^^^^
+568 |         assert "continue" in last_msg["content"].lower()
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:568:9
+    |
+566 |         last_msg = state["messages"][-1]
+567 |         assert last_msg["role"] == "user"
+568 |         assert "continue" in last_msg["content"].lower()
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:578:9
+    |
+576 |         audit = MockAuditLogger()
+577 |         await log_transition(audit, Transition.USER_MESSAGE)
+578 |         assert len(audit.events) == 1
+    |         ^^^^^^
+579 |         assert audit.events[0].event == "LOOP_TRANSITION"
+580 |         assert audit.events[0].transition == "user_message"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:579:9
+    |
+577 |         await log_transition(audit, Transition.USER_MESSAGE)
+578 |         assert len(audit.events) == 1
+579 |         assert audit.events[0].event == "LOOP_TRANSITION"
+    |         ^^^^^^
+580 |         assert audit.events[0].transition == "user_message"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_loop.py:580:9
+    |
+578 |         assert len(audit.events) == 1
+579 |         assert audit.events[0].event == "LOOP_TRANSITION"
+580 |         assert audit.events[0].transition == "user_message"
+    |         ^^^^^^
+581 |
+582 |     async def test_none_audit_logger_no_crash(self):
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:13:9
+   |
+12 |         executor = ToolExecutor(tool_server_url="http://tool:8001", rag_server_url="http://rag:8002")
+13 |         assert executor.tool_server_url == "http://tool:8001"
+   |         ^^^^^^
+14 |         assert executor.rag_server_url == "http://rag:8002"
+15 |         assert executor.max_retries == 2
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:14:9
+   |
+12 |         executor = ToolExecutor(tool_server_url="http://tool:8001", rag_server_url="http://rag:8002")
+13 |         assert executor.tool_server_url == "http://tool:8001"
+14 |         assert executor.rag_server_url == "http://rag:8002"
+   |         ^^^^^^
+15 |         assert executor.max_retries == 2
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:15:9
+   |
+13 |         assert executor.tool_server_url == "http://tool:8001"
+14 |         assert executor.rag_server_url == "http://rag:8002"
+15 |         assert executor.max_retries == 2
+   |         ^^^^^^
+16 |
+17 |     def test_executor_custom_retries(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:25:9
+   |
+23 |             max_retries=0,
+24 |         )
+25 |         assert executor.max_retries == 0
+   |         ^^^^^^
+26 |
+27 |     def test_is_connect_timeout(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:31:9
+   |
+30 |         executor = ToolExecutor(tool_server_url="", rag_server_url="")
+31 |         assert executor._is_connect_error(ConnectionRefusedError("test"))
+   |         ^^^^^^
+32 |         assert not executor._is_connect_error(ValueError("test"))
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:32:9
+   |
+30 |         executor = ToolExecutor(tool_server_url="", rag_server_url="")
+31 |         assert executor._is_connect_error(ConnectionRefusedError("test"))
+32 |         assert not executor._is_connect_error(ValueError("test"))
+   |         ^^^^^^
+33 |
+34 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:59:13
+   |
+57 |             tools = await executor.list_tools()
+58 |
+59 |             assert len(tools) == 3
+   |             ^^^^^^
+60 |
+61 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_mcp_client.py:78:13
+   |
+77 |             mock_client.call_tool.assert_called_once_with("get_cpu_info", {})
+78 |             assert result["execution_status"] == "SUCCEEDED"
+   |             ^^^^^^
+79 |
+80 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:108:13
+    |
+106 |             result = await executor.execute("get_cpu_info", {})
+107 |
+108 |             assert call_count == 3
+    |             ^^^^^^
+109 |             assert result["execution_status"] == "SUCCEEDED"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:109:13
+    |
+108 |             assert call_count == 3
+109 |             assert result["execution_status"] == "SUCCEEDED"
+    |             ^^^^^^
+110 |
+111 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:128:13
+    |
+126 |             result = await executor.execute("get_cpu_info", {})
+127 |
+128 |             assert result["execution_status"] == "FAILED"
+    |             ^^^^^^
+129 |
+130 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:150:13
+    |
+148 |             result = await executor.execute("get_cpu_info", {})
+149 |
+150 |             assert result["execution_status"] == "FAILED"
+    |             ^^^^^^
+151 |
+152 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:171:13
+    |
+169 |             ])
+170 |
+171 |             assert len(results) == 2
+    |             ^^^^^^
+172 |             assert all(r["execution_status"] == "SUCCEEDED" for r in results)
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:172:13
+    |
+171 |             assert len(results) == 2
+172 |             assert all(r["execution_status"] == "SUCCEEDED" for r in results)
+    |             ^^^^^^
+173 |
+174 |     # SC-008: 二次校验拦截未审批请求
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:182:9
+    |
+180 |         result = await executor.execute("restart_service", {}, is_read_only=False, approval_status="PENDING")
+181 |
+182 |         assert result["execution_status"] == "SECURITY_VIOLATION"
+    |         ^^^^^^
+183 |         assert result["error"]["code"] == "SECURITY_VIOLATION"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:183:9
+    |
+182 |         assert result["execution_status"] == "SECURITY_VIOLATION"
+183 |         assert result["error"]["code"] == "SECURITY_VIOLATION"
+    |         ^^^^^^
+184 |
+185 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_mcp_client.py:201:13
+    |
+199 |             result = await executor.execute("restart_service", {}, is_read_only=False, approval_status="APPROVED")
+200 |
+201 |             assert result["execution_status"] == "SUCCEEDED"
+    |             ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:21:9
+   |
+19 |             content="hello",
+20 |         )
+21 |         assert msg.type == MessageType.USER
+   |         ^^^^^^
+22 |         assert msg.is_meta is False
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:22:9
+   |
+20 |         )
+21 |         assert msg.type == MessageType.USER
+22 |         assert msg.is_meta is False
+   |         ^^^^^^
+23 |
+24 |     def test_message_is_meta_default(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:35:9
+   |
+33 |             is_meta=True,
+34 |         )
+35 |         assert msg.is_meta is True
+   |         ^^^^^^
+36 |
+37 |     def test_message_type_enum(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:40:9
+   |
+38 |         from src.models.message import MessageType
+39 |
+40 |         assert MessageType.USER == "user"
+   |         ^^^^^^
+41 |         assert MessageType.ASSISTANT == "assistant"
+42 |         assert MessageType.TOOL_CALL == "tool_call"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:41:9
+   |
+40 |         assert MessageType.USER == "user"
+41 |         assert MessageType.ASSISTANT == "assistant"
+   |         ^^^^^^
+42 |         assert MessageType.TOOL_CALL == "tool_call"
+43 |         assert MessageType.TOOL_RESULT == "tool_result"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:42:9
+   |
+40 |         assert MessageType.USER == "user"
+41 |         assert MessageType.ASSISTANT == "assistant"
+42 |         assert MessageType.TOOL_CALL == "tool_call"
+   |         ^^^^^^
+43 |         assert MessageType.TOOL_RESULT == "tool_result"
+44 |         assert MessageType.SYSTEM == "system"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:43:9
+   |
+41 |         assert MessageType.ASSISTANT == "assistant"
+42 |         assert MessageType.TOOL_CALL == "tool_call"
+43 |         assert MessageType.TOOL_RESULT == "tool_result"
+   |         ^^^^^^
+44 |         assert MessageType.SYSTEM == "system"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:44:9
+   |
+42 |         assert MessageType.TOOL_CALL == "tool_call"
+43 |         assert MessageType.TOOL_RESULT == "tool_result"
+44 |         assert MessageType.SYSTEM == "system"
+   |         ^^^^^^
+45 |
+46 |     def test_message_type_invalid(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:71:9
+   |
+69 |         )
+70 |         data = msg.model_dump(mode="json")
+71 |         assert data["message_id"] == str(msg_id)
+   |         ^^^^^^
+72 |         assert data["chat_id"] == str(chat_id)
+73 |         assert data["type"] == "user"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:72:9
+   |
+70 |         data = msg.model_dump(mode="json")
+71 |         assert data["message_id"] == str(msg_id)
+72 |         assert data["chat_id"] == str(chat_id)
+   |         ^^^^^^
+73 |         assert data["type"] == "user"
+74 |         assert data["is_meta"] is False
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:73:9
+   |
+71 |         assert data["message_id"] == str(msg_id)
+72 |         assert data["chat_id"] == str(chat_id)
+73 |         assert data["type"] == "user"
+   |         ^^^^^^
+74 |         assert data["is_meta"] is False
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:74:9
+   |
+72 |         assert data["chat_id"] == str(chat_id)
+73 |         assert data["type"] == "user"
+74 |         assert data["is_meta"] is False
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:89:9
+   |
+87 |             params_schema={"type": "object", "properties": {}},
+88 |         )
+89 |         assert tool.name == "get_cpu_info"
+   |         ^^^^^^
+90 |         assert tool.server == "tool-server"
+91 |         assert tool.is_read_only is True
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:90:9
+   |
+88 |         )
+89 |         assert tool.name == "get_cpu_info"
+90 |         assert tool.server == "tool-server"
+   |         ^^^^^^
+91 |         assert tool.is_read_only is True
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_models.py:91:9
+   |
+89 |         assert tool.name == "get_cpu_info"
+90 |         assert tool.server == "tool-server"
+91 |         assert tool.is_read_only is True
+   |         ^^^^^^
+92 |
+93 |     def test_tool_server_enum(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:104:9
+    |
+102 |             params_schema={},
+103 |         )
+104 |         assert tool.server == "rag-server"
+    |         ^^^^^^
+    |
+
+S108 Probable insecure usage of temporary file or directory: "/tmp"
+   --> tests/unit/test_models.py:120:29
+    |
+118 |             chat_id=uuid.uuid4(),
+119 |             message_id=uuid.uuid4(),
+120 |             params={"path": "/tmp"},
+    |                             ^^^^^^
+121 |             approval_status=ApprovalStatus.PENDING,
+122 |             execution_status=ExecutionStatus.PENDING_APPROVAL,
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:125:9
+    |
+123 |             timestamp=datetime.now(timezone.utc).isoformat(),
+124 |         )
+125 |         assert call.name == "delete_temp_files"
+    |         ^^^^^^
+126 |         assert call.is_read_only is False
+127 |         assert call.approval_status == ApprovalStatus.PENDING
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:126:9
+    |
+124 |         )
+125 |         assert call.name == "delete_temp_files"
+126 |         assert call.is_read_only is False
+    |         ^^^^^^
+127 |         assert call.approval_status == ApprovalStatus.PENDING
+128 |         assert call.request_id is None  # optional
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:127:9
+    |
+125 |         assert call.name == "delete_temp_files"
+126 |         assert call.is_read_only is False
+127 |         assert call.approval_status == ApprovalStatus.PENDING
+    |         ^^^^^^
+128 |         assert call.request_id is None  # optional
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:128:9
+    |
+126 |         assert call.is_read_only is False
+127 |         assert call.approval_status == ApprovalStatus.PENDING
+128 |         assert call.request_id is None  # optional
+    |         ^^^^^^
+129 |
+130 |     def test_tool_call_with_request_id(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:149:9
+    |
+147 |             timestamp=datetime.now(timezone.utc).isoformat(),
+148 |         )
+149 |         assert call.request_id == req_id
+    |         ^^^^^^
+150 |
+151 |     def test_tool_call_with_llm_trace_id(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:170:9
+    |
+168 |             timestamp=datetime.now(timezone.utc).isoformat(),
+169 |         )
+170 |         assert call.llm_trace_id == trace_id
+    |         ^^^^^^
+    |
+
+S108 Probable insecure usage of temporary file or directory: "/tmp"
+   --> tests/unit/test_models.py:188:29
+    |
+186 |             message_id=uuid.uuid4(),
+187 |             request_id=req_id,
+188 |             params={"path": "/tmp"},
+    |                             ^^^^^^
+189 |             approval_status=ApprovalStatus.PENDING,
+190 |             created_at=datetime.now(timezone.utc).isoformat(),
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:192:9
+    |
+190 |             created_at=datetime.now(timezone.utc).isoformat(),
+191 |         )
+192 |         assert tr.request_id == req_id
+    |         ^^^^^^
+193 |         assert tr.approval_status == ApprovalStatus.PENDING
+194 |         assert tr.approved_at is None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:193:9
+    |
+191 |         )
+192 |         assert tr.request_id == req_id
+193 |         assert tr.approval_status == ApprovalStatus.PENDING
+    |         ^^^^^^
+194 |         assert tr.approved_at is None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:194:9
+    |
+192 |         assert tr.request_id == req_id
+193 |         assert tr.approval_status == ApprovalStatus.PENDING
+194 |         assert tr.approved_at is None
+    |         ^^^^^^
+195 |
+196 |     def test_tool_request_with_rejected_reason(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:215:9
+    |
+213 |             rejected_reason="不需要重启",
+214 |         )
+215 |         assert tr.rejected_reason == "不需要重启"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:223:9
+    |
+222 |         approval = ToolApproval(approval_status="APPROVED")
+223 |         assert approval.approval_status == "APPROVED"
+    |         ^^^^^^
+224 |
+225 |     def test_approval_rejected_with_reason(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:229:9
+    |
+228 |         approval = ToolApproval(approval_status="REJECTED", reason="too risky")
+229 |         assert approval.reason == "too risky"
+    |         ^^^^^^
+230 |
+231 |     def test_approval_invalid_status(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:246:9
+    |
+244 |             output={"cpu_percent": 85},
+245 |         )
+246 |         assert result.execution_status == "SUCCEEDED"
+    |         ^^^^^^
+247 |         assert result.output == {"cpu_percent": 85}
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:247:9
+    |
+245 |         )
+246 |         assert result.execution_status == "SUCCEEDED"
+247 |         assert result.output == {"cpu_percent": 85}
+    |         ^^^^^^
+248 |
+249 |     def test_result_failed_with_error(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:256:9
+    |
+254 |             error={"code": "TIMEOUT", "message": "connection timeout"},
+255 |         )
+256 |         assert result.execution_status == "FAILED"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:278:9
+    |
+276 |             timestamp=datetime.now(timezone.utc).isoformat(),
+277 |         )
+278 |         assert session.id == chat_id
+    |         ^^^^^^
+279 |         assert len(session.messages) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:279:9
+    |
+277 |         )
+278 |         assert session.id == chat_id
+279 |         assert len(session.messages) == 1
+    |         ^^^^^^
+280 |
+281 |     def test_session_with_title_and_transition(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:295:9
+    |
+293 |             timestamp=datetime.now(timezone.utc).isoformat(),
+294 |         )
+295 |         assert session.title == "CPU 诊断会话"
+    |         ^^^^^^
+296 |         assert session.turn_count == 3
+297 |         assert session.max_turns == 30
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:296:9
+    |
+294 |         )
+295 |         assert session.title == "CPU 诊断会话"
+296 |         assert session.turn_count == 3
+    |         ^^^^^^
+297 |         assert session.max_turns == 30
+298 |         assert session.transition == "tool_results"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:297:9
+    |
+295 |         assert session.title == "CPU 诊断会话"
+296 |         assert session.turn_count == 3
+297 |         assert session.max_turns == 30
+    |         ^^^^^^
+298 |         assert session.transition == "tool_results"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:298:9
+    |
+296 |         assert session.turn_count == 3
+297 |         assert session.max_turns == 30
+298 |         assert session.transition == "tool_results"
+    |         ^^^^^^
+299 |
+300 |     def test_session_defaults(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:310:9
+    |
+308 |             timestamp=datetime.now(timezone.utc).isoformat(),
+309 |         )
+310 |         assert session.title is None
+    |         ^^^^^^
+311 |         assert session.turn_count == 0
+312 |         assert session.max_turns == 30
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:311:9
+    |
+309 |         )
+310 |         assert session.title is None
+311 |         assert session.turn_count == 0
+    |         ^^^^^^
+312 |         assert session.max_turns == 30
+313 |         assert session.transition == ""
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:312:9
+    |
+310 |         assert session.title is None
+311 |         assert session.turn_count == 0
+312 |         assert session.max_turns == 30
+    |         ^^^^^^
+313 |         assert session.transition == ""
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:313:9
+    |
+311 |         assert session.turn_count == 0
+312 |         assert session.max_turns == 30
+313 |         assert session.transition == ""
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:326:9
+    |
+324 |             event="AUTO_APPROVED",
+325 |         )
+326 |         assert event.level == AuditLevel.INFO
+    |         ^^^^^^
+327 |         assert event.chat_id is None  # optional
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:327:9
+    |
+325 |         )
+326 |         assert event.level == AuditLevel.INFO
+327 |         assert event.chat_id is None  # optional
+    |         ^^^^^^
+328 |
+329 |     def test_audit_level_enum(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:332:9
+    |
+330 |         from src.models.audit import AuditLevel
+331 |
+332 |         assert AuditLevel.INFO == "INFO"
+    |         ^^^^^^
+333 |         assert AuditLevel.WARN == "WARN"
+334 |         assert AuditLevel.ERROR == "ERROR"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:333:9
+    |
+332 |         assert AuditLevel.INFO == "INFO"
+333 |         assert AuditLevel.WARN == "WARN"
+    |         ^^^^^^
+334 |         assert AuditLevel.ERROR == "ERROR"
+335 |         assert AuditLevel.CRITICAL == "CRITICAL"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:334:9
+    |
+332 |         assert AuditLevel.INFO == "INFO"
+333 |         assert AuditLevel.WARN == "WARN"
+334 |         assert AuditLevel.ERROR == "ERROR"
+    |         ^^^^^^
+335 |         assert AuditLevel.CRITICAL == "CRITICAL"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:335:9
+    |
+333 |         assert AuditLevel.WARN == "WARN"
+334 |         assert AuditLevel.ERROR == "ERROR"
+335 |         assert AuditLevel.CRITICAL == "CRITICAL"
+    |         ^^^^^^
+336 |
+337 |     def test_audit_event_with_transition(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:347:9
+    |
+345 |             transition="tool_results",
+346 |         )
+347 |         assert event.transition == "tool_results"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:356:9
+    |
+354 |         err = ApiErrorResponse(code="NOT_FOUND", message="session not found")
+355 |         data = err.model_dump()
+356 |         assert data["code"] == "NOT_FOUND"
+    |         ^^^^^^
+357 |         assert data["message"] == "session not found"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:357:9
+    |
+355 |         data = err.model_dump()
+356 |         assert data["code"] == "NOT_FOUND"
+357 |         assert data["message"] == "session not found"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:365:9
+    |
+364 |         err = WebServerError(status_code=500, code="INTERNAL", message="boom")
+365 |         assert err.status_code == 500
+    |         ^^^^^^
+366 |         assert err.code == "INTERNAL"
+367 |         assert str(err) == "[INTERNAL] boom"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:366:9
+    |
+364 |         err = WebServerError(status_code=500, code="INTERNAL", message="boom")
+365 |         assert err.status_code == 500
+366 |         assert err.code == "INTERNAL"
+    |         ^^^^^^
+367 |         assert str(err) == "[INTERNAL] boom"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_models.py:367:9
+    |
+365 |         assert err.status_code == 500
+366 |         assert err.code == "INTERNAL"
+367 |         assert str(err) == "[INTERNAL] boom"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:35:9
+   |
+33 |         result = await think_node(_state(), llm=llm)
+34 |
+35 |         assert result["transition"] == Transition.DONE
+   |         ^^^^^^
+36 |         assert len(result["messages"]) == 1
+37 |         assert result["messages"][0]["role"] == "assistant"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:36:9
+   |
+35 |         assert result["transition"] == Transition.DONE
+36 |         assert len(result["messages"]) == 1
+   |         ^^^^^^
+37 |         assert result["messages"][0]["role"] == "assistant"
+38 |         assert "CPU" in result["messages"][0]["content"]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:37:9
+   |
+35 |         assert result["transition"] == Transition.DONE
+36 |         assert len(result["messages"]) == 1
+37 |         assert result["messages"][0]["role"] == "assistant"
+   |         ^^^^^^
+38 |         assert "CPU" in result["messages"][0]["content"]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:38:9
+   |
+36 |         assert len(result["messages"]) == 1
+37 |         assert result["messages"][0]["role"] == "assistant"
+38 |         assert "CPU" in result["messages"][0]["content"]
+   |         ^^^^^^
+39 |
+40 |     async def test_text_accumulates_multiple_deltas(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:49:9
+   |
+47 |         result = await think_node(_state(), llm=llm)
+48 |
+49 |         assert result["messages"][0]["content"] == "Hello World"
+   |         ^^^^^^
+50 |         assert result["transition"] == Transition.DONE
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:50:9
+   |
+49 |         assert result["messages"][0]["content"] == "Hello World"
+50 |         assert result["transition"] == Transition.DONE
+   |         ^^^^^^
+51 |
+52 |     async def test_tool_call_only_no_text(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:62:9
+   |
+60 |         result = await think_node(_state(), llm=llm)
+61 |
+62 |         assert result["transition"] is None  # 不设 transition——由后续节点决定
+   |         ^^^^^^
+63 |         assert len(result["tool_calls"]) == 1
+64 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:63:9
+   |
+62 |         assert result["transition"] is None  # 不设 transition——由后续节点决定
+63 |         assert len(result["tool_calls"]) == 1
+   |         ^^^^^^
+64 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:64:9
+   |
+62 |         assert result["transition"] is None  # 不设 transition——由后续节点决定
+63 |         assert len(result["tool_calls"]) == 1
+64 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+   |         ^^^^^^
+65 |
+66 |     async def test_text_and_tool_calls_combined(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:77:9
+   |
+75 |         result = await think_node(_state(), llm=llm)
+76 |
+77 |         assert result["messages"][0]["role"] == "assistant"
+   |         ^^^^^^
+78 |         assert result["messages"][0]["content"] == "Let me check."
+79 |         assert len(result["tool_calls"]) == 1
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:78:9
+   |
+77 |         assert result["messages"][0]["role"] == "assistant"
+78 |         assert result["messages"][0]["content"] == "Let me check."
+   |         ^^^^^^
+79 |         assert len(result["tool_calls"]) == 1
+80 |         assert result["transition"] is None  # 有 tool_call，不应设 DONE
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:79:9
+   |
+77 |         assert result["messages"][0]["role"] == "assistant"
+78 |         assert result["messages"][0]["content"] == "Let me check."
+79 |         assert len(result["tool_calls"]) == 1
+   |         ^^^^^^
+80 |         assert result["transition"] is None  # 有 tool_call，不应设 DONE
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:80:9
+   |
+78 |         assert result["messages"][0]["content"] == "Let me check."
+79 |         assert len(result["tool_calls"]) == 1
+80 |         assert result["transition"] is None  # 有 tool_call，不应设 DONE
+   |         ^^^^^^
+81 |
+82 |     async def test_multiple_tool_calls_accumulated(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:95:9
+   |
+93 |         result = await think_node(_state(), llm=llm)
+94 |
+95 |         assert len(result["tool_calls"]) == 2
+   |         ^^^^^^
+96 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+97 |         assert result["tool_calls"][1]["function"]["name"] == "get_memory"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:96:9
+   |
+95 |         assert len(result["tool_calls"]) == 2
+96 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+   |         ^^^^^^
+97 |         assert result["tool_calls"][1]["function"]["name"] == "get_memory"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_nodes.py:97:9
+   |
+95 |         assert len(result["tool_calls"]) == 2
+96 |         assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+97 |         assert result["tool_calls"][1]["function"]["name"] == "get_memory"
+   |         ^^^^^^
+98 |
+99 |     async def test_streaming_tool_use_chunks_are_merged(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:112:9
+    |
+110 |         result = await think_node(_state(), llm=llm)
+111 |
+112 |         assert len(result["tool_calls"]) == 1
+    |         ^^^^^^
+113 |         fn = result["tool_calls"][0]["function"]
+114 |         assert fn["name"] == "bash"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:114:9
+    |
+112 |         assert len(result["tool_calls"]) == 1
+113 |         fn = result["tool_calls"][0]["function"]
+114 |         assert fn["name"] == "bash"
+    |         ^^^^^^
+115 |         assert "ls" in fn["arguments"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:115:9
+    |
+113 |         fn = result["tool_calls"][0]["function"]
+114 |         assert fn["name"] == "bash"
+115 |         assert "ls" in fn["arguments"]
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:153:9
+    |
+151 |         result = await act_node(state, executor=executor)
+152 |
+153 |         assert len(executor.calls) == 2
+    |         ^^^^^^
+154 |         tool_names = [c["tool_name"] for c in executor.calls]
+155 |         assert "get_cpu" in tool_names
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:155:9
+    |
+153 |         assert len(executor.calls) == 2
+154 |         tool_names = [c["tool_name"] for c in executor.calls]
+155 |         assert "get_cpu" in tool_names
+    |         ^^^^^^
+156 |         assert "get_memory" in tool_names
+157 |         assert len(result["tool_results"]) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:156:9
+    |
+154 |         tool_names = [c["tool_name"] for c in executor.calls]
+155 |         assert "get_cpu" in tool_names
+156 |         assert "get_memory" in tool_names
+    |         ^^^^^^
+157 |         assert len(result["tool_results"]) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:157:9
+    |
+155 |         assert "get_cpu" in tool_names
+156 |         assert "get_memory" in tool_names
+157 |         assert len(result["tool_results"]) == 2
+    |         ^^^^^^
+158 |
+159 |     async def test_concurrent_readonly_tools_use_execute_parallel(self, monkeypatch):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:177:9
+    |
+175 |         result = await act_node(state, executor=_SpyExecutor())
+176 |
+177 |         assert parallel_called
+    |         ^^^^^^
+178 |         assert len(call_args) == 2
+179 |         assert call_args[0]["tool_name"] == "get_cpu"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:178:9
+    |
+177 |         assert parallel_called
+178 |         assert len(call_args) == 2
+    |         ^^^^^^
+179 |         assert call_args[0]["tool_name"] == "get_cpu"
+180 |         assert call_args[1]["tool_name"] == "get_memory"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:179:9
+    |
+177 |         assert parallel_called
+178 |         assert len(call_args) == 2
+179 |         assert call_args[0]["tool_name"] == "get_cpu"
+    |         ^^^^^^
+180 |         assert call_args[1]["tool_name"] == "get_memory"
+181 |         assert len(result["tool_results"]) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:180:9
+    |
+178 |         assert len(call_args) == 2
+179 |         assert call_args[0]["tool_name"] == "get_cpu"
+180 |         assert call_args[1]["tool_name"] == "get_memory"
+    |         ^^^^^^
+181 |         assert len(result["tool_results"]) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:181:9
+    |
+179 |         assert call_args[0]["tool_name"] == "get_cpu"
+180 |         assert call_args[1]["tool_name"] == "get_memory"
+181 |         assert len(result["tool_results"]) == 2
+    |         ^^^^^^
+182 |
+183 |     async def test_empty_approved_list_returns_nothing(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:187:9
+    |
+185 |         result = await act_node(_state_with_tools([]), executor=executor)
+186 |
+187 |         assert result["tool_results"] == []
+    |         ^^^^^^
+188 |         assert executor.calls == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:188:9
+    |
+187 |         assert result["tool_results"] == []
+188 |         assert executor.calls == []
+    |         ^^^^^^
+189 |
+190 |     async def test_execution_failure_recorded(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:200:9
+    |
+198 |         result = await act_node(state, executor=executor)
+199 |
+200 |         assert result["tool_results"][0]["result"]["execution_status"] == "FAILED"
+    |         ^^^^^^
+201 |         assert "permission denied" in str(result["tool_results"][0]["result"])
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:201:9
+    |
+200 |         assert result["tool_results"][0]["result"]["execution_status"] == "FAILED"
+201 |         assert "permission denied" in str(result["tool_results"][0]["result"])
+    |         ^^^^^^
+202 |
+203 |     async def test_tool_results_include_tool_name(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:210:9
+    |
+208 |         result = await act_node(state, executor=executor)
+209 |
+210 |         assert result["tool_results"][0]["tool_name"] == "get_cpu"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:229:9
+    |
+227 |         result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+228 |
+229 |         assert len(result["streaming_tool_results"]) == 1
+    |         ^^^^^^
+230 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+231 |         assert result["tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:230:9
+    |
+229 |         assert len(result["streaming_tool_results"]) == 1
+230 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+    |         ^^^^^^
+231 |         assert result["tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:231:9
+    |
+229 |         assert len(result["streaming_tool_results"]) == 1
+230 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+231 |         assert result["tool_calls"] == []
+    |         ^^^^^^
+232 |
+233 |     async def test_non_readonly_stays_in_tool_calls(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:246:9
+    |
+244 |         result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+245 |
+246 |         assert result["streaming_tool_results"] == []
+    |         ^^^^^^
+247 |         assert len(result["tool_calls"]) == 1
+248 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:247:9
+    |
+246 |         assert result["streaming_tool_results"] == []
+247 |         assert len(result["tool_calls"]) == 1
+    |         ^^^^^^
+248 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:248:9
+    |
+246 |         assert result["streaming_tool_results"] == []
+247 |         assert len(result["tool_calls"]) == 1
+248 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |         ^^^^^^
+249 |
+250 |     async def test_mixed_readonly_and_highrisk(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:266:9
+    |
+264 |         result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+265 |
+266 |         assert len(result["streaming_tool_results"]) == 1
+    |         ^^^^^^
+267 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+268 |         assert len(result["tool_calls"]) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:267:9
+    |
+266 |         assert len(result["streaming_tool_results"]) == 1
+267 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+    |         ^^^^^^
+268 |         assert len(result["tool_calls"]) == 1
+269 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:268:9
+    |
+266 |         assert len(result["streaming_tool_results"]) == 1
+267 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+268 |         assert len(result["tool_calls"]) == 1
+    |         ^^^^^^
+269 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:269:9
+    |
+267 |         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
+268 |         assert len(result["tool_calls"]) == 1
+269 |         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:299:9
+    |
+297 |         ])
+298 |
+299 |         assert len(result["messages"]) == 2
+    |         ^^^^^^
+300 |         assert result["messages"][0]["role"] == "tool"
+301 |         assert "get_cpu" in result["messages"][0]["content"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:300:9
+    |
+299 |         assert len(result["messages"]) == 2
+300 |         assert result["messages"][0]["role"] == "tool"
+    |         ^^^^^^
+301 |         assert "get_cpu" in result["messages"][0]["content"]
+302 |         assert "get_memory" in result["messages"][1]["content"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:301:9
+    |
+299 |         assert len(result["messages"]) == 2
+300 |         assert result["messages"][0]["role"] == "tool"
+301 |         assert "get_cpu" in result["messages"][0]["content"]
+    |         ^^^^^^
+302 |         assert "get_memory" in result["messages"][1]["content"]
+303 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:302:9
+    |
+300 |         assert result["messages"][0]["role"] == "tool"
+301 |         assert "get_cpu" in result["messages"][0]["content"]
+302 |         assert "get_memory" in result["messages"][1]["content"]
+    |         ^^^^^^
+303 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:303:9
+    |
+301 |         assert "get_cpu" in result["messages"][0]["content"]
+302 |         assert "get_memory" in result["messages"][1]["content"]
+303 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |         ^^^^^^
+304 |
+305 |     def test_empty_results_returns_empty(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:308:9
+    |
+306 |         result = observe_node(_state_with_tools(), tool_results=[])
+307 |
+308 |         assert result["messages"] == []
+    |         ^^^^^^
+309 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:309:9
+    |
+308 |         assert result["messages"] == []
+309 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |         ^^^^^^
+310 |
+311 |     def test_merges_streaming_tool_results(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:322:9
+    |
+320 |         ])
+321 |
+322 |         assert len(result["messages"]) == 2
+    |         ^^^^^^
+323 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_nodes.py:323:9
+    |
+322 |         assert len(result["messages"]) == 2
+323 |         assert result["transition"] == Transition.TOOL_RESULTS
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:21:9
+   |
+19 |         logger.info("test message")
+20 |         recent = logger.recent(10)
+21 |         assert any("test message" in r for r in recent)
+   |         ^^^^^^
+22 |
+23 |     def test_disabled_by_default(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:28:9
+   |
+27 |         logger = DebugLogger()
+28 |         assert not logger.is_enabled()
+   |         ^^^^^^
+29 |
+30 |     def test_debug_level_filtered_when_default_info(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:39:9
+   |
+38 |         recent = logger.recent(10)
+39 |         assert not any("debug msg" in r for r in recent)
+   |         ^^^^^^
+40 |         assert any("info msg" in r for r in recent)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:40:9
+   |
+38 |         recent = logger.recent(10)
+39 |         assert not any("debug msg" in r for r in recent)
+40 |         assert any("info msg" in r for r in recent)
+   |         ^^^^^^
+41 |
+42 |     def test_all_levels_when_debug_level(self, monkeypatch):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:52:9
+   |
+51 |         recent = logger.recent(10)
+52 |         assert any("debug msg" in r for r in recent)
+   |         ^^^^^^
+53 |         assert any("info msg" in r for r in recent)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:53:9
+   |
+51 |         recent = logger.recent(10)
+52 |         assert any("debug msg" in r for r in recent)
+53 |         assert any("info msg" in r for r in recent)
+   |         ^^^^^^
+54 |
+55 |     def test_level_order_warn_includes_error(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:66:9
+   |
+65 |         recent = logger.recent(10)
+66 |         assert not any("info msg" in r for r in recent)
+   |         ^^^^^^
+67 |         assert any("warn msg" in r for r in recent)
+68 |         assert any("error msg" in r for r in recent)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:67:9
+   |
+65 |         recent = logger.recent(10)
+66 |         assert not any("info msg" in r for r in recent)
+67 |         assert any("warn msg" in r for r in recent)
+   |         ^^^^^^
+68 |         assert any("error msg" in r for r in recent)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:68:9
+   |
+66 |         assert not any("info msg" in r for r in recent)
+67 |         assert any("warn msg" in r for r in recent)
+68 |         assert any("error msg" in r for r in recent)
+   |         ^^^^^^
+69 |
+70 |     def test_filter_keyword_matching(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:80:9
+   |
+79 |         recent = logger.recent(10)
+80 |         assert any("agent decision" in r for r in recent)
+   |         ^^^^^^
+81 |         assert not any("security check" in r for r in recent)
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:81:9
+   |
+79 |         recent = logger.recent(10)
+80 |         assert any("agent decision" in r for r in recent)
+81 |         assert not any("security check" in r for r in recent)
+   |         ^^^^^^
+82 |
+83 |     def test_ring_buffer_max_500(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:92:9
+   |
+91 |         recent = logger.recent(600)
+92 |         assert len(recent) == 500
+   |         ^^^^^^
+93 |         assert "msg 0" not in "\n".join(recent)
+94 |         assert "msg 599" in recent[-1]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:93:9
+   |
+91 |         recent = logger.recent(600)
+92 |         assert len(recent) == 500
+93 |         assert "msg 0" not in "\n".join(recent)
+   |         ^^^^^^
+94 |         assert "msg 599" in recent[-1]
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_observability.py:94:9
+   |
+92 |         assert len(recent) == 500
+93 |         assert "msg 0" not in "\n".join(recent)
+94 |         assert "msg 599" in recent[-1]
+   |         ^^^^^^
+95 |
+96 |     def test_file_output_when_enabled(self, monkeypatch, tmp_path):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:109:9
+    |
+107 |         logger.info("file output test")
+108 |
+109 |         assert logger.is_enabled()
+    |         ^^^^^^
+110 |         content = logger._file_path.read_text()
+111 |         assert "file output test" in content
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:111:9
+    |
+109 |         assert logger.is_enabled()
+110 |         content = logger._file_path.read_text()
+111 |         assert "file output test" in content
+    |         ^^^^^^
+112 |
+113 |     def test_file_not_written_when_disabled(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:119:9
+    |
+117 |         logger = DebugLogger()
+118 |         logger.info("no file")
+119 |         assert logger._file_path is None
+    |         ^^^^^^
+120 |
+121 |     def test_recent_returns_last_n(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:130:9
+    |
+129 |         recent = logger.recent(3)
+130 |         assert len(recent) == 3
+    |         ^^^^^^
+131 |         assert "msg 2" in recent[0]
+132 |         assert "msg 4" in recent[-1]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:131:9
+    |
+129 |         recent = logger.recent(3)
+130 |         assert len(recent) == 3
+131 |         assert "msg 2" in recent[0]
+    |         ^^^^^^
+132 |         assert "msg 4" in recent[-1]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:132:9
+    |
+130 |         assert len(recent) == 3
+131 |         assert "msg 2" in recent[0]
+132 |         assert "msg 4" in recent[-1]
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:143:9
+    |
+142 |         profiler = Profiler()
+143 |         assert not profiler.is_enabled()
+    |         ^^^^^^
+144 |         # checkpoint should be a no-op
+145 |         profiler.checkpoint("test")
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:147:9
+    |
+145 |         profiler.checkpoint("test")
+146 |         report = profiler.report()
+147 |         assert report == {}
+    |         ^^^^^^
+148 |
+149 |     def test_enabled_records_checkpoints(self, monkeypatch):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:155:9
+    |
+154 |         profiler = Profiler()
+155 |         assert profiler.is_enabled()
+    |         ^^^^^^
+156 |
+157 |         profiler.checkpoint("think")
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:162:9
+    |
+161 |         report = profiler.report()
+162 |         assert "think" in report
+    |         ^^^^^^
+163 |         assert "act" in report
+164 |         assert "observe" in report
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:163:9
+    |
+161 |         report = profiler.report()
+162 |         assert "think" in report
+163 |         assert "act" in report
+    |         ^^^^^^
+164 |         assert "observe" in report
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:164:9
+    |
+162 |         assert "think" in report
+163 |         assert "act" in report
+164 |         assert "observe" in report
+    |         ^^^^^^
+165 |
+166 |     def test_report_marks_slow_operations(self, monkeypatch):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:180:9
+    |
+178 |         report = profiler.report()
+179 |
+180 |         assert "slow_op" in report
+    |         ^^^^^^
+181 |         assert report["slow_op"]["slow"] is True
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:181:9
+    |
+180 |         assert "slow_op" in report
+181 |         assert report["slow_op"]["slow"] is True
+    |         ^^^^^^
+182 |
+183 |     def test_report_includes_total_duration(self, monkeypatch):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:195:9
+    |
+194 |         report = profiler.report()
+195 |         assert report["step2"]["total_ms"] > 0
+    |         ^^^^^^
+196 |
+197 |     def test_reset_clears_checkpoints(self, monkeypatch):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_observability.py:207:9
+    |
+206 |         report = profiler.report()
+207 |         assert report == {}
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:15:9
+   |
+13 |         pm = PromptManager()
+14 |         prompt = pm.build_system_prompt()
+15 |         assert "AI 运维 Agent" in prompt
+   |         ^^^^^^
+16 |         assert "未经用户明确审批" in prompt
+17 |         assert "优先使用只读工具" in prompt
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:16:9
+   |
+14 |         prompt = pm.build_system_prompt()
+15 |         assert "AI 运维 Agent" in prompt
+16 |         assert "未经用户明确审批" in prompt
+   |         ^^^^^^
+17 |         assert "优先使用只读工具" in prompt
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:17:9
+   |
+15 |         assert "AI 运维 Agent" in prompt
+16 |         assert "未经用户明确审批" in prompt
+17 |         assert "优先使用只读工具" in prompt
+   |         ^^^^^^
+18 |
+19 |     def test_section_order(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:27:9
+   |
+25 |         pos_rules = prompt.find("你必须遵守以下规则")
+26 |         pos_tool_usage = prompt.find("工具调用规范")
+27 |         assert pos_identity < pos_rules < pos_tool_usage
+   |         ^^^^^^
+28 |
+29 |     def test_static_sections_are_cached(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:35:9
+   |
+33 |         first = pm.build_system_prompt()
+34 |         second = pm.build_system_prompt()
+35 |         assert first == second
+   |         ^^^^^^
+36 |
+37 |     def test_override_single_section_from_file(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:45:13
+   |
+43 |             pm = PromptManager(prompt_path=Path(f.name))
+44 |             prompt = pm.build_system_prompt()
+45 |             assert "Custom agent identity." in prompt
+   |             ^^^^^^
+46 |             assert "AI 运维 Agent" not in prompt
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:46:13
+   |
+44 |             prompt = pm.build_system_prompt()
+45 |             assert "Custom agent identity." in prompt
+46 |             assert "AI 运维 Agent" not in prompt
+   |             ^^^^^^
+47 |
+48 |     def test_override_partial_sections(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:56:13
+   |
+54 |             pm = PromptManager(prompt_path=Path(f.name))
+55 |             prompt = pm.build_system_prompt()
+56 |             assert "Custom identity." in prompt
+   |             ^^^^^^
+57 |             assert "Custom rules." in prompt
+58 |             assert "工具调用规范" in prompt
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:57:13
+   |
+55 |             prompt = pm.build_system_prompt()
+56 |             assert "Custom identity." in prompt
+57 |             assert "Custom rules." in prompt
+   |             ^^^^^^
+58 |             assert "工具调用规范" in prompt
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:58:13
+   |
+56 |             assert "Custom identity." in prompt
+57 |             assert "Custom rules." in prompt
+58 |             assert "工具调用规范" in prompt
+   |             ^^^^^^
+59 |
+60 |     def test_environment_section_is_dynamic(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:66:9
+   |
+64 |         pm.set_environment({"target_host": "host-a"})
+65 |         prompt1 = pm.build_system_prompt()
+66 |         assert "host-a" in prompt1
+   |         ^^^^^^
+67 |
+68 |         pm.set_environment({"target_host": "host-b"})
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:70:9
+   |
+68 |         pm.set_environment({"target_host": "host-b"})
+69 |         prompt2 = pm.build_system_prompt()
+70 |         assert "host-b" in prompt2
+   |         ^^^^^^
+71 |         assert "host-a" not in prompt2
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:71:9
+   |
+69 |         prompt2 = pm.build_system_prompt()
+70 |         assert "host-b" in prompt2
+71 |         assert "host-a" not in prompt2
+   |         ^^^^^^
+72 |
+73 |     def test_memory_section_is_dynamic(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:79:9
+   |
+77 |         pm.set_memory("记住：上次重启了 nginx")
+78 |         prompt = pm.build_system_prompt()
+79 |         assert "记住：上次重启了 nginx" in prompt
+   |         ^^^^^^
+80 |
+81 |     def test_empty_memory_shows_default_placeholder(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_prompt_manager.py:86:9
+   |
+84 |         pm = PromptManager()
+85 |         prompt = pm.build_system_prompt()
+86 |         assert "无持久记忆" in prompt
+   |         ^^^^^^
+87 |
+88 |     def test_reset_cache(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:168:9
+    |
+166 |         ))
+167 |         event_types = [e[0] for e in events]
+168 |         assert event_types == ["assistant", "done"]
+    |         ^^^^^^
+169 |
+170 |     async def test_tool_call_auto_approve_then_done(self, query, llm):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:182:9
+    |
+180 |         ))
+181 |         event_types = [e[0] for e in events]
+182 |         assert "tool_call" in event_types
+    |         ^^^^^^
+183 |         assert "tool_result" in event_types
+184 |         assert "assistant" in event_types
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:183:9
+    |
+181 |         event_types = [e[0] for e in events]
+182 |         assert "tool_call" in event_types
+183 |         assert "tool_result" in event_types
+    |         ^^^^^^
+184 |         assert "assistant" in event_types
+185 |         assert event_types[-1] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:184:9
+    |
+182 |         assert "tool_call" in event_types
+183 |         assert "tool_result" in event_types
+184 |         assert "assistant" in event_types
+    |         ^^^^^^
+185 |         assert event_types[-1] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:185:9
+    |
+183 |         assert "tool_result" in event_types
+184 |         assert "assistant" in event_types
+185 |         assert event_types[-1] == "done"
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:215:9
+    |
+214 |         event_types = [e[0] for e in events]
+215 |         assert "tool_approval_required" in event_types
+    |         ^^^^^^
+216 |         assert "assistant" in event_types
+217 |         assert event_types[-1] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:216:9
+    |
+214 |         event_types = [e[0] for e in events]
+215 |         assert "tool_approval_required" in event_types
+216 |         assert "assistant" in event_types
+    |         ^^^^^^
+217 |         assert event_types[-1] == "done"
+218 |         assert executor.calls
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:217:9
+    |
+215 |         assert "tool_approval_required" in event_types
+216 |         assert "assistant" in event_types
+217 |         assert event_types[-1] == "done"
+    |         ^^^^^^
+218 |         assert executor.calls
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:218:9
+    |
+216 |         assert "assistant" in event_types
+217 |         assert event_types[-1] == "done"
+218 |         assert executor.calls
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:231:9
+    |
+229 |         transition_events = [e for e in audit.events if e.event == "LOOP_TRANSITION"]
+230 |         transitions = [e.transition for e in transition_events]
+231 |         assert "user_message" in transitions
+    |         ^^^^^^
+232 |         assert "done" in transitions
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:232:9
+    |
+230 |         transitions = [e.transition for e in transition_events]
+231 |         assert "user_message" in transitions
+232 |         assert "done" in transitions
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:243:9
+    |
+241 |             [{"role": "user", "content": "test"}], available_tools=[],
+242 |         ))
+243 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+244 |
+245 |     async def test_continues_when_tool_calls_present(self, query, llm, executor):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:256:9
+    |
+254 |             [{"role": "user", "content": "check"}], available_tools=[],
+255 |         ))
+256 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+257 |         assert executor.calls
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:257:9
+    |
+255 |         ))
+256 |         assert events[-1][0] == "done"
+257 |         assert executor.calls
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:276:9
+    |
+274 |         ))
+275 |         event_types = [e[0] for e in events]
+276 |         assert event_types.count("tool_call") == 2
+    |         ^^^^^^
+277 |         assert event_types.count("tool_result") == 2
+278 |         assert len(executor.calls) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:277:9
+    |
+275 |         event_types = [e[0] for e in events]
+276 |         assert event_types.count("tool_call") == 2
+277 |         assert event_types.count("tool_result") == 2
+    |         ^^^^^^
+278 |         assert len(executor.calls) == 2
+279 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:278:9
+    |
+276 |         assert event_types.count("tool_call") == 2
+277 |         assert event_types.count("tool_result") == 2
+278 |         assert len(executor.calls) == 2
+    |         ^^^^^^
+279 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:279:9
+    |
+277 |         assert event_types.count("tool_result") == 2
+278 |         assert len(executor.calls) == 2
+279 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+280 |
+281 |     async def test_concurrent_readonly_tools_single_parallel_call(self, query, llm, executor):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:303:9
+    |
+301 |             [{"role": "user", "content": "check"}], available_tools=[],
+302 |         ))
+303 |         assert parallel_called
+    |         ^^^^^^
+304 |
+305 |     async def test_mixed_readonly_highrisk(self, query, llm, bridge, executor, rule_engine, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:330:9
+    |
+329 |         event_types = [e[0] for e in events]
+330 |         assert "tool_approval_required" in event_types
+    |         ^^^^^^
+331 |         assert "tool_result" in event_types
+332 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:331:9
+    |
+329 |         event_types = [e[0] for e in events]
+330 |         assert "tool_approval_required" in event_types
+331 |         assert "tool_result" in event_types
+    |         ^^^^^^
+332 |         assert events[-1][0] == "done"
+333 |         assert len(executor.calls) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:332:9
+    |
+330 |         assert "tool_approval_required" in event_types
+331 |         assert "tool_result" in event_types
+332 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+333 |         assert len(executor.calls) == 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:333:9
+    |
+331 |         assert "tool_result" in event_types
+332 |         assert events[-1][0] == "done"
+333 |         assert len(executor.calls) == 2
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:353:9
+    |
+351 |         event_types = [e[0] for e in events]
+352 |         # tool_call events from think_node emit; tool_result events from observe_node
+353 |         assert event_types.count("tool_call") == 2
+    |         ^^^^^^
+354 |         assert event_types.count("tool_result") == 2
+355 |         assert len(executor.calls) >= 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:354:9
+    |
+352 |         # tool_call events from think_node emit; tool_result events from observe_node
+353 |         assert event_types.count("tool_call") == 2
+354 |         assert event_types.count("tool_result") == 2
+    |         ^^^^^^
+355 |         assert len(executor.calls) >= 2
+356 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:355:9
+    |
+353 |         assert event_types.count("tool_call") == 2
+354 |         assert event_types.count("tool_result") == 2
+355 |         assert len(executor.calls) >= 2
+    |         ^^^^^^
+356 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:356:9
+    |
+354 |         assert event_types.count("tool_result") == 2
+355 |         assert len(executor.calls) >= 2
+356 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+357 |
+358 |     async def test_mixed_streaming_highrisk_still_reviewed(self, query, llm, bridge, executor, rule_engine, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:383:9
+    |
+382 |         event_types = [e[0] for e in events]
+383 |         assert "tool_approval_required" in event_types
+    |         ^^^^^^
+384 |         assert "tool_result" in event_types
+385 |         assert events[-1][0] == "done"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:384:9
+    |
+382 |         event_types = [e[0] for e in events]
+383 |         assert "tool_approval_required" in event_types
+384 |         assert "tool_result" in event_types
+    |         ^^^^^^
+385 |         assert events[-1][0] == "done"
+386 |         assert len(executor.calls) >= 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:385:9
+    |
+383 |         assert "tool_approval_required" in event_types
+384 |         assert "tool_result" in event_types
+385 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+386 |         assert len(executor.calls) >= 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:386:9
+    |
+384 |         assert "tool_result" in event_types
+385 |         assert events[-1][0] == "done"
+386 |         assert len(executor.calls) >= 2
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:424:9
+    |
+422 |             [{"role": "user", "content": "test"}], available_tools=[],
+423 |         ))
+424 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+425 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+426 |         assert "context_compacted" in transitions
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:426:9
+    |
+424 |         assert events[-1][0] == "done"
+425 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+426 |         assert "context_compacted" in transitions
+    |         ^^^^^^
+427 |
+428 |     async def test_prompt_too_long_exhausted_yields_error(self, recovery_loop, llm, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:439:9
+    |
+437 |         ))
+438 |         event_types = [e[0] for e in events]
+439 |         assert "error" in event_types
+    |         ^^^^^^
+440 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+441 |         assert "error_exit" in transitions
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:441:9
+    |
+439 |         assert "error" in event_types
+440 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+441 |         assert "error_exit" in transitions
+    |         ^^^^^^
+442 |
+443 |     async def test_max_output_tokens_continue_then_retry(self, recovery_loop, llm):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:452:9
+    |
+450 |             [{"role": "user", "content": "test"}], available_tools=[],
+451 |         ))
+452 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+453 |
+454 |     async def test_model_unavailable_fallback_then_retry(self, recovery_loop, llm):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:463:9
+    |
+461 |             [{"role": "user", "content": "test"}], available_tools=[],
+462 |         ))
+463 |         assert events[-1][0] == "done"
+    |         ^^^^^^
+464 |
+465 |     async def test_non_recoverable_error_surfaces_immediately(self, recovery_loop, llm, audit):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:473:9
+    |
+471 |             [{"role": "user", "content": "test"}], available_tools=[],
+472 |         ))
+473 |         assert events[0][0] == "error"
+    |         ^^^^^^
+474 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+475 |         assert "error_exit" in transitions
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:475:9
+    |
+473 |         assert events[0][0] == "error"
+474 |         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+475 |         assert "error_exit" in transitions
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:504:9
+    |
+503 |         audit_events = [e.event for e in audit.events]
+504 |         assert "TOOL_REQUEST_CREATED" in audit_events
+    |         ^^^^^^
+505 |         assert "TOOL_APPROVED" in audit_events
+506 |         assert "TOOL_EXECUTED" in audit_events
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:505:9
+    |
+503 |         audit_events = [e.event for e in audit.events]
+504 |         assert "TOOL_REQUEST_CREATED" in audit_events
+505 |         assert "TOOL_APPROVED" in audit_events
+    |         ^^^^^^
+506 |         assert "TOOL_EXECUTED" in audit_events
+507 |         # Verify order: CREATED before APPROVED before EXECUTED
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:506:9
+    |
+504 |         assert "TOOL_REQUEST_CREATED" in audit_events
+505 |         assert "TOOL_APPROVED" in audit_events
+506 |         assert "TOOL_EXECUTED" in audit_events
+    |         ^^^^^^
+507 |         # Verify order: CREATED before APPROVED before EXECUTED
+508 |         created_idx = audit_events.index("TOOL_REQUEST_CREATED")
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:511:9
+    |
+509 |         approved_idx = audit_events.index("TOOL_APPROVED")
+510 |         executed_idx = audit_events.index("TOOL_EXECUTED")
+511 |         assert created_idx < approved_idx < executed_idx
+    |         ^^^^^^
+512 |
+513 |     async def test_full_audit_chain_mixed(self, query, llm, bridge, audit, executor, rule_engine):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:537:9
+    |
+536 |         audit_events = [e.event for e in audit.events]
+537 |         assert "TOOL_REQUEST_CREATED" in audit_events
+    |         ^^^^^^
+538 |         assert "TOOL_APPROVED" in audit_events
+539 |         # 两个高风险工具都审批通过并执行
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:538:9
+    |
+536 |         audit_events = [e.event for e in audit.events]
+537 |         assert "TOOL_REQUEST_CREATED" in audit_events
+538 |         assert "TOOL_APPROVED" in audit_events
+    |         ^^^^^^
+539 |         # 两个高风险工具都审批通过并执行
+540 |         assert audit_events.count("TOOL_EXECUTED") >= 2
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_query.py:540:9
+    |
+538 |         assert "TOOL_APPROVED" in audit_events
+539 |         # 两个高风险工具都审批通过并执行
+540 |         assert audit_events.count("TOOL_EXECUTED") >= 2
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:69:9
+   |
+67 |         )
+68 |
+69 |         assert len(result["approved_tool_calls"]) == 2
+   |         ^^^^^^
+70 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+71 |         assert result["approved_tool_calls"][1]["function"]["name"] == "get_memory"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:70:9
+   |
+69 |         assert len(result["approved_tool_calls"]) == 2
+70 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+   |         ^^^^^^
+71 |         assert result["approved_tool_calls"][1]["function"]["name"] == "get_memory"
+72 |         assert result["rejected_tool_calls"] == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:71:9
+   |
+69 |         assert len(result["approved_tool_calls"]) == 2
+70 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+71 |         assert result["approved_tool_calls"][1]["function"]["name"] == "get_memory"
+   |         ^^^^^^
+72 |         assert result["rejected_tool_calls"] == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:72:9
+   |
+70 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+71 |         assert result["approved_tool_calls"][1]["function"]["name"] == "get_memory"
+72 |         assert result["rejected_tool_calls"] == []
+   |         ^^^^^^
+73 |
+74 |     async def test_blacklisted_tools_rejected(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:89:9
+   |
+87 |         )
+88 |
+89 |         assert len(result["approved_tool_calls"]) == 1
+   |         ^^^^^^
+90 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+91 |         assert len(result["rejected_tool_calls"]) == 1
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:90:9
+   |
+89 |         assert len(result["approved_tool_calls"]) == 1
+90 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+   |         ^^^^^^
+91 |         assert len(result["rejected_tool_calls"]) == 1
+92 |         assert result["rejected_tool_calls"][0]["function"]["name"] == "blacklist_cmd"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:91:9
+   |
+89 |         assert len(result["approved_tool_calls"]) == 1
+90 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+91 |         assert len(result["rejected_tool_calls"]) == 1
+   |         ^^^^^^
+92 |         assert result["rejected_tool_calls"][0]["function"]["name"] == "blacklist_cmd"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_review.py:92:9
+   |
+90 |         assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
+91 |         assert len(result["rejected_tool_calls"]) == 1
+92 |         assert result["rejected_tool_calls"][0]["function"]["name"] == "blacklist_cmd"
+   |         ^^^^^^
+93 |
+94 |     async def test_whitelist_overrides_classification(self):
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:109:9
+    |
+107 |         )
+108 |
+109 |         assert len(result["approved_tool_calls"]) == 1
+    |         ^^^^^^
+110 |         assert result["rejected_tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:110:9
+    |
+109 |         assert len(result["approved_tool_calls"]) == 1
+110 |         assert result["rejected_tool_calls"] == []
+    |         ^^^^^^
+111 |
+112 |     async def test_high_risk_triggers_interrupt(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:133:9
+    |
+131 |         mock_interrupt.assert_called_once()
+132 |         interrupt_arg = mock_interrupt.call_args[0][0]
+133 |         assert interrupt_arg["event"] == "approval_required"
+    |         ^^^^^^
+134 |         assert len(interrupt_arg["pending_tool_calls"]) == 1
+135 |         assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:134:9
+    |
+132 |         interrupt_arg = mock_interrupt.call_args[0][0]
+133 |         assert interrupt_arg["event"] == "approval_required"
+134 |         assert len(interrupt_arg["pending_tool_calls"]) == 1
+    |         ^^^^^^
+135 |         assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
+136 |         # 用户批准后 → 加入 approved
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:135:9
+    |
+133 |         assert interrupt_arg["event"] == "approval_required"
+134 |         assert len(interrupt_arg["pending_tool_calls"]) == 1
+135 |         assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
+    |         ^^^^^^
+136 |         # 用户批准后 → 加入 approved
+137 |         assert len(result["approved_tool_calls"]) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:137:9
+    |
+135 |         assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
+136 |         # 用户批准后 → 加入 approved
+137 |         assert len(result["approved_tool_calls"]) == 1
+    |         ^^^^^^
+138 |
+139 |     async def test_interrupt_resume_rejected(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:158:9
+    |
+156 |             )
+157 |
+158 |         assert result["approved_tool_calls"] == []
+    |         ^^^^^^
+159 |         assert len(result["rejected_tool_calls"]) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:159:9
+    |
+158 |         assert result["approved_tool_calls"] == []
+159 |         assert len(result["rejected_tool_calls"]) == 1
+    |         ^^^^^^
+160 |
+161 |     async def test_mixed_classifications(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:184:9
+    |
+183 |         names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
+184 |         assert "get_cpu" in names
+    |         ^^^^^^
+185 |         assert "get_memory" in names
+186 |         assert "delete_logs" in names
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:185:9
+    |
+183 |         names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
+184 |         assert "get_cpu" in names
+185 |         assert "get_memory" in names
+    |         ^^^^^^
+186 |         assert "delete_logs" in names
+187 |         assert "blacklist_cmd" not in names
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:186:9
+    |
+184 |         assert "get_cpu" in names
+185 |         assert "get_memory" in names
+186 |         assert "delete_logs" in names
+    |         ^^^^^^
+187 |         assert "blacklist_cmd" not in names
+188 |         assert len(result["rejected_tool_calls"]) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:187:9
+    |
+185 |         assert "get_memory" in names
+186 |         assert "delete_logs" in names
+187 |         assert "blacklist_cmd" not in names
+    |         ^^^^^^
+188 |         assert len(result["rejected_tool_calls"]) == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:188:9
+    |
+186 |         assert "delete_logs" in names
+187 |         assert "blacklist_cmd" not in names
+188 |         assert len(result["rejected_tool_calls"]) == 1
+    |         ^^^^^^
+189 |
+190 |     async def test_audit_logged_for_rejected(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:205:9
+    |
+203 |         )
+204 |
+205 |         assert len(audit.events) == 1
+    |         ^^^^^^
+206 |         assert audit.events[0]["event"] == "TOOL_REJECTED"
+207 |         assert audit.events[0]["tool_name"] == "blacklist_cmd"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:206:9
+    |
+205 |         assert len(audit.events) == 1
+206 |         assert audit.events[0]["event"] == "TOOL_REJECTED"
+    |         ^^^^^^
+207 |         assert audit.events[0]["tool_name"] == "blacklist_cmd"
+208 |         assert audit.events[0]["decision"] == "REJECT"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:207:9
+    |
+205 |         assert len(audit.events) == 1
+206 |         assert audit.events[0]["event"] == "TOOL_REJECTED"
+207 |         assert audit.events[0]["tool_name"] == "blacklist_cmd"
+    |         ^^^^^^
+208 |         assert audit.events[0]["decision"] == "REJECT"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:208:9
+    |
+206 |         assert audit.events[0]["event"] == "TOOL_REJECTED"
+207 |         assert audit.events[0]["tool_name"] == "blacklist_cmd"
+208 |         assert audit.events[0]["decision"] == "REJECT"
+    |         ^^^^^^
+209 |
+210 |     async def test_transition_when_all_auto_approved(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:223:9
+    |
+221 |         )
+222 |
+223 |         assert result["transition"] == Transition.APPROVAL_GRANTED
+    |         ^^^^^^
+224 |
+225 |     async def test_transition_when_all_rejected(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:238:9
+    |
+236 |         )
+237 |
+238 |         assert result["transition"] == Transition.APPROVAL_REJECTED
+    |         ^^^^^^
+239 |
+240 |     async def test_no_tool_calls_returns_empty(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:250:9
+    |
+248 |         )
+249 |
+250 |         assert result["approved_tool_calls"] == []
+    |         ^^^^^^
+251 |         assert result["rejected_tool_calls"] == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_review.py:251:9
+    |
+250 |         assert result["approved_tool_calls"] == []
+251 |         assert result["rejected_tool_calls"] == []
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_security.py:64:9
+   |
+62 |         engine = RuleEngine(rules_config)
+63 |         decision = engine.evaluate("get_cpu_info", is_read_only=True, is_rollbackable=False)
+64 |         assert decision == "AUTO_APPROVE"
+   |         ^^^^^^
+65 |
+66 |     def test_blacklist_rejected(self, rules_config):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_security.py:71:9
+   |
+69 |         engine = RuleEngine(rules_config)
+70 |         decision = engine.evaluate("reboot_system", is_read_only=False, is_rollbackable=False)
+71 |         assert decision == "REJECT"
+   |         ^^^^^^
+72 |
+73 |     def test_whitelist_override(self, rules_config):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_security.py:78:9
+   |
+76 |         engine = RuleEngine(rules_config)
+77 |         decision = engine.evaluate("delete_temp_files", is_read_only=False, is_rollbackable=True)
+78 |         assert decision == "AUTO_APPROVE"
+   |         ^^^^^^
+79 |
+80 |     def test_high_risk_requires_approval(self, rules_config):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_security.py:85:9
+   |
+83 |         engine = RuleEngine(rules_config)
+84 |         decision = engine.evaluate("rm_rf", is_read_only=False, is_rollbackable=False)
+85 |         assert decision == "REQUIRE_APPROVAL"
+   |         ^^^^^^
+86 |
+87 |     def test_classification_overrides_static_readonly(self, rules_config):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_security.py:92:9
+   |
+90 |         engine = RuleEngine(rules_config)
+91 |         decision = engine.evaluate("bash", is_read_only=False, is_rollbackable=False)
+92 |         assert decision == "REQUIRE_APPROVAL"
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:16:9
+   |
+14 |         mgr = InMemorySessionManager()
+15 |         session = await mgr.create_session()
+16 |         assert session.id is not None
+   |         ^^^^^^
+17 |         assert session.messages == []
+18 |         assert session.executed_tool_list == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:17:9
+   |
+15 |         session = await mgr.create_session()
+16 |         assert session.id is not None
+17 |         assert session.messages == []
+   |         ^^^^^^
+18 |         assert session.executed_tool_list == []
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:18:9
+   |
+16 |         assert session.id is not None
+17 |         assert session.messages == []
+18 |         assert session.executed_tool_list == []
+   |         ^^^^^^
+19 |
+20 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:27:9
+   |
+25 |         created = await mgr.create_session()
+26 |         retrieved = await mgr.get_session(created.id)
+27 |         assert retrieved.id == created.id
+   |         ^^^^^^
+28 |
+29 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:45:9
+   |
+43 |         await mgr.create_session()
+44 |         sessions = await mgr.list_sessions()
+45 |         assert len(sessions) == 2
+   |         ^^^^^^
+46 |
+47 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_services.py:63:9
+   |
+61 |         await mgr.add_message(session.id, msg)
+62 |         retrieved = await mgr.get_session(session.id)
+63 |         assert len(retrieved.messages) == 1
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:107:9
+    |
+105 |         await mgr.add_tool_call(session.id, call)
+106 |         retrieved = await mgr.get_session(session.id)
+107 |         assert len(retrieved.executed_tool_list) == 1
+    |         ^^^^^^
+108 |
+109 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:144:9
+    |
+143 |         result = mgr.build_system_prompt()
+144 |         assert "You are an ops agent." in result
+    |         ^^^^^^
+145 |
+146 |     def test_default_prompt_when_no_file(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:151:9
+    |
+149 |         mgr = PromptManager()
+150 |         result = mgr.build_system_prompt()
+151 |         assert "AI 运维 Agent" in result
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:160:9
+    |
+158 |         cm = ContextManager(window_size=10000, threshold=0.7)
+159 |         tokens = cm.count_tokens([{"role": "user", "content": "hello world"}])
+160 |         assert tokens > 0
+    |         ^^^^^^
+161 |
+162 |     def test_needs_compression_under_threshold(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:166:9
+    |
+165 |         cm = ContextManager(window_size=10000, threshold=0.7)
+166 |         assert not cm.needs_compression(1000)
+    |         ^^^^^^
+167 |
+168 |     def test_needs_compression_over_threshold(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:172:9
+    |
+171 |         cm = ContextManager(window_size=10000, threshold=0.7)
+172 |         assert cm.needs_compression(8000)
+    |         ^^^^^^
+173 |
+174 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:187:9
+    |
+185 |         result = await cm.compress(messages)
+186 |
+187 |         assert len(result) < len(messages)
+    |         ^^^^^^
+188 |         assert any("Conversation summary" in m["content"] for m in result)
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:188:9
+    |
+187 |         assert len(result) < len(messages)
+188 |         assert any("Conversation summary" in m["content"] for m in result)
+    |         ^^^^^^
+189 |
+190 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:198:9
+    |
+196 |         result = await cm.compress(messages)
+197 |
+198 |         assert len(result) == len(messages)
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:217:9
+    |
+215 |         result = cm._truncate_tool_results(messages)
+216 |
+217 |         assert len(result[1]["content"]) <= 100 + len("...[truncated]")
+    |         ^^^^^^
+218 |         assert "...[truncated]" in result[1]["content"]
+219 |         assert result[0]["content"] == "check CPU"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:218:9
+    |
+217 |         assert len(result[1]["content"]) <= 100 + len("...[truncated]")
+218 |         assert "...[truncated]" in result[1]["content"]
+    |         ^^^^^^
+219 |         assert result[0]["content"] == "check CPU"
+220 |         assert result[2]["content"] == "CPU is fine"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:219:9
+    |
+217 |         assert len(result[1]["content"]) <= 100 + len("...[truncated]")
+218 |         assert "...[truncated]" in result[1]["content"]
+219 |         assert result[0]["content"] == "check CPU"
+    |         ^^^^^^
+220 |         assert result[2]["content"] == "CPU is fine"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:220:9
+    |
+218 |         assert "...[truncated]" in result[1]["content"]
+219 |         assert result[0]["content"] == "check CPU"
+220 |         assert result[2]["content"] == "CPU is fine"
+    |         ^^^^^^
+221 |
+222 |     def test_layer1_preserves_short_tool_results(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:229:9
+    |
+227 |         messages = [{"role": "tool", "content": "short result"}]
+228 |         result = cm._truncate_tool_results(messages)
+229 |         assert result[0]["content"] == "short result"
+    |         ^^^^^^
+230 |
+231 |     def test_layer1_skips_non_tool_messages(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:241:9
+    |
+239 |         ]
+240 |         result = cm._truncate_tool_results(messages)
+241 |         assert result == messages
+    |         ^^^^^^
+242 |
+243 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:252:9
+    |
+250 |         result = await cm.compress(messages)
+251 |         # Layer 1 still applies if tool_results are present
+252 |         assert len(result) == len(messages)
+    |         ^^^^^^
+253 |
+254 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:279:9
+    |
+278 |         await cm.compress(messages)
+279 |         assert not compact_called
+    |         ^^^^^^
+280 |
+281 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:287:13
+    |
+286 |         async def mock_compact_llm(system_prompt, user_prompt):
+287 |             assert "Text only, no tools" in system_prompt
+    |             ^^^^^^
+288 |             assert "请生成摘要" in user_prompt
+289 |             return "summarized conversation"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:288:13
+    |
+286 |         async def mock_compact_llm(system_prompt, user_prompt):
+287 |             assert "Text only, no tools" in system_prompt
+288 |             assert "请生成摘要" in user_prompt
+    |             ^^^^^^
+289 |             return "summarized conversation"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:304:9
+    |
+302 |         result = await cm.compress(messages)
+303 |
+304 |         assert len(result) < len(messages)
+    |         ^^^^^^
+305 |         assert result[0]["role"] == "system"
+306 |         assert "summarized conversation" in result[0]["content"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:305:9
+    |
+304 |         assert len(result) < len(messages)
+305 |         assert result[0]["role"] == "system"
+    |         ^^^^^^
+306 |         assert "summarized conversation" in result[0]["content"]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:306:9
+    |
+304 |         assert len(result) < len(messages)
+305 |         assert result[0]["role"] == "system"
+306 |         assert "summarized conversation" in result[0]["content"]
+    |         ^^^^^^
+307 |
+308 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:332:9
+    |
+330 |         result = await cm.compress(messages)
+331 |
+332 |         assert result[-3]["content"] == "recent tool result"
+    |         ^^^^^^
+333 |         assert result[-2]["content"] == "recent assistant"
+334 |         assert result[-1]["content"] == "recent user"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:333:9
+    |
+332 |         assert result[-3]["content"] == "recent tool result"
+333 |         assert result[-2]["content"] == "recent assistant"
+    |         ^^^^^^
+334 |         assert result[-1]["content"] == "recent user"
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:334:9
+    |
+332 |         assert result[-3]["content"] == "recent tool result"
+333 |         assert result[-2]["content"] == "recent assistant"
+334 |         assert result[-1]["content"] == "recent user"
+    |         ^^^^^^
+335 |
+336 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:350:17
+    |
+348 |         for m in result:
+349 |             if m["role"] == "tool":
+350 |                 assert len(m["content"]) <= 20 + len("...[truncated]")
+    |                 ^^^^^^
+351 |
+352 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_services.py:376:9
+    |
+374 |         threshold = cm.window_size * cm.threshold
+375 |
+376 |         assert tokens_after < threshold
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:68:9
+   |
+66 |                             msg_type="user", content="hello", is_meta=False)
+67 |         msg = _message_from_row(row)
+68 |         assert msg.message_id == msg_id
+   |         ^^^^^^
+69 |         assert msg.chat_id == chat_id
+70 |         assert msg.type == MessageType.USER
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:69:9
+   |
+67 |         msg = _message_from_row(row)
+68 |         assert msg.message_id == msg_id
+69 |         assert msg.chat_id == chat_id
+   |         ^^^^^^
+70 |         assert msg.type == MessageType.USER
+71 |         assert msg.content == "hello"
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:70:9
+   |
+68 |         assert msg.message_id == msg_id
+69 |         assert msg.chat_id == chat_id
+70 |         assert msg.type == MessageType.USER
+   |         ^^^^^^
+71 |         assert msg.content == "hello"
+72 |         assert msg.is_meta is False
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:71:9
+   |
+69 |         assert msg.chat_id == chat_id
+70 |         assert msg.type == MessageType.USER
+71 |         assert msg.content == "hello"
+   |         ^^^^^^
+72 |         assert msg.is_meta is False
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:72:9
+   |
+70 |         assert msg.type == MessageType.USER
+71 |         assert msg.content == "hello"
+72 |         assert msg.is_meta is False
+   |         ^^^^^^
+73 |
+74 |     def test_is_meta_true(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:79:9
+   |
+77 |         row = _make_msg_row(msg_type="assistant", content="thinking...", is_meta=True)
+78 |         msg = _message_from_row(row)
+79 |         assert msg.is_meta is True
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:96:9
+   |
+94 |         )
+95 |         tc = _tool_call_from_row(row)
+96 |         assert tc.name == "get_cpu"
+   |         ^^^^^^
+97 |         assert tc.server == "tool-server"
+98 |         assert tc.is_read_only is True
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_session_manager.py:97:9
+   |
+95 |         tc = _tool_call_from_row(row)
+96 |         assert tc.name == "get_cpu"
+97 |         assert tc.server == "tool-server"
+   |         ^^^^^^
+98 |         assert tc.is_read_only is True
+99 |         assert tc.is_rollbackable is False
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:98:9
+    |
+ 96 |         assert tc.name == "get_cpu"
+ 97 |         assert tc.server == "tool-server"
+ 98 |         assert tc.is_read_only is True
+    |         ^^^^^^
+ 99 |         assert tc.is_rollbackable is False
+100 |         assert tc.params == {"filter": "cpu"}
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:99:9
+    |
+ 97 |         assert tc.server == "tool-server"
+ 98 |         assert tc.is_read_only is True
+ 99 |         assert tc.is_rollbackable is False
+    |         ^^^^^^
+100 |         assert tc.params == {"filter": "cpu"}
+101 |         assert tc.approval_status == ApprovalStatus.APPROVED
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:100:9
+    |
+ 98 |         assert tc.is_read_only is True
+ 99 |         assert tc.is_rollbackable is False
+100 |         assert tc.params == {"filter": "cpu"}
+    |         ^^^^^^
+101 |         assert tc.approval_status == ApprovalStatus.APPROVED
+102 |         assert tc.execution_status == ExecutionStatus.SUCCEEDED
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:101:9
+    |
+ 99 |         assert tc.is_rollbackable is False
+100 |         assert tc.params == {"filter": "cpu"}
+101 |         assert tc.approval_status == ApprovalStatus.APPROVED
+    |         ^^^^^^
+102 |         assert tc.execution_status == ExecutionStatus.SUCCEEDED
+103 |         assert tc.timestamp is not None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:102:9
+    |
+100 |         assert tc.params == {"filter": "cpu"}
+101 |         assert tc.approval_status == ApprovalStatus.APPROVED
+102 |         assert tc.execution_status == ExecutionStatus.SUCCEEDED
+    |         ^^^^^^
+103 |         assert tc.timestamp is not None
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:103:9
+    |
+101 |         assert tc.approval_status == ApprovalStatus.APPROVED
+102 |         assert tc.execution_status == ExecutionStatus.SUCCEEDED
+103 |         assert tc.timestamp is not None
+    |         ^^^^^^
+104 |
+105 |     def test_params_already_dict(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:110:9
+    |
+108 |         row = _make_call_row(params={"filter": "cpu"})
+109 |         tc = _tool_call_from_row(row)
+110 |         assert tc.params == {"filter": "cpu"}
+    |         ^^^^^^
+111 |
+112 |     def test_error_string_parsed_to_dict(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:120:9
+    |
+118 |         )
+119 |         tc = _tool_call_from_row(row)
+120 |         assert tc.error == {"code": "TIMEOUT", "message": "timed out"}
+    |         ^^^^^^
+121 |
+122 |     def test_error_already_dict(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:130:9
+    |
+128 |         )
+129 |         tc = _tool_call_from_row(row)
+130 |         assert tc.error == {"code": "TIMEOUT"}
+    |         ^^^^^^
+131 |
+132 |     def test_error_none(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:137:9
+    |
+135 |         row = _make_call_row(error=None)
+136 |         tc = _tool_call_from_row(row)
+137 |         assert tc.error is None
+    |         ^^^^^^
+138 |
+139 |     def test_error_key_missing(self):
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:153:9
+    |
+151 |         row = _FakeRecord(data)
+152 |         tc = _tool_call_from_row(row)
+153 |         assert tc.error is None
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:166:9
+    |
+165 |         session = await mgr.create_session()
+166 |         assert session.id is not None
+    |         ^^^^^^
+167 |         assert session.messages == []
+168 |         assert session.executed_tool_list == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:167:9
+    |
+165 |         session = await mgr.create_session()
+166 |         assert session.id is not None
+167 |         assert session.messages == []
+    |         ^^^^^^
+168 |         assert session.executed_tool_list == []
+169 |         assert db.execute.call_count == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:168:9
+    |
+166 |         assert session.id is not None
+167 |         assert session.messages == []
+168 |         assert session.executed_tool_list == []
+    |         ^^^^^^
+169 |         assert db.execute.call_count == 1
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:169:9
+    |
+167 |         assert session.messages == []
+168 |         assert session.executed_tool_list == []
+169 |         assert db.execute.call_count == 1
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:198:9
+    |
+196 |         mgr = PostgresSessionManager(db)
+197 |         session = await mgr.get_session(chat_id)
+198 |         assert session.id == chat_id
+    |         ^^^^^^
+199 |         assert session.messages == []
+200 |         assert session.executed_tool_list == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:199:9
+    |
+197 |         session = await mgr.get_session(chat_id)
+198 |         assert session.id == chat_id
+199 |         assert session.messages == []
+    |         ^^^^^^
+200 |         assert session.executed_tool_list == []
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:200:9
+    |
+198 |         assert session.id == chat_id
+199 |         assert session.messages == []
+200 |         assert session.executed_tool_list == []
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:213:9
+    |
+212 |         sessions = await mgr.list_sessions()
+213 |         assert sessions == []
+    |         ^^^^^^
+214 |
+215 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:229:9
+    |
+228 |         sessions = await mgr.list_sessions()
+229 |         assert len(sessions) == 1
+    |         ^^^^^^
+230 |         assert sessions[0].id == chat_id
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:230:9
+    |
+228 |         sessions = await mgr.list_sessions()
+229 |         assert len(sessions) == 1
+230 |         assert sessions[0].id == chat_id
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:252:9
+    |
+250 |         )
+251 |         await mgr.add_message(chat_id, msg)
+252 |         assert db.execute.call_count == 2
+    |         ^^^^^^
+253 |
+254 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:275:9
+    |
+273 |         # INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta)
+274 |         insert_args = db.execute.call_args_list[0][0]
+275 |         assert insert_args[6] is True  # is_meta is 7th positional arg ($6)
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_session_manager.py:305:9
+    |
+303 |         )
+304 |         await mgr.add_tool_call(call.chat_id, call)
+305 |         assert db.execute.call_count == 2
+    |         ^^^^^^
+    |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_tracer.py:38:9
+   |
+37 |         tokens = _estimate_tokens([{"content": "hello world"}])
+38 |         assert tokens > 0
+   |         ^^^^^^
+39 |
+40 |     def test_minimum_one_token(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_tracer.py:44:9
+   |
+43 |         tokens = _estimate_tokens([])
+44 |         assert tokens == 1
+   |         ^^^^^^
+45 |
+46 |     def test_empty_content(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_tracer.py:50:9
+   |
+49 |         tokens = _estimate_tokens([{"content": ""}])
+50 |         assert tokens == 1
+   |         ^^^^^^
+51 |
+52 |     def test_aggregates_multiple_messages(self):
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_tracer.py:59:9
+   |
+57 |             {"content": "bbbb"},
+58 |         ])
+59 |         assert tokens == 2  # 8 chars / 4
+   |         ^^^^^^
+   |
+
+S101 Use of `assert` detected
+  --> tests/unit/test_tracer.py:81:9
+   |
+79 |         db.execute.assert_called_once()
+80 |         args = db.execute.call_args[0]
+81 |         assert args[0].startswith("INSERT INTO llm_traces")
+   |         ^^^^^^
+82 |
+83 |     @pytest.mark.asyncio
+   |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:103:9
+    |
+101 |         completion_text = args[5]  # index 5: completion_text ($5 in SQL)
+102 |         parsed = json.loads(completion_text)
+103 |         assert "tool_calls" in parsed
+    |         ^^^^^^
+104 |         assert parsed["tool_calls"] == [{"name": "get_cpu"}]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:104:9
+    |
+102 |         parsed = json.loads(completion_text)
+103 |         assert "tool_calls" in parsed
+104 |         assert parsed["tool_calls"] == [{"name": "get_cpu"}]
+    |         ^^^^^^
+105 |
+106 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:125:9
+    |
+123 |         args = db.execute.call_args[0]
+124 |         completion_text = args[5]
+125 |         assert completion_text is None
+    |         ^^^^^^
+126 |
+127 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:148:9
+    |
+146 |         completion_text = args[5]
+147 |         parsed = json.loads(completion_text)
+148 |         assert parsed["content"] == ""
+    |         ^^^^^^
+149 |         assert parsed["tool_calls"] == [{"name": "get_cpu"}]
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:149:9
+    |
+147 |         parsed = json.loads(completion_text)
+148 |         assert parsed["content"] == ""
+149 |         assert parsed["tool_calls"] == [{"name": "get_cpu"}]
+    |         ^^^^^^
+150 |
+151 |     @pytest.mark.asyncio
+    |
+
+S101 Use of `assert` detected
+   --> tests/unit/test_tracer.py:169:9
+    |
+168 |         args = db.execute.call_args[0]
+169 |         assert args[2] == cid  # chat_id is 3rd positional arg ($3)
+    |         ^^^^^^
+    |
+
+Found 568 errors.

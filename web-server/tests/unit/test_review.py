@@ -3,14 +3,18 @@ import pytest
 from src.agent.state import AgentState, Transition
 
 
-class MockClassifier:
-    """返回固定的分级结果。"""
+class MockExecutorWithClassify:
+    """Executor stub that optionally classifies mutable tools."""
 
     def __init__(self, is_read_only=True, is_rollbackable=True):
         self._readonly = is_read_only
         self._rollbackable = is_rollbackable
+        self.classify_calls: list[dict] = []
 
-    async def classify(self, tool_name: str, params: dict) -> dict:
+    async def classify(self, tool_name: str, params: dict, server_name: str) -> dict:
+        self.classify_calls.append({
+            "tool_name": tool_name, "params": params, "server_name": server_name,
+        })
         return {"is_read_only": self._readonly, "is_rollbackable": self._rollbackable}
 
 
@@ -55,15 +59,15 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
-            {"function": {"name": "get_memory", "arguments": "{}"}},
+            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {"function": {"name": "get_memory", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
-        classifier = MockClassifier(is_read_only=True)
+        executor = MockExecutorWithClassify(is_read_only=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
         assert len(result["approved_tool_calls"]) == 2
@@ -75,15 +79,15 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}},
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
+            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
-        classifier = MockClassifier(is_read_only=True)
+        executor = MockExecutorWithClassify(is_read_only=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
         assert len(result["approved_tool_calls"]) == 1
@@ -92,31 +96,31 @@ class TestReviewNode:
         assert result["rejected_tool_calls"][0]["function"]["name"] == "blacklist_cmd"
 
     async def test_whitelist_overrides_classification(self):
-        """白名单优先于分级：即使分级为高风险，whitelist 也直接放行。"""
+        """Whitelist overrides: even non-readonly is auto-approved if whitelisted."""
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "whitelist_cleanup", "arguments": "{}"}},
+            {"function": {"name": "whitelist_cleanup", "arguments": "{}"}, "mutable": False, "is_read_only": False},
         ]
-        classifier = MockClassifier(is_read_only=False, is_rollbackable=False)
+        executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
         assert len(result["approved_tool_calls"]) == 1
         assert result["rejected_tool_calls"] == []
 
     async def test_high_risk_triggers_interrupt(self):
-        """高风险工具（非只读、非白名单、非黑名单）→ interrupt() 暂停。"""
-        from unittest.mock import AsyncMock, MagicMock, patch
+        """Non-readonly, non-whitelist, non-blacklist → interrupt()."""
+        from unittest.mock import MagicMock, patch
 
         tool_calls = [
-            {"function": {"name": "delete_logs", "arguments": '{"path":"/var/log"}'}},
+            {"function": {"name": "delete_logs", "arguments": '{"path":"/var/log"}'}, "mutable": False, "is_read_only": False},
         ]
-        classifier = MockClassifier(is_read_only=False, is_rollbackable=False)
+        executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
@@ -125,7 +129,7 @@ class TestReviewNode:
         with patch("src.agent.nodes.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
-                _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
             )
 
         mock_interrupt.assert_called_once()
@@ -133,17 +137,16 @@ class TestReviewNode:
         assert interrupt_arg["event"] == "approval_required"
         assert len(interrupt_arg["pending_tool_calls"]) == 1
         assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
-        # 用户批准后 → 加入 approved
         assert len(result["approved_tool_calls"]) == 1
 
     async def test_interrupt_resume_rejected(self):
-        """用户拒绝 → 工具加入 rejected 列表。"""
+        """User rejects → tool goes to rejected list."""
         from unittest.mock import MagicMock, patch
 
         tool_calls = [
-            {"function": {"name": "delete_logs", "arguments": "{}"}},
+            {"function": {"name": "delete_logs", "arguments": "{}"}, "mutable": False, "is_read_only": False},
         ]
-        classifier = MockClassifier(is_read_only=False, is_rollbackable=False)
+        executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
@@ -152,23 +155,23 @@ class TestReviewNode:
         with patch("src.agent.nodes.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
-                _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
             )
 
         assert result["approved_tool_calls"] == []
         assert len(result["rejected_tool_calls"]) == 1
 
     async def test_mixed_classifications(self):
-        """混合场景：只读放行、黑名单拒绝、高风险暂停。"""
+        """Mixed: readonly auto-approved, blacklist rejected, high-risk pauses."""
         from unittest.mock import MagicMock, patch
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}},          # 只读
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}},    # 黑名单
-            {"function": {"name": "delete_logs", "arguments": "{}"}},      # 高风险
-            {"function": {"name": "get_memory", "arguments": "{}"}},       # 只读
+            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {"function": {"name": "delete_logs", "arguments": "{}"}, "mutable": False, "is_read_only": False},
+            {"function": {"name": "get_memory", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
-        classifier = MockClassifier(is_read_only=True, is_rollbackable=True)
+        executor = MockExecutorWithClassify(is_read_only=True, is_rollbackable=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
@@ -177,7 +180,7 @@ class TestReviewNode:
         with patch("src.agent.nodes.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
-                _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
             )
 
         names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
@@ -188,18 +191,17 @@ class TestReviewNode:
         assert len(result["rejected_tool_calls"]) == 1
 
     async def test_audit_logged_for_rejected(self):
-        """黑名单拒绝时写审计日志。"""
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}},
+            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
-        classifier = MockClassifier()
+        executor = MockExecutorWithClassify()
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         await review_node(
-            _state(tool_calls), classifier=classifier, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
         assert len(audit.events) == 1
@@ -211,11 +213,11 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
+            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
         result = await review_node(
             _state(tool_calls),
-            classifier=MockClassifier(is_read_only=True),
+            executor=MockExecutorWithClassify(is_read_only=True),
             rule_engine=MockRuleEngine(),
             audit_logger=MockAuditLogger(),
         )
@@ -226,11 +228,11 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}},
+            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
         ]
         result = await review_node(
             _state(tool_calls),
-            classifier=MockClassifier(),
+            executor=MockExecutorWithClassify(),
             rule_engine=MockRuleEngine(),
             audit_logger=MockAuditLogger(),
         )
@@ -242,10 +244,33 @@ class TestReviewNode:
 
         result = await review_node(
             _state([]),
-            classifier=MockClassifier(),
+            executor=MockExecutorWithClassify(),
             rule_engine=MockRuleEngine(),
             audit_logger=MockAuditLogger(),
         )
 
         assert result["approved_tool_calls"] == []
         assert result["rejected_tool_calls"] == []
+
+    async def test_mutable_tool_calls_classify(self):
+        """Mutable tool triggers executor.classify() for dynamic classification."""
+        from unittest.mock import MagicMock, patch
+        from src.agent.nodes import review_node
+
+        tool_calls = [
+            {"function": {"name": "bash", "arguments": '{"cmd":"ls"}'}, "mutable": True, "server_name": "tool-server"},
+        ]
+        executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
+        rule_engine = MockRuleEngine()
+        audit = MockAuditLogger()
+
+        mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
+        with patch("src.agent.nodes.interrupt", mock_interrupt):
+            result = await review_node(
+                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            )
+
+        assert len(executor.classify_calls) == 1
+        assert executor.classify_calls[0]["tool_name"] == "bash"
+        assert executor.classify_calls[0]["server_name"] == "tool-server"
+        assert len(result["approved_tool_calls"]) == 1

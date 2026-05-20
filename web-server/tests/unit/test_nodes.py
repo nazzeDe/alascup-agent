@@ -211,79 +211,113 @@ class TestActNode:
 
 
 class TestStreamingThink:
-    """AG-007: think_node 流式分发只读工具。"""
+    """AG-007: think_node stream-dispatch based on tool metadata (three pools)."""
+
+    def _state_with_tools(self, tools: list[dict]):
+        return AgentState(messages=[], available_tools=tools, transition=None)
 
     async def test_dispatches_readonly_tools_inline(self):
-        """只读 tool_call → think_node 内立即执行，结果进 streaming_tool_results。"""
+        """Safe-pool (non-mutable, readonly) → pre-executed, streaming_tool_results."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_cpu", "arguments": "{}"}
+                "function": {"name": "tool-server/get_cpu", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
         executor = MockExecutor()
-        classifier = _FakeReadOnlyClassifier()
+        state = self._state_with_tools([
+            {"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True},
+        ])
 
-        result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+        result = await think_node(state, llm=llm, executor=executor)
 
         assert len(result["streaming_tool_results"]) == 1
         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
         assert result["tool_calls"] == []
 
     async def test_non_readonly_stays_in_tool_calls(self):
-        """非只读 tool_call → 保留在 tool_calls，不进 streaming_tool_results。"""
+        """Approval-pool (non-mutable, not readonly) → stays in tool_calls."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "restart_service", "arguments": "{}"}
+                "function": {"name": "tool-server/restart_service", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
         executor = MockExecutor()
-        classifier = _FakeHighRiskClassifier()
+        state = self._state_with_tools([
+            {"name": "restart_service", "server_name": "tool-server", "mutable": False, "is_read_only": False},
+        ])
 
-        result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+        result = await think_node(state, llm=llm, executor=executor)
 
         assert result["streaming_tool_results"] == []
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
 
     async def test_mixed_readonly_and_highrisk(self):
-        """混合：只读立即执行，高风险保留。"""
+        """Mixed: readonly pre-executed, write stays in tool_calls."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_cpu", "arguments": "{}"}
+                "function": {"name": "tool-server/get_cpu", "arguments": "{}"}
             })},
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "restart_service", "arguments": "{}"}
+                "function": {"name": "tool-server/restart_service", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
         executor = MockExecutor()
-        classifier = _MixedClassifier()
+        state = self._state_with_tools([
+            {"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True},
+            {"name": "restart_service", "server_name": "tool-server", "mutable": False, "is_read_only": False},
+        ])
 
-        result = await think_node(_state(), llm=llm, executor=executor, classifier=classifier)
+        result = await think_node(state, llm=llm, executor=executor)
 
         assert len(result["streaming_tool_results"]) == 1
         assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["function"]["name"] == "restart_service"
 
+    async def test_mutable_tool_stays_pending(self):
+        """Mutable pool — not pre-executed, stays in tool_calls for review_node classification."""
+        llm = MockLLM([
+            {"event": "tool_call", "data": json.dumps({
+                "function": {"name": "tool-server/bash", "arguments": '{"cmd":"ls"}'}
+            })},
+            {"event": "done", "data": "{}"},
+        ])
+        executor = MockExecutor()
+        state = self._state_with_tools([
+            {"name": "bash", "server_name": "tool-server", "mutable": True, "is_read_only": False},
+        ])
 
-class _FakeReadOnlyClassifier:
-    async def classify(self, tool_name, params):
-        return {"is_read_only": True, "is_rollbackable": True}
+        result = await think_node(state, llm=llm, executor=executor)
 
+        assert result["streaming_tool_results"] == []
+        assert len(result["tool_calls"]) == 1
+        tc = result["tool_calls"][0]
+        assert tc["function"]["name"] == "bash"
+        assert tc["mutable"] is True
+        assert tc["server_name"] == "tool-server"
 
-class _FakeHighRiskClassifier:
-    async def classify(self, tool_name, params):
-        return {"is_read_only": False, "is_rollbackable": False}
+    async def test_prefix_parsing_attaches_server_name(self):
+        """Server prefix is parsed once and attached to the tool_call dict (Q24)."""
+        llm = MockLLM([
+            {"event": "tool_call", "data": json.dumps({
+                "function": {"name": "rag-server/search_experience", "arguments": "{}"}
+            })},
+            {"event": "done", "data": "{}"},
+        ])
+        executor = MockExecutor()
+        state = self._state_with_tools([
+            {"name": "search_experience", "server_name": "rag-server", "mutable": False, "is_read_only": True},
+        ])
 
+        result = await think_node(state, llm=llm, executor=executor)
 
-class _MixedClassifier:
-    async def classify(self, tool_name, params):
-        if tool_name == "get_cpu":
-            return {"is_read_only": True, "is_rollbackable": True}
-        return {"is_read_only": False, "is_rollbackable": False}
+        assert result["tool_calls"] == []
+        assert len(result["streaming_tool_results"]) == 1
+        assert result["streaming_tool_results"][0]["tool_name"] == "search_experience"
 
 
 class TestObserveNode:

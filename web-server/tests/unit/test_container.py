@@ -23,7 +23,6 @@ class TestServicesDataclass:
             rule_engine=None,
             tool_executor=None,
             audit_logger=MagicMock(),
-            classifier=None,
             approval_bridge=None,
             checkpointer=None,
             graph=None,
@@ -42,7 +41,6 @@ class TestServicesDataclass:
             rule_engine=None,
             tool_executor=None,
             audit_logger=MagicMock(),
-            classifier=None,
             approval_bridge=None,
             checkpointer=None,
             graph=None,
@@ -59,7 +57,7 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=None, session_manager=mock_sm, prompt_manager=None,
             context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=MagicMock(), classifier=None, approval_bridge=None,
+            audit_logger=MagicMock(), approval_bridge=None,
             checkpointer=None, graph=None,
         )
         mock_request.app.state.services = svc
@@ -74,7 +72,7 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=None, session_manager=MagicMock(), prompt_manager=None,
             context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=mock_al, classifier=None, approval_bridge=None,
+            audit_logger=mock_al, approval_bridge=None,
             checkpointer=None, graph=None,
         )
         mock_request.app.state.services = svc
@@ -89,7 +87,7 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=None, session_manager=MagicMock(), prompt_manager=None,
             context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=MagicMock(), classifier=None, approval_bridge=mock_ab,
+            audit_logger=MagicMock(), approval_bridge=mock_ab,
             checkpointer=None, graph=None,
         )
         mock_request.app.state.services = svc
@@ -104,7 +102,7 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=mock_llm, session_manager=MagicMock(), prompt_manager=None,
             context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=MagicMock(), classifier=None, approval_bridge=None,
+            audit_logger=MagicMock(), approval_bridge=None,
             checkpointer=None, graph=None,
         )
         mock_request.app.state.services = svc
@@ -119,28 +117,13 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=None, session_manager=MagicMock(), prompt_manager=None,
             context_manager=None, rule_engine=mock_re, tool_executor=None,
-            audit_logger=MagicMock(), classifier=None, approval_bridge=None,
+            audit_logger=MagicMock(), approval_bridge=None,
             checkpointer=None, graph=None,
         )
         mock_request.app.state.services = svc
 
         result = rule_engine(mock_request)
         assert result is mock_re
-
-    def test_classifier_dep(self, mock_request):
-        from src.services.container import Services, classifier
-
-        mock_cl = MagicMock()
-        svc = Services(
-            llm_adapter=None, session_manager=MagicMock(), prompt_manager=None,
-            context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=MagicMock(), classifier=mock_cl, approval_bridge=None,
-            checkpointer=None, graph=None,
-        )
-        mock_request.app.state.services = svc
-
-        result = classifier(mock_request)
-        assert result is mock_cl
 
     def test_graph_dep(self, mock_request):
         from src.services.container import Services, graph
@@ -149,7 +132,7 @@ class TestDependencyFunctions:
         svc = Services(
             llm_adapter=None, session_manager=MagicMock(), prompt_manager=None,
             context_manager=None, rule_engine=None, tool_executor=None,
-            audit_logger=MagicMock(), classifier=None, approval_bridge=None,
+            audit_logger=MagicMock(), approval_bridge=None,
             checkpointer=None, graph=mock_g,
         )
         mock_request.app.state.services = svc

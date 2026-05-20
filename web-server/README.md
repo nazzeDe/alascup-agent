@@ -257,9 +257,11 @@ LLM 流式输出 token
 
 ## MCP 客户端
 
-- 懒连接：首次 chat-turn 时才连接 tool-server / rag-server，避免启动顺序依赖
-- 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）。工具调用失败（tool not found）时刷新列表
-- tool-server 未就绪时首次 chat-turn 返回友好错误，不崩溃
+- 统一 Server Pool：`servers.json` 列出所有候选 MCP Server，web-server 动态发现可用 server 及其工具。LLM 看到统一工具列表，不感知 server 拓扑
+- 懒连接：首次 chat-turn 时才连接各 server，避免启动顺序依赖
+- 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）。工具调用失败（tool not found）时刷新对应 server
+- 三级工具池：安全池（只读，自动放行）、审批池（写操作，需用户确认）、可变池（每调 `classify_tool` 动态判定）
+- server 未就绪时跳过（WARN），不影响已就绪 server 的工具使用
 
 ## 配置
 

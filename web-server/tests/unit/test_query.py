@@ -68,7 +68,7 @@ class MockExecutor:
     def __init__(self):
         self.calls: list[dict] = []
 
-    async def execute(self, tool_name, arguments, **kwargs):
+    async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None, **kwargs):
         self.calls.append({"tool_name": tool_name, "arguments": arguments})
         return {"execution_status": "SUCCEEDED", "output": f"result of {tool_name}"}
 
@@ -76,6 +76,9 @@ class MockExecutor:
         import asyncio
         tasks = [self.execute(c["tool_name"], c.get("arguments", {})) for c in calls]
         return await asyncio.gather(*tasks)
+
+    async def classify(self, tool_name, params, server_name=""):
+        return {"is_read_only": True, "is_rollbackable": True}
 
 
 class MockContextManager:
@@ -100,6 +103,14 @@ class MockAuditLogger:
 pytestmark = pytest.mark.asyncio
 
 
+def _tools(*names, is_read_only=True, mutable=False, server="tool-server"):
+    """Build available_tools list from bare names."""
+    return [
+        {"name": n, "server_name": server, "mutable": mutable, "is_read_only": is_read_only}
+        for n in names
+    ]
+
+
 async def _collect(gen):
     events = []
     async for e in gen:
@@ -110,11 +121,6 @@ async def _collect(gen):
 @pytest.fixture
 def llm():
     return MockLLM()
-
-
-@pytest.fixture
-def classifier():
-    return MockClassifier()
 
 
 @pytest.fixture
@@ -144,8 +150,8 @@ def bridge():
 
 
 @pytest.fixture
-def graph(llm, executor, classifier, rule_engine, audit):
-    return build_graph(llm=llm, executor=executor, classifier=classifier,
+def graph(llm, executor, rule_engine, audit):
+    return build_graph(llm=llm, executor=executor,
                        rule_engine=rule_engine, audit_logger=audit,
                        checkpointer=MemorySaver())
 
@@ -168,7 +174,7 @@ class TestQueryBasic:
         assert event_types == ["assistant", "done"]
 
     async def test_tool_call_auto_approve_then_done(self, query, llm):
-        """读工具 → AUTO_APPROVE → 执行 → 结果推回 → LLM 输出结论 → done。"""
+        """Readonly tool → AUTO_APPROVE → execute → result → LLM concludes → done."""
         llm.responses = [
             {"content": "", "tool_calls": [
                 {"function": {"name": "get_cpu", "arguments": "{}"}},
@@ -176,7 +182,7 @@ class TestQueryBasic:
             {"content": "CPU is 85%.", "tool_calls": None},
         ]
         events = await _collect(query.run(
-            [{"role": "user", "content": "check CPU"}], available_tools=[],
+            [{"role": "user", "content": "check CPU"}], available_tools=_tools("get_cpu"),
         ))
         event_types = [e[0] for e in events]
         assert "tool_call" in event_types
@@ -189,9 +195,8 @@ class TestQueryHighRisk:
     """AG-004: 高风险工具审批。"""
 
     async def test_high_risk_yields_approval_required_and_resumes(self, query, llm, bridge, executor, rule_engine, audit):
-        """高风险 tool_call → interrupt → yield approval_required → resolve → 继续执行。"""
-        query._graph = build_graph(llm=llm, executor=executor, classifier=MockClassifier(is_read_only=True, threshold_risky=True),
-                                   rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        """High-risk tool_call → interrupt → yield approval_required → resolve → continue."""
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -199,11 +204,12 @@ class TestQueryHighRisk:
             ]},
             {"content": "Service restarted.", "tool_calls": None},
         ]
+        tools = _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
         # Phase 1: run until interrupt
         async for e in query.run(
-            [{"role": "user", "content": "restart"}], available_tools=[],
+            [{"role": "user", "content": "restart"}], available_tools=tools,
         ):
             events.append((e["event"], e["data"]))
 
@@ -243,7 +249,7 @@ class TestQueryExit:
         assert events[-1][0] == "done"
 
     async def test_continues_when_tool_calls_present(self, query, llm, executor):
-        """有 tool_call 时不应立即 done——LLM 需要基于 tool_result 继续推理。"""
+        """Tool calls should keep loop alive — LLM reasons on tool_result."""
         llm.responses = [
             {"content": "", "tool_calls": [
                 {"function": {"name": "get_cpu", "arguments": "{}"}},
@@ -251,7 +257,7 @@ class TestQueryExit:
             {"content": "Result analyzed.", "tool_calls": None},
         ]
         events = await _collect(query.run(
-            [{"role": "user", "content": "check"}], available_tools=[],
+            [{"role": "user", "content": "check"}], available_tools=_tools("get_cpu"),
         ))
         assert events[-1][0] == "done"
         assert executor.calls
@@ -261,7 +267,7 @@ class TestQueryConcurrent:
     """AG-003, AG-004: 并发 tool_call。"""
 
     async def test_concurrent_readonly_tools_executed(self, query, llm, executor):
-        """AG-003: LLM 单次返回两个只读 tool_call → 并行执行 → 两个结果。"""
+        """AG-003: LLM returns 2 readonly tool_calls → parallel execution → 2 results."""
         llm.responses = [
             {"content": "", "tool_calls": [
                 {"function": {"name": "get_cpu", "arguments": "{}"}},
@@ -270,7 +276,7 @@ class TestQueryConcurrent:
             {"content": "Both checked.", "tool_calls": None},
         ]
         events = await _collect(query.run(
-            [{"role": "user", "content": "check both"}], available_tools=[],
+            [{"role": "user", "content": "check both"}], available_tools=_tools("get_cpu", "get_memory"),
         ))
         event_types = [e[0] for e in events]
         assert event_types.count("tool_call") == 2
@@ -279,7 +285,7 @@ class TestQueryConcurrent:
         assert events[-1][0] == "done"
 
     async def test_concurrent_readonly_tools_single_parallel_call(self, query, llm, executor):
-        """AG-003: 验证只读工具通过 execute_parallel 一次调用。"""
+        """AG-003: readonly tools use execute_parallel in a single call."""
         parallel_called = False
         original = executor.execute_parallel
 
@@ -298,14 +304,13 @@ class TestQueryConcurrent:
             {"content": "Done.", "tool_calls": None},
         ]
         await _collect(query.run(
-            [{"role": "user", "content": "check"}], available_tools=[],
+            [{"role": "user", "content": "check"}], available_tools=_tools("get_cpu", "get_memory"),
         ))
         assert parallel_called
 
     async def test_mixed_readonly_highrisk(self, query, llm, bridge, executor, rule_engine, audit):
-        """AG-004: 一个只读 + 一个高风险 → 只读和审批通过的工具最终都执行。"""
-        query._graph = build_graph(llm=llm, executor=executor, classifier=MockClassifier(is_read_only=True, threshold_risky=True),
-                                   rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        """AG-004: readonly + high-risk → readonly pre-executed, high-risk needs approval."""
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -314,11 +319,12 @@ class TestQueryConcurrent:
             ]},
             {"content": "Handled.", "tool_calls": None},
         ]
+        tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
         # Phase 1: run until interrupt
         async for e in query.run(
-            [{"role": "user", "content": "check and restart"}], available_tools=[],
+            [{"role": "user", "content": "check and restart"}], available_tools=tools,
         ):
             events.append((e["event"], e["data"]))
 
@@ -337,7 +343,7 @@ class TestQueryStreamingExecution:
     """AG-007: 流式工具执行——只读工具在 think 阶段即被分发。"""
 
     async def test_readonly_tools_pre_executed_skip_review_act(self, query, llm, executor):
-        """只读 tool_call 被 think_node 预执行，跳过 review/act，结果直接推送。"""
+        """Readonly tool_calls pre-executed by think_node, skip review/act."""
         llm.responses = [
             {"content": "", "tool_calls": [
                 {"function": {"name": "get_cpu", "arguments": "{}"}},
@@ -346,7 +352,7 @@ class TestQueryStreamingExecution:
             {"content": "Both checked.", "tool_calls": None},
         ]
         events = await _collect(query.run(
-            [{"role": "user", "content": "check both"}], available_tools=[],
+            [{"role": "user", "content": "check both"}], available_tools=_tools("get_cpu", "get_memory"),
         ))
         event_types = [e[0] for e in events]
         # tool_call events from think_node emit; tool_result events from observe_node
@@ -356,9 +362,8 @@ class TestQueryStreamingExecution:
         assert events[-1][0] == "done"
 
     async def test_mixed_streaming_highrisk_still_reviewed(self, query, llm, bridge, executor, rule_engine, audit):
-        """混合：只读预执行，高风险走审查 → interrupt → 审批 → 执行。"""
-        query._graph = build_graph(llm=llm, executor=executor, classifier=MockClassifier(is_read_only=True, threshold_risky=True),
-                                   rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        """Mixed: readonly pre-executed, high-risk goes through review → interrupt → execute."""
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -367,11 +372,12 @@ class TestQueryStreamingExecution:
             ]},
             {"content": "Done.", "tool_calls": None},
         ]
+        tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
         # Phase 1: run until interrupt
         async for e in query.run(
-            [{"role": "user", "content": "check and restart"}], available_tools=[],
+            [{"role": "user", "content": "check and restart"}], available_tools=tools,
         ):
             events.append((e["event"], e["data"]))
 
@@ -480,8 +486,7 @@ class TestQueryFullChainAudit:
 
     async def test_full_audit_chain_high_risk(self, query, llm, bridge, audit, executor, rule_engine):
         """高风险操作完整审计链：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED。"""
-        query._graph = build_graph(llm=llm, executor=executor, classifier=MockClassifier(is_read_only=True, threshold_risky=True),
-                                   rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -512,8 +517,7 @@ class TestQueryFullChainAudit:
 
     async def test_full_audit_chain_mixed(self, query, llm, bridge, audit, executor, rule_engine):
         """混合场景：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED 链路完整。"""
-        query._graph = build_graph(llm=llm, executor=executor, classifier=MockClassifier(is_read_only=True, threshold_risky=True),
-                                   rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
 
         llm.responses = [
             {"content": "", "tool_calls": [

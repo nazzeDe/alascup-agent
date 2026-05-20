@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from src.config.models import LLMConfig, RulesConfig, ServersConfig
+from pydantic import TypeAdapter
+
+from src.config.models import LLMConfig, RulesConfig, ServerEntry
 
 
 def _read_json(path: Path) -> dict:
@@ -21,5 +23,17 @@ def load_rules_config(path: Path) -> RulesConfig:
         return RulesConfig()
 
 
-def load_servers_config(path: Path) -> ServersConfig:
-    return ServersConfig.model_validate(_read_json(path))
+_servers_adapter = TypeAdapter(list[ServerEntry])
+
+
+def load_servers_config(path: Path) -> list[ServerEntry]:
+    data = _read_json(path)
+    servers = _servers_adapter.validate_python(data)
+    names = [s.name for s in servers]
+    if len(names) != len(set(names)):
+        seen = set()
+        for n in names:
+            if n in seen:
+                raise ValueError(f"Duplicate server name: {n}")
+            seen.add(n)
+    return servers

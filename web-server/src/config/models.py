@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 
+
 class RuleEntry(BaseModel):
     tool_name: str
     description: str = ""
@@ -11,12 +12,9 @@ class RulesConfig(BaseModel):
 
 
 class ServerEntry(BaseModel):
+    name: str
     url: str
-
-
-class ServersConfig(BaseModel):
-    tool_server: ServerEntry
-    rag_server: ServerEntry
+    transport: str = "streamable-http"
 
 
 class LLMConfig(BaseModel):

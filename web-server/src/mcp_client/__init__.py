@@ -1,4 +1,4 @@
-from src.mcp_client.classifier import ToolClassifier
 from src.mcp_client.executor import ToolExecutor
+from src.mcp_client.registry import ServerRegistry
 
-__all__ = ["ToolClassifier", "ToolExecutor"]
+__all__ = ["ToolExecutor", "ServerRegistry"]

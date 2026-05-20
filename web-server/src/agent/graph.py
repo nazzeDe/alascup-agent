@@ -13,12 +13,12 @@ from src.agent.nodes import (
 from src.agent.state import AgentState
 
 
-def build_graph(*, llm, executor, classifier, rule_engine, audit_logger, checkpointer) -> CompiledStateGraph:
-    """构建 ReAct graph: think → review → act → observe → END。
+def build_graph(*, llm, executor, rule_engine, audit_logger, checkpointer) -> CompiledStateGraph:
+    """Build ReAct graph: think → review → act → observe → END.
 
-    think 后路由：有 tool_call → review，无 → END。
-    review 节点使用 interrupt() 在高风险操作时暂停等审批。
-    checkpointer 为 interrupt/Command(resume) 提供状态持久化，必须显式传入。
+    After think: has tool_call → review, none → END.
+    review_node uses interrupt() to pause on high-risk tools.
+    checkpointer required for interrupt/Command(resume) state persistence.
     """
     if checkpointer is None:
         raise ValueError(
@@ -28,10 +28,10 @@ def build_graph(*, llm, executor, classifier, rule_engine, audit_logger, checkpo
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("think", partial(think_node, llm=llm, executor=executor, classifier=classifier))
+    graph.add_node("think", partial(think_node, llm=llm, executor=executor))
     graph.add_node(
         "review",
-        partial(review_node, classifier=classifier, rule_engine=rule_engine, audit_logger=audit_logger),
+        partial(review_node, executor=executor, rule_engine=rule_engine, audit_logger=audit_logger),
     )
     graph.add_node("act", partial(act_node, executor=executor, audit_logger=audit_logger))
     graph.add_node("observe", observe_node)

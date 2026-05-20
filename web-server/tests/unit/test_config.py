@@ -75,15 +75,47 @@ class TestServersConfig:
     def test_load_servers(self, tmp_config_dir):
         from src.config.loader import load_servers_config
 
-        cfg = {
-            "tool_server": {"url": "http://tool-server:8001"},
-            "rag_server": {"url": "http://rag-server:8002"},
-        }
+        cfg = [
+            {"name": "tool-server", "url": "http://tool-server:8001"},
+            {"name": "rag-server", "url": "http://rag-server:8002", "transport": "streamable-http"},
+        ]
         (tmp_config_dir / "servers.json").write_text(json.dumps(cfg))
 
         result = load_servers_config(tmp_config_dir / "servers.json")
-        assert result.tool_server.url == "http://tool-server:8001"
-        assert result.rag_server.url == "http://rag-server:8002"
+        assert len(result) == 2
+        assert result[0].name == "tool-server"
+        assert result[0].url == "http://tool-server:8001"
+        assert result[0].transport == "streamable-http"
+        assert result[1].name == "rag-server"
+        assert result[1].url == "http://rag-server:8002"
+
+    def test_load_empty_servers(self, tmp_config_dir):
+        from src.config.loader import load_servers_config
+
+        (tmp_config_dir / "servers.json").write_text(json.dumps([]))
+        result = load_servers_config(tmp_config_dir / "servers.json")
+        assert result == []
+
+    def test_missing_required_field_raises(self, tmp_config_dir):
+        from src.config.loader import load_servers_config
+
+        cfg = [{"name": "tool-server"}]
+        (tmp_config_dir / "servers.json").write_text(json.dumps(cfg))
+
+        with pytest.raises(ValidationError):
+            load_servers_config(tmp_config_dir / "servers.json")
+
+    def test_duplicate_name_raises(self, tmp_config_dir):
+        from src.config.loader import load_servers_config
+
+        cfg = [
+            {"name": "tool-server", "url": "http://a:8001"},
+            {"name": "tool-server", "url": "http://b:8001"},
+        ]
+        (tmp_config_dir / "servers.json").write_text(json.dumps(cfg))
+
+        with pytest.raises(ValueError, match="Duplicate server name"):
+            load_servers_config(tmp_config_dir / "servers.json")
 
     def test_file_not_found(self, tmp_config_dir):
         from src.config.loader import load_servers_config

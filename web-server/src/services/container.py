@@ -42,7 +42,6 @@ class Services:
     rule_engine: Any
     tool_executor: Any
     audit_logger: AuditLogger
-    classifier: Any
     approval_bridge: Any
     checkpointer: Any
     graph: Any
@@ -82,10 +81,6 @@ def tool_executor(request: Request):
 
 def audit_logger(request: Request) -> AuditLogger:
     return _services(request).audit_logger
-
-
-def classifier(request: Request):
-    return _services(request).classifier
 
 
 def approval_bridge(request: Request):

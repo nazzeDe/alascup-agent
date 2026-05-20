@@ -19,20 +19,18 @@ class _MockLLMAdapter:
         pass
 
 
-class _MockClassifier:
-    async def classify(self, tool_name, params):
-        return {"is_read_only": True, "is_rollbackable": True}
-
-
 class _MockToolExecutor:
     async def list_tools(self):
         return []
 
-    async def execute(self, tool_name, arguments, server=None):
+    async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None):
         return {"execution_status": "SUCCEEDED", "output": {}}
 
     async def execute_parallel(self, calls):
         return [{"execution_status": "SUCCEEDED", "output": {}} for _ in calls]
+
+    async def classify(self, tool_name, params, server_name):
+        return {"is_read_only": True, "is_rollbackable": True}
 
 
 def _build_test_services():
@@ -50,7 +48,6 @@ def _build_test_services():
 
     llm_adapter = _MockLLMAdapter()
     executor = _MockToolExecutor()
-    classifier = _MockClassifier()
     rule_engine = RuleEngine(RulesConfig())
     audit_logger = InMemoryAuditLogger()
     checkpointer = MemorySaver()
@@ -58,7 +55,6 @@ def _build_test_services():
     graph = build_graph(
         llm=llm_adapter,
         executor=executor,
-        classifier=classifier,
         rule_engine=rule_engine,
         audit_logger=audit_logger,
         checkpointer=checkpointer,
@@ -72,7 +68,6 @@ def _build_test_services():
         rule_engine=rule_engine,
         tool_executor=executor,
         audit_logger=audit_logger,
-        classifier=classifier,
         approval_bridge=ApprovalBridge(),
         checkpointer=checkpointer,
         graph=graph,

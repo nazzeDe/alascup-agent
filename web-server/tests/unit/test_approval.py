@@ -35,14 +35,13 @@ def app_with_bridge():
         async def list_tools(self):
             return []
 
-        async def execute(self, tool_name, arguments, server=None):
+        async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None):
             return {"execution_status": "SUCCEEDED", "output": {}}
 
         async def execute_parallel(self, calls):
             return [{"execution_status": "SUCCEEDED", "output": {}} for _ in calls]
 
-    class _MockClassifier:
-        async def classify(self, tool_name, params, server=None):
+        async def classify(self, tool_name, params, server_name=""):
             return {"is_read_only": True, "is_rollbackable": True}
 
     from langgraph.checkpoint.memory import MemorySaver
@@ -51,7 +50,6 @@ def app_with_bridge():
     graph = build_graph(
         llm=_MockLLM(),
         executor=_MockExecutor(),
-        classifier=_MockClassifier(),
         rule_engine=RuleEngine(RulesConfig()),
         audit_logger=InMemoryAuditLogger(),
         checkpointer=checkpointer,
@@ -66,7 +64,6 @@ def app_with_bridge():
         rule_engine=RuleEngine(RulesConfig()),
         tool_executor=_MockExecutor(),
         audit_logger=InMemoryAuditLogger(),
-        classifier=_MockClassifier(),
         approval_bridge=bridge,
         checkpointer=checkpointer,
         graph=graph,

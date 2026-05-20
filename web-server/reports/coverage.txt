@@ -1,0 +1,67 @@
+........................................................................ [ 22%]
+........................................................................ [ 45%]
+........................................................................ [ 67%]
+........................................................................ [ 90%]
+................................                                         [100%]
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.11.15-final-0 _______________
+
+Name                                   Stmts   Miss  Cover
+----------------------------------------------------------
+src/__init__.py                            0      0   100%
+src/agent/__init__.py                      5      0   100%
+src/agent/graph.py                        19      1    95%
+src/agent/loop/__init__.py                 2      0   100%
+src/agent/loop/audit.py                    7      0   100%
+src/agent/loop/events.py                  29      0   100%
+src/agent/loop/handlers/__init__.py        3      0   100%
+src/agent/loop/handlers/error.py          31      1    97%
+src/agent/loop/handlers/interrupt.py      13      0   100%
+src/agent/loop/orchestrator.py            49      0   100%
+src/agent/loop/transitions.py              9      0   100%
+src/agent/nodes.py                       192     19    90%
+src/agent/query.py                        29      0   100%
+src/agent/state.py                        23      0   100%
+src/api/__init__.py                       12      0   100%
+src/api/approval.py                       40      3    92%
+src/api/chat.py                           49     11    78%
+src/api/health.py                          5      0   100%
+src/api/sessions.py                       17      2    88%
+src/api/tools.py                           6      1    83%
+src/config/__init__.py                     3      0   100%
+src/config/loader.py                      16      0   100%
+src/config/models.py                      22      0   100%
+src/error.py                               8      0   100%
+src/main.py                               51     25    51%
+src/mcp_client/__init__.py                 3      0   100%
+src/mcp_client/classifier.py              17      0   100%
+src/mcp_client/executor.py                43      2    95%
+src/models/__init__.py                     6      0   100%
+src/models/api_error.py                   10      0   100%
+src/models/audit.py                       24      0   100%
+src/models/message.py                     16      0   100%
+src/models/session.py                     13      0   100%
+src/models/tool.py                        52      0   100%
+src/observability/__init__.py              5      0   100%
+src/observability/audit_logger.py         15      3    80%
+src/observability/debug_log.py            52      9    83%
+src/observability/profiler.py             30      0   100%
+src/observability/tracer.py               21      1    95%
+src/persistence/__init__.py                0      0   100%
+src/persistence/checkpoint.py             88      0   100%
+src/security/__init__.py                   3      0   100%
+src/security/pending.py                    7      0   100%
+src/security/rule_engine.py               17      2    88%
+src/services/__init__.py                   6      0   100%
+src/services/container.py                 48      1    98%
+src/services/context_manager.py           59      7    88%
+src/services/db.py                        26     15    42%
+src/services/error_recovery.py            25      0   100%
+src/services/llm_adapter.py              110     18    84%
+src/services/prompt_manager.py            59      0   100%
+src/services/session_manager.py           59      0   100%
+src/tools/__init__.py                      2      0   100%
+src/tools/feature_time_tracker.py         56      0   100%
+----------------------------------------------------------
+TOTAL                                   1512    121    92%
+320 passed in 8.35s

@@ -1,0 +1,8 @@
+src/agent/nodes.py
+    F 12:0 think_node - C (20)
+    F 153:0 review_node - C (12)
+src/agent/loop/orchestrator.py
+    M 46:4 LoopOrchestrator.run - C (11)
+src/services/llm_adapter.py
+    F 8:0 classify_error - C (15)
+    M 98:4 LLMAdapter.generate_stream - C (13)
