@@ -26,6 +26,6 @@ def get_process_list(config: ToolServerConfig) -> list[dict]:
                 })
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
-    except Exception:
+    except (FileNotFoundError, PermissionError, OSError):
         pass
     return processes

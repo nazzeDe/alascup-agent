@@ -107,7 +107,7 @@ class TestAput:
         config = _config(thread_id="t1", checkpoint_ns="ns1")
         ckpt = _checkpoint_data("ckpt-1")
 
-        result = await cp.aput(config, ckpt, metadata={"source": "test"}, new_versions={})
+        result = await cp.aput(config, ckpt, {"source": "test"}, {})
 
         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
         conn.execute.assert_called_once()
@@ -122,7 +122,7 @@ class TestAput:
         config = _config(thread_id="t1")
         ckpt = _checkpoint_data("ckpt-1")
 
-        await cp.aput(config, ckpt, metadata={}, new_versions={})
+        await cp.aput(config, ckpt, {}, {})
 
         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
         sql = conn.execute.call_args[0][0]
@@ -137,7 +137,7 @@ class TestAput:
         ckpt = _checkpoint_data("ckpt-1")
         ckpt["channel_values"] = {"messages": ["msg1", "msg2"]}
 
-        await cp.aput(_config(), ckpt, metadata={}, new_versions={})
+        await cp.aput(_config(), ckpt, {}, {})
 
         conn = mock_db.pool.acquire.return_value.__aenter__.return_value
         args = conn.execute.call_args[0]

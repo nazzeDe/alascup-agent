@@ -8,7 +8,8 @@ from fastmcp import FastMCP
 from src.cache import create_cache
 from src.config import ToolServerConfig, load_config
 from src.handlers import handle_execute_tool
-from src.security.classify import classify_tool
+from src.security.bash_classify import classify_bash
+from src.security.operation_classify import classify_manage_service
 from src.tools.operation import manage_service, run_bash
 from src.tools.perception import (
     get_cpu_info,
@@ -24,6 +25,11 @@ from src.tools.registry import (
     list_tools,
     register,
 )
+
+# Attach classification functions to mutable operation tools (used by
+# _register_tools to auto-populate classify_fn on ToolMeta).
+run_bash.__classify__ = classify_bash  # type: ignore[attr-defined]
+manage_service.__classify__ = classify_manage_service  # type: ignore[attr-defined]
 
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     "get_cpu_info": {
@@ -72,37 +78,101 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 PERCEPTION_TOOLS = {
-    "get_cpu_info": ("获取 CPU 型号、核心数、负载和利用率", get_cpu_info, True),
-    "get_memory_info": ("获取物理内存和 Swap 使用量", get_memory_info, True),
-    "get_disk_usage": ("获取磁盘使用率和空间分布", get_disk_usage, True),
-    "get_network_info": ("获取网卡地址和 I/O 计数器", get_network_info, True),
-    "get_process_list": ("获取运行进程列表（PID/名称/CPU/内存/状态）", get_process_list, True),
-    "read_logs": ("读取日志文件末尾行", read_logs, True),
+    "get_cpu_info": ("获取 CPU 型号、核心数、负载和利用率", get_cpu_info, True,
+                     {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
+    "get_memory_info": ("获取物理内存和 Swap 使用量", get_memory_info, True,
+                        {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
+    "get_disk_usage": ("获取磁盘使用率和空间分布", get_disk_usage, True,
+                       {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
+    "get_network_info": ("获取网卡地址和 I/O 计数器", get_network_info, True,
+                         {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
+    "get_process_list": ("获取运行进程列表（PID/名称/CPU/内存/状态）", get_process_list, True,
+                         {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
+    "read_logs": ("读取日志文件末尾行", read_logs, True,
+                  {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
 }
 
 OPERATION_TOOLS = {
-    "run_bash": ("在沙箱环境中执行 Shell 命令", run_bash, False),
-    "manage_service": ("管理 systemd 服务", manage_service, False),
+    "run_bash": ("在沙箱环境中执行 Shell 命令", run_bash, False,
+                 {"is_read_only": False, "is_rollbackable": False, "mutable": True}),
+    "manage_service": ("管理 systemd 服务", manage_service, False,
+                       {"is_read_only": False, "is_rollbackable": False, "mutable": True}),
 }
 
 
 def _register_tools(config: ToolServerConfig) -> None:
     clear_registry()
-    for name, (desc, fn, is_read_only) in PERCEPTION_TOOLS.items():
+    for tools_dict in (PERCEPTION_TOOLS, OPERATION_TOOLS):
+        for name, (desc, fn, is_read_only, meta) in tools_dict.items():
+            classify_fn = getattr(fn, "__classify__", None)
+            register(ToolMeta(
+                name=name,
+                description=desc,
+                is_read_only=is_read_only,
+                input_schema=TOOL_SCHEMAS.get(name, {}),
+                fn=lambda c=config, f=fn, **kw: f(c, **kw),
+                classify_fn=classify_fn,
+                meta=meta,
+            ))
+
+
+def _register_classify_companions(server: FastMCP) -> None:
+    """Auto-generate companion classification tools for mutable tools.
+
+    Scans the registry for tools with a classify_fn and creates hidden
+    MCP companion tools named {tool_name}_classify. These are called by
+    the web-server review layer to dynamically determine safe/dangerous.
+    """
+    for tool in list_tools():
+        if tool.classify_fn is None:
+            continue
+
+        companion_name = f"{tool.name}_classify"
+        classify_fn = tool.classify_fn
+
+        # Build a wrapper that matches classify_fn's signature.
+        # The wrapper is registered both as an MCP tool (on the server) and
+        # in the tool registry for discoverability.
+        import inspect
+
+        sig = inspect.signature(classify_fn)
+        params = list(sig.parameters.values())
+
+        # Build an explicit-parameter wrapper so fastmcp can inspect it
+        param_defs = []
+        call_args = []
+        for p in params:
+            if p.default is inspect.Parameter.empty:
+                param_defs.append(f"{p.name}")
+            else:
+                param_defs.append(f"{p.name}={p.default!r}")
+            call_args.append(f"{p.name}={p.name}")
+
+        wrapper_src = (
+            f"def _companion({', '.join(param_defs)}):\n"
+            f"    return classify_fn({', '.join(call_args)})\n"
+        )
+        local_ns: dict[str, Any] = {"classify_fn": classify_fn}
+        exec(wrapper_src, local_ns)
+        companion_fn = local_ns["_companion"]
+
+        # Register as MCP tool (hidden from LLM)
+        server.tool(
+            name=companion_name,
+            description=f"Security classification companion for {tool.name}",
+            meta={"hidden": True, "is_read_only": True, "mutable": False},
+        )(companion_fn)
+
+        # Also register in the tool registry so web-server can discover it
         register(ToolMeta(
-            name=name,
-            description=desc,
-            is_read_only=is_read_only,
-            input_schema=TOOL_SCHEMAS.get(name, {}),
-            fn=lambda c=config, f=fn, **kw: f(c, **kw),
-        ))
-    for name, (desc, fn, is_read_only) in OPERATION_TOOLS.items():
-        register(ToolMeta(
-            name=name,
-            description=desc,
-            is_read_only=is_read_only,
-            input_schema=TOOL_SCHEMAS.get(name, {}),
-            fn=lambda c=config, f=fn, **kw: f(c, **kw),
+            name=companion_name,
+            description=f"Security classification companion for {tool.name}",
+            is_read_only=True,
+            input_schema={},
+            fn=lambda c=None, **kw: classify_fn(**kw),
+            classify_fn=None,
+            hidden=True,
+            meta={"hidden": True, "is_read_only": True, "mutable": False},
         ))
 
 
@@ -113,53 +183,38 @@ def create_server(config: ToolServerConfig) -> FastMCP:
     server = FastMCP(name="tool-server")
 
     # ── perception tools (explicit signatures — fastmcp rejects **kwargs) ──
-    @server.tool(name="get_cpu_info", description="获取 CPU 型号、核心数、负载和利用率", output_schema=TOOL_SCHEMAS["get_cpu_info"])
+    @server.tool(name="get_cpu_info", description="获取 CPU 型号、核心数、负载和利用率", output_schema=TOOL_SCHEMAS["get_cpu_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_cpu_info() -> dict:
         return get_cpu_info(config)
 
-    @server.tool(name="get_memory_info", description="获取物理内存和 Swap 使用量", output_schema=TOOL_SCHEMAS["get_memory_info"])
+    @server.tool(name="get_memory_info", description="获取物理内存和 Swap 使用量", output_schema=TOOL_SCHEMAS["get_memory_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_memory_info() -> dict:
         return get_memory_info(config)
 
-    @server.tool(name="get_disk_usage", description="获取磁盘使用率和空间分布", output_schema=TOOL_SCHEMAS["get_disk_usage"])
+    @server.tool(name="get_disk_usage", description="获取磁盘使用率和空间分布", output_schema=TOOL_SCHEMAS["get_disk_usage"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_disk_usage(path: str = "/") -> dict:
         return get_disk_usage(config, path=path)
 
-    @server.tool(name="get_network_info", description="获取网卡地址和 I/O 计数器", output_schema=TOOL_SCHEMAS["get_network_info"])
+    @server.tool(name="get_network_info", description="获取网卡地址和 I/O 计数器", output_schema=TOOL_SCHEMAS["get_network_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_network_info() -> dict:
         return get_network_info(config)
 
-    @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=TOOL_SCHEMAS["get_process_list"])
+    @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=TOOL_SCHEMAS["get_process_list"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_process_list() -> dict:
         return get_process_list(config)
 
-    @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=TOOL_SCHEMAS["read_logs"])
+    @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=TOOL_SCHEMAS["read_logs"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _read_logs(path: str = "", lines: int = 50) -> dict:
         return read_logs(config, path=path, lines=lines)
 
     # ── operation tools ──
-    @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=TOOL_SCHEMAS["run_bash"])
+    @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=TOOL_SCHEMAS["run_bash"], meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
     def _run_bash(command: str = "", timeout: int | None = None) -> dict:
         return run_bash(config, command=command, timeout=timeout)
 
-    @server.tool(name="manage_service", description="管理 systemd 服务", output_schema=TOOL_SCHEMAS["manage_service"])
+    @server.tool(name="manage_service", description="管理 systemd 服务", output_schema=TOOL_SCHEMAS["manage_service"], meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
     def _manage_service(name: str = "", action: str = "") -> dict:
         return manage_service(config, name=name, action=action)
-
-    # ── classify_tool: security classification query, called by web-server review layer ──
-    @server.tool(
-        name="classify_tool",
-        description="查询工具操作的安全分级（isReadOnly / isRollbackable）",
-        output_schema={
-            "type": "object",
-            "properties": {
-                "tool_name": {"type": "string"},
-                "params": {"type": "object"},
-            },
-        },
-    )
-    def classify(tool_name: str = "", params: dict | None = None) -> dict:
-        return classify_tool(tool_name, params or {})
 
     # ── execute_tool: secured execution dispatcher, called by web-server after approval ──
     @server.tool(
@@ -210,6 +265,9 @@ def create_server(config: ToolServerConfig) -> FastMCP:
     )
     def health() -> dict:
         return {"status": "healthy", "tool_count": len(list_tools())}
+
+    # ── companion classification tools for mutable operation tools ──
+    _register_classify_companions(server)
 
     return server
 

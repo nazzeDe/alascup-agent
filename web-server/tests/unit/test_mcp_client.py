@@ -251,15 +251,15 @@ class TestToolExecutorExecuteParallel:
         assert all(r["execution_status"] == "SUCCEEDED" for r in results)
 
 
-class TestToolExecutorClassify:
+class TestToolExecutorClassifyCompanion:
     @pytest.mark.asyncio
-    async def test_calls_classify_tool_on_correct_server(self):
+    async def test_calls_classify_companion_on_correct_server(self):
         from src.mcp_client.executor import ToolExecutor
 
         registry = FakeRegistry()
 
         mock_result = MagicMock()
-        mock_result.content = {"isReadOnly": False, "isRollbackable": True}
+        mock_result.content = {"safe": False}
 
         mock_client = MagicMock()
         mock_client.call_tool = AsyncMock(return_value=mock_result)
@@ -269,22 +269,22 @@ class TestToolExecutorClassify:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify("bash", {"cmd": "ls"}, server_name="tool-server")
+            result = await executor.classify_companion("bash", {"cmd": "ls"}, server_name="tool-server")
 
         MockClient.assert_called_once_with("http://tool:8001")
         mock_client.call_tool.assert_called_once_with(
-            "classify_tool", {"tool_name": "bash", "params": {"cmd": "ls"}}
+            "bash_classify", {"cmd": "ls"}
         )
-        assert result == {"is_read_only": False, "is_rollbackable": True}
+        assert result == {"safe": False}
 
     @pytest.mark.asyncio
-    async def test_normalizes_snake_case_keys(self):
+    async def test_safe_true_returns_safe_true(self):
         from src.mcp_client.executor import ToolExecutor
 
         registry = FakeRegistry()
 
         mock_result = MagicMock()
-        mock_result.content = {"is_read_only": True, "is_rollbackable": False}
+        mock_result.content = {"safe": True}
 
         mock_client = MagicMock()
         mock_client.call_tool = AsyncMock(return_value=mock_result)
@@ -294,12 +294,12 @@ class TestToolExecutorClassify:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify("get_cpu", {}, server_name="tool-server")
+            result = await executor.classify_companion("get_cpu", {}, server_name="tool-server")
 
-        assert result == {"is_read_only": True, "is_rollbackable": False}
+        assert result == {"safe": True}
 
     @pytest.mark.asyncio
-    async def test_non_dict_content_defaults_to_dangerous(self):
+    async def test_non_dict_content_defaults_to_unsafe(self):
         from src.mcp_client.executor import ToolExecutor
 
         registry = FakeRegistry()
@@ -315,12 +315,12 @@ class TestToolExecutorClassify:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion("bash", {}, server_name="tool-server")
 
-        assert result == {"is_read_only": False, "is_rollbackable": False}
+        assert result == {"safe": False}
 
     @pytest.mark.asyncio
-    async def test_none_content_defaults_to_dangerous(self):
+    async def test_none_content_defaults_to_unsafe(self):
         from src.mcp_client.executor import ToolExecutor
 
         registry = FakeRegistry()
@@ -336,18 +336,18 @@ class TestToolExecutorClassify:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion("bash", {}, server_name="tool-server")
 
-        assert result == {"is_read_only": False, "is_rollbackable": False}
+        assert result == {"safe": False}
 
     @pytest.mark.asyncio
-    async def test_partial_camelcase_keys(self):
+    async def test_missing_safe_key_defaults_to_unsafe(self):
         from src.mcp_client.executor import ToolExecutor
 
         registry = FakeRegistry()
 
         mock_result = MagicMock()
-        mock_result.content = {"isReadOnly": False}
+        mock_result.content = {"other_key": "value"}
 
         mock_client = MagicMock()
         mock_client.call_tool = AsyncMock(return_value=mock_result)
@@ -357,6 +357,6 @@ class TestToolExecutorClassify:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion("bash", {}, server_name="tool-server")
 
-        assert result == {"is_read_only": False, "is_rollbackable": False}
+        assert result == {"safe": False}

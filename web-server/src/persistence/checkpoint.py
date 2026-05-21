@@ -40,7 +40,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
-        new_versions: ChannelVersions,
+        _new_versions: ChannelVersions,
     ) -> RunnableConfig:
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -79,7 +79,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         config: RunnableConfig,
         writes: Sequence[tuple[str, Any]],
         task_id: str,
-        task_path: str = "",
+        _task_path: str = "",
     ) -> None:
         thread_id = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -172,8 +172,8 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         self,
         config: RunnableConfig | None,
         *,
-        filter: dict[str, Any] | None = None,
-        before: RunnableConfig | None = None,
+        _filter: dict[str, Any] | None = None,
+        _before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:
         thread_id = config["configurable"]["thread_id"] if config else None

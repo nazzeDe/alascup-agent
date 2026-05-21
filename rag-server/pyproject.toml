@@ -2,8 +2,7 @@
 name = "rag-server"
 version = "0.1.0"
 description = "运维经验库 — 语义检索与知识写入"
-readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "chromadb>=0.5",
     "fastmcp>=3.2.4",

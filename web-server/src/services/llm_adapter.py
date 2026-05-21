@@ -5,6 +5,18 @@ from httpx import AsyncClient
 from src.config.models import LLMConfig
 
 
+_STATUS_ERROR_MAP: dict[int, str] = {
+    429: "rate_limit",
+    401: "auth_failed",
+    403: "auth_failed",
+    404: "model_unavailable",
+    500: "server_error",
+    502: "server_error",
+    503: "server_error",
+    529: "server_error",
+}
+
+
 def classify_error(
     status_code: int, response_text: str, stop_reason: str | None = None
 ) -> str | None:
@@ -21,19 +33,13 @@ def classify_error(
     ):
         return "prompt_too_long"
 
-    match status_code:
-        case 429:
-            return "rate_limit"
-        case 401 | 403:
-            return "auth_failed"
-        case 404:
-            return "model_unavailable"
-        case 500 | 502 | 503 | 529:
-            return "server_error"
-        case _ if status_code >= 500:
-            return "server_error"
-        case _ if status_code >= 400:
-            return "unknown"
+    if mapped := _STATUS_ERROR_MAP.get(status_code):
+        return mapped
+
+    if status_code >= 500:
+        return "server_error"
+    if status_code >= 400:
+        return "unknown"
 
     return None
 
@@ -127,38 +133,44 @@ class LLMAdapter:
                         yield {"event": "done", "data": "{}"}
                         continue
 
-                    try:
-                        chunk = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    content = delta.get("content", "")
-                    tool_calls = delta.get("tool_calls")
-
-                    if tool_calls:
-                        for tc in tool_calls:
-                            idx = tc.get("index", 0)
-                            if idx not in accumulated:
-                                accumulated[idx] = {
-                                    "function": {"name": "", "arguments": ""}
-                                }
-                            fn = tc.get("function", {})
-                            if "name" in fn:
-                                accumulated[idx]["function"]["name"] += fn["name"]
-                            if "arguments" in fn:
-                                accumulated[idx]["function"]["arguments"] += fn[
-                                    "arguments"
-                                ]
-
-                    if content:
-                        yield {
-                            "event": "assistant",
-                            "data": json.dumps({"delta": content}),
-                        }
+                    for event in self._process_chunk(data_str, accumulated):
+                        yield event
 
                 for tc in accumulated.values():
                     yield {"event": "tool_call", "data": json.dumps(tc)}
+
+    @staticmethod
+    def _process_chunk(data_str: str, accumulated: dict[int, dict]):
+        """Parse a single SSE data line and yield assistant/tool_call events."""
+        try:
+            chunk = json.loads(data_str)
+        except json.JSONDecodeError:
+            return
+
+        delta = chunk.get("choices", [{}])[0].get("delta", {})
+        content = delta.get("content", "")
+        tool_calls = delta.get("tool_calls")
+
+        if tool_calls:
+            for tc in tool_calls:
+                idx = tc.get("index", 0)
+                if idx not in accumulated:
+                    accumulated[idx] = {
+                        "function": {"name": "", "arguments": ""}
+                    }
+                fn = tc.get("function", {})
+                if "name" in fn:
+                    accumulated[idx]["function"]["name"] += fn["name"]
+                if "arguments" in fn:
+                    accumulated[idx]["function"]["arguments"] += fn[
+                        "arguments"
+                    ]
+
+        if content:
+            yield {
+                "event": "assistant",
+                "data": json.dumps({"delta": content}),
+            }
 
     async def summarize(self, messages: list[dict]) -> str:
         model = self._config.summary_model or self._config.model

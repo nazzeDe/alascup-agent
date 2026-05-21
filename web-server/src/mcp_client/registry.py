@@ -6,8 +6,6 @@ from fastmcp import Client
 
 from src.config.models import ServerEntry
 
-_RESERVED_TOOLS = {"classify_tool"}
-
 
 class ServerRegistry:
     """Discovers MCP servers and caches tool metadata with routing info.
@@ -15,7 +13,7 @@ class ServerRegistry:
     Each tool in the cache carries:
       - name: original tool name (no prefix)
       - server_name: which server it belongs to
-      - mutable: whether classification is per-call (classify_tool required)
+      - mutable: whether classification is per-call (companion tool required)
       - is_read_only: static read-only flag
       - is_rollbackable: static rollback flag
     """
@@ -38,7 +36,8 @@ class ServerRegistry:
         """Connect to every configured server, fetch tools, populate cache.
 
         Unavailable servers are skipped with a warning.
-        ``classify_tool`` is stripped from the public tool list.
+        Tools with ``meta.hidden=True`` (companion classification tools) are
+        stripped from the public tool list.
         """
         all_tools: list[dict] = []
         for entry in self._servers.values():
@@ -71,14 +70,15 @@ class ServerRegistry:
             raw = await client.list_tools()
         tools: list[dict] = []
         for t in raw:
-            if t.name in _RESERVED_TOOLS:
+            meta = getattr(t, "meta", None) or {}
+            if meta.get("hidden"):
                 continue
             tools.append({
                 "name": t.name,
                 "server_name": entry.name,
                 "description": getattr(t, "description", ""),
-                "mutable": getattr(t, "mutable", False),
-                "is_read_only": getattr(t, "is_read_only", bool(getattr(t, "isReadOnly", False))),
-                "is_rollbackable": getattr(t, "is_rollbackable", bool(getattr(t, "isRollbackable", False))),
+                "mutable": meta.get("mutable", False),
+                "is_read_only": meta.get("is_read_only", False),
+                "is_rollbackable": meta.get("is_rollbackable", False),
             })
         return tools

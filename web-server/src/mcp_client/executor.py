@@ -10,7 +10,7 @@ class ToolExecutor:
     """Execute and classify tool calls via MCP servers.
 
     Routes calls to the correct server using a ServerRegistry.
-    Merges the classification concern (previously ToolClassifier).
+    Classification for mutable tools uses companion tools (``{tool}_classify``).
     """
 
     def __init__(self, registry: ServerRegistry, max_retries: int = 2) -> None:
@@ -25,22 +25,21 @@ class ToolExecutor:
 
     # ── classification ──────────────────────────────────────────────────
 
-    async def classify(self, tool_name: str, params: dict, server_name: str) -> dict:
-        """Call ``classify_tool`` on *server_name* and normalize the result.
+    async def classify_companion(self, tool_name: str, params: dict, server_name: str) -> dict:
+        """Call ``{tool_name}_classify`` companion tool on *server_name*.
 
-        Returns ``{"is_read_only": bool, "is_rollbackable": bool}``.
-        Defaults to dangerous (read_only=False) on any failure.
+        Returns ``{"safe": bool}``.
+        Defaults to unsafe (safe=False) on any failure — fail-closed.
         """
         url = self._registry.url_for(server_name)
         async with Client(url) as client:
             result = await client.call_tool(
-                "classify_tool",
-                {"tool_name": tool_name, "params": params},
+                f"{tool_name}_classify", params,
             )
             content = getattr(result, "content", None)
             if isinstance(content, dict):
-                return _normalize_classification(content)
-            return {"is_read_only": False, "is_rollbackable": False}
+                return {"safe": content.get("safe", False)}
+            return {"safe": False}
 
     # ── execution ───────────────────────────────────────────────────────
 
@@ -110,11 +109,3 @@ class ToolExecutor:
     @staticmethod
     def _is_connect_error(exc: Exception) -> bool:
         return isinstance(exc, (ConnectionError, ConnectionRefusedError, TimeoutError))
-
-
-def _normalize_classification(content: dict) -> dict:
-    """Normalize camelCase (MCP) to snake_case."""
-    return {
-        "is_read_only": content.get("isReadOnly", content.get("is_read_only", False)),
-        "is_rollbackable": content.get("isRollbackable", content.get("is_rollbackable", False)),
-    }

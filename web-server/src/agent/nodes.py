@@ -30,25 +30,16 @@ async def think_node(state: AgentState, *, llm, executor=None):
     tool_call_blocks: list[dict] = []
 
     async for event in llm.generate_stream(messages, tools=tools, system=system):
-        if event["event"] == "assistant":
-            data = json.loads(event["data"])
-            accumulated_text.append(data.get("delta", ""))
-
-        elif event["event"] == "tool_call":
-            data = json.loads(event["data"])
-            _merge_tool_block(tool_call_blocks, data)
-
-        elif event["event"] == "error":
-            data = json.loads(event["data"])
+        result = _process_stream_event(event, accumulated_text, tool_call_blocks)
+        if result is True:
+            break
+        if result is not None:
             return {
                 "messages": [],
                 "tool_calls": [],
-                "llm_error": data,
+                "llm_error": result,
                 "transition": Transition.ERROR_EXIT,
             }
-
-        elif event["event"] == "done":
-            break
 
     result: dict = {}
     text = "".join(accumulated_text)
@@ -70,6 +61,29 @@ async def think_node(state: AgentState, *, llm, executor=None):
     needs_processing = bool(pending_tool_calls or pre_executed)
     result["transition"] = Transition.DONE if not needs_processing else None
     return result
+
+
+def _process_stream_event(
+    event: dict, accumulated_text: list[str], tool_call_blocks: list[dict]
+) -> dict | bool | None:
+    """Process a single stream event.
+
+    Returns:
+        None  — continue the stream loop
+        True  — done signal, break the loop
+        dict  — error data for early return
+    """
+    if event["event"] == "assistant":
+        data = json.loads(event["data"])
+        accumulated_text.append(data.get("delta", ""))
+    elif event["event"] == "tool_call":
+        data = json.loads(event["data"])
+        _merge_tool_block(tool_call_blocks, data)
+    elif event["event"] == "error":
+        return json.loads(event["data"])
+    elif event["event"] == "done":
+        return True
+    return None
 
 
 async def act_node(state: AgentState, *, executor, audit_logger=None):
@@ -109,10 +123,56 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
     return {"tool_results": formatted}
 
 
+async def _classify_tool_call(tc: dict, executor) -> tuple[str, bool, bool]:
+    """Determine tool classification: mutable → dynamic; non-mutable → static metadata.
+
+    Returns (tool_name, is_read_only, is_rollbackable).
+    """
+    fn = tc.get("function", {})
+    name = fn.get("name", "")
+    args = _parse_args(fn.get("arguments", "{}"))
+
+    if tc.get("mutable"):
+        try:
+            classification = await executor.classify_companion(name, args, tc.get("server_name", ""))
+        except Exception:
+            logger.opt(exception=True).warning(
+                "classify_companion failed for tool={tool}, treating as dangerous", tool=name,
+            )
+            classification = {"safe": False}
+        return name, classification.get("safe", False), False
+    return name, tc.get("is_read_only", False), tc.get("is_rollbackable", False)
+
+
+async def _apply_decision(
+    tc: dict,
+    name: str,
+    is_read_only: bool,
+    decision: str,
+    audit_logger,
+    approved: list[dict],
+    rejected: list[dict],
+    pending: list[dict],
+) -> None:
+    """Route a single tool call to the appropriate bucket based on decision."""
+    if decision == "REJECT":
+        rejected.append(tc)
+        await _log_review(audit_logger, "TOOL_REJECTED", name, decision="REJECT")
+    elif decision == "AUTO_APPROVE":
+        tc["is_read_only"] = is_read_only
+        tc["request_id"] = str(uuid4())
+        approved.append(tc)
+        await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO)
+    else:
+        tc["is_read_only"] = is_read_only
+        pending.append(tc)
+        await _log_review(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN)
+
+
 async def review_node(state: AgentState, *, executor, rule_engine, audit_logger):
     """Review all tool_calls: classify mutable tools → rule match → decide.
 
-    1. Mutable tools: call executor.classify() for dynamic is_read_only/is_rollbackable
+    1. Mutable tools: call executor.classify_companion() for dynamic safe/dangerous
     2. Non-mutable tools: use static is_read_only from tool_call metadata
     3. rule_engine.evaluate() → REJECT / AUTO_APPROVE / NEEDS_APPROVAL
     4. Readonly/whitelist → approved_tool_calls
@@ -125,43 +185,9 @@ async def review_node(state: AgentState, *, executor, rule_engine, audit_logger)
     pending: list[dict] = []
 
     for tc in tool_calls:
-        fn = tc.get("function", {})
-        name = fn.get("name", "")
-        args = _parse_args(fn.get("arguments", "{}"))
-
-        if tc.get("mutable"):
-            try:
-                classification = await executor.classify(name, args, tc.get("server_name", ""))
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "classify failed for tool={tool}, treating as dangerous", tool=name,
-                )
-                classification = {"is_read_only": False, "is_rollbackable": False, "_classify_fallback": True}
-        else:
-            classification = {
-                "is_read_only": tc.get("is_read_only", False),
-                "is_rollbackable": tc.get("is_rollbackable", False),
-            }
-
-        is_read_only = classification.get("is_read_only", False)
-        is_rollbackable = classification.get("is_rollbackable", False)
-
+        name, is_read_only, is_rollbackable = await _classify_tool_call(tc, executor)
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
-
-        if decision == "REJECT":
-            rejected.append(tc)
-            await _log_review(audit_logger, "TOOL_REJECTED", name, decision="REJECT")
-
-        elif decision == "AUTO_APPROVE":
-            tc["is_read_only"] = is_read_only
-            tc["request_id"] = str(uuid4())
-            approved.append(tc)
-            await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO)
-
-        else:
-            tc["is_read_only"] = is_read_only
-            pending.append(tc)
-            await _log_review(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN)
+        await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending)
 
     if pending:
         request_id = str(uuid4())
@@ -324,7 +350,7 @@ async def _dispatch_tool_calls(
     """Parse server_name prefix, attach metadata, pre-execute readonly tools.
 
     Dispatch based on static tool metadata:
-    - Mutable tools → pending (dynamic classify_tool called later in review_node)
+    - Mutable tools → pending (dynamic classify_companion called later in review_node)
     - Non-mutable readonly → pre-executed via executor.execute_parallel
     - Non-mutable write → pending (needs approval in review_node)
 
@@ -362,7 +388,7 @@ async def _dispatch_tool_calls(
 
         if is_mutable:
             tc["mutable"] = True
-            tc["is_read_only"] = None  # determined by classify_tool
+            tc["is_read_only"] = None  # determined by classify_companion
             pending.append(tc)
         elif is_read_only:
             dispatch.append({

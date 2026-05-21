@@ -49,12 +49,7 @@ class LoopOrchestrator:
 
         while True:
             # 1. Context compression
-            tokens = self._context_manager.count_tokens(state.get("messages", []))
-            if self._context_manager.needs_compression(tokens):
-                state["messages"] = await self._context_manager.compress(
-                    state.get("messages", [])
-                )
-                await log_transition(self._audit, Transition.CONTEXT_COMPACTED)
+            await self._compress_context(state)
 
             # 2. Invoke graph (think → review → act → observe)
             result = await self._graph.ainvoke(state, self._config)
@@ -73,28 +68,12 @@ class LoopOrchestrator:
             state = result
 
             # 4. LLM error recovery
-            if state.get("llm_error") and self._error_recovery:
-                handled = await handle_llm_error(
-                    state,
-                    error_recovery=self._error_recovery,
-                    context_manager=self._context_manager,
-                    llm=self._llm,
-                    audit_logger=self._audit,
-                )
-                if not handled:
-                    llm_error = state["llm_error"]
-                    yield {
-                        "event": "error",
-                        "data": json.dumps(
-                            {
-                                "code": llm_error.get("code", 500),
-                                "message": "Recovery exhausted",
-                            },
-                            default=str,
-                        ),
-                    }
-                    await log_transition(self._audit, Transition.ERROR_EXIT)
-                    return
+            action, error_event = await self._recover_from_error(state)
+            if action == "return":
+                if error_event:
+                    yield error_event
+                return
+            if action == "continue":
                 continue
 
             # 5. Emit SSE events
@@ -105,12 +84,55 @@ class LoopOrchestrator:
             clear_transient_fields(state)
 
             # 7. Route based on transition
-            transition = get_transition(state)
-            if transition == Transition.DONE:
-                await log_transition(self._audit, Transition.DONE)
+            action = await self._handle_transition(state)
+            if action == "return":
                 yield {"event": "done", "data": "{}"}
                 return
-
-            if transition == Transition.TOOL_RESULTS:
-                await log_transition(self._audit, Transition.TOOL_RESULTS)
+            if action == "continue":
                 continue
+
+    async def _compress_context(self, state: dict) -> None:
+        """Compress message context if over token threshold."""
+        tokens = self._context_manager.count_tokens(state.get("messages", []))
+        if self._context_manager.needs_compression(tokens):
+            state["messages"] = await self._context_manager.compress(
+                state.get("messages", [])
+            )
+            await log_transition(self._audit, Transition.CONTEXT_COMPACTED)
+
+    async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
+        """Attempt error recovery. Returns (action, optional_error_event)."""
+        if not state.get("llm_error") or not self._error_recovery:
+            return None, None
+        handled = await handle_llm_error(
+            state,
+            error_recovery=self._error_recovery,
+            context_manager=self._context_manager,
+            llm=self._llm,
+            audit_logger=self._audit,
+        )
+        if not handled:
+            llm_error = state["llm_error"]
+            await log_transition(self._audit, Transition.ERROR_EXIT)
+            return "return", {
+                "event": "error",
+                "data": json.dumps(
+                    {"code": llm_error.get("code", 500), "message": "Recovery exhausted"},
+                    default=str,
+                ),
+            }
+        return "continue", None
+
+    async def _handle_transition(self, state: dict) -> str | None:
+        """Route loop based on state transition.
+
+        Returns "return" to stop, "continue" to loop, or None to fall through.
+        """
+        transition = get_transition(state)
+        if transition == Transition.DONE:
+            await log_transition(self._audit, Transition.DONE)
+            return "return"
+        if transition == Transition.TOOL_RESULTS:
+            await log_transition(self._audit, Transition.TOOL_RESULTS)
+            return "continue"
+        return None

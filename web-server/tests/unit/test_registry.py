@@ -5,13 +5,11 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _make_tool(name, description="", mutable=False, is_read_only=False, is_rollbackable=False):
+def _make_tool(name, description="", mutable=False, is_read_only=False, is_rollbackable=False, hidden=False):
     t = MagicMock()
     t.name = name
     t.description = description
-    t.mutable = mutable
-    t.is_read_only = is_read_only
-    t.is_rollbackable = is_rollbackable
+    t.meta = {"mutable": mutable, "is_read_only": is_read_only, "is_rollbackable": is_rollbackable, "hidden": hidden}
     return t
 
 
@@ -65,7 +63,7 @@ class TestServerRegistryDiscover:
 
         tool_client = _make_client([
             _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-            _make_tool("classify_tool", mutable=False, is_read_only=True),
+            _make_tool("bash_classify", mutable=False, is_read_only=True, hidden=True),
         ])
         rag_client = _make_client([
             _make_tool("search_experience", mutable=False, is_read_only=True),
@@ -84,7 +82,7 @@ class TestServerRegistryDiscover:
         tool_names = {t["name"] for t in tools}
         assert "get_cpu_info" in tool_names
         assert "search_experience" in tool_names
-        assert "classify_tool" not in tool_names
+        assert "bash_classify" not in tool_names
 
     @pytest.mark.asyncio
     async def test_discover_adds_metadata_fields(self):
@@ -136,12 +134,12 @@ class TestServerRegistryDiscover:
         assert tools[0]["name"] == "get_cpu_info"
 
     @pytest.mark.asyncio
-    async def test_classify_tool_filtered_from_llm_list(self):
+    async def test_hidden_tools_filtered_from_llm_list(self):
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
         client = _make_client([
-            _make_tool("classify_tool", mutable=False, is_read_only=True),
+            _make_tool("bash_classify", mutable=False, is_read_only=True, hidden=True),
             _make_tool("bash", mutable=True),
             _make_tool("get_cpu_info", mutable=False, is_read_only=True),
         ])
@@ -155,7 +153,7 @@ class TestServerRegistryDiscover:
             tools = await registry.discover()
 
         names = {t["name"] for t in tools}
-        assert "classify_tool" not in names
+        assert "bash_classify" not in names
         assert "bash" in names
         assert "get_cpu_info" in names
 

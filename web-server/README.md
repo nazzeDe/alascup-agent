@@ -18,7 +18,7 @@
 - 不执行实际运维命令
 - 不存储向量数据
 - 不做知识库文本预处理
-- 不对工具参数做安全分级判断——分级由 tool-server 的 classify_tool 负责
+- 不对工具参数做安全分级判断——分级由 tool-server 的伴生分类工具（`{tool_name}_classify`）负责
 
 ## 技术栈
 
@@ -260,7 +260,12 @@ LLM 流式输出 token
 - 统一 Server Pool：`servers.json` 列出所有候选 MCP Server，web-server 动态发现可用 server 及其工具。LLM 看到统一工具列表，不感知 server 拓扑
 - 懒连接：首次 chat-turn 时才连接各 server，避免启动顺序依赖
 - 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）。工具调用失败（tool not found）时刷新对应 server
-- 三级工具池：安全池（只读，自动放行）、审批池（写操作，需用户确认）、可变池（每调 `classify_tool` 动态判定）
+- `meta.hidden = true` 的工具（伴生分类工具）从 LLM 可见列表中过滤，保留在内部缓存供审查层使用
+- 三级工具池：
+  - **安全池**：`meta.mutable = false` 且 `meta.is_read_only = true` 的静态工具，永远自动放行
+  - **审批池**：`meta.mutable = false` 且 `meta.is_read_only = false` 的静态工具，永远需用户确认
+  - **动态池**：`meta.mutable = true` 的工具，每次调用时由伴生分类工具动态判定后临时归入安全或审批路径
+- 可变工具分类：`ToolExecutor.classify_companion(tool_name, params)` → 内部调 `{tool_name}_classify` 伴生工具
 - server 未就绪时跳过（WARN），不影响已就绪 server 的工具使用
 
 ## 配置

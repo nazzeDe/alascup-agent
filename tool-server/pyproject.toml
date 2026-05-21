@@ -2,11 +2,12 @@
 name = "tool-server"
 version = "0.1.0"
 description = "A mcp server implement"
-readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
 	"fastmcp>=3.2.4",
 	"psutil>=7.0.0",
+	"tree-sitter>=0.22",
+	"tree-sitter-bash>=0.23.5",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +22,11 @@ packages = ["src"]
 
 [dependency-groups]
 dev = [
+    "lizard>=1.22.1",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "radon>=6.0.1",
+    "ruff>=0.15.13",
+    "vulture>=2.16",
 ]
 

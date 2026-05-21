@@ -4,18 +4,17 @@ from src.agent.state import AgentState, Transition
 
 
 class MockExecutorWithClassify:
-    """Executor stub that optionally classifies mutable tools."""
+    """Executor stub that optionally classifies mutable tools via companion."""
 
     def __init__(self, is_read_only=True, is_rollbackable=True):
-        self._readonly = is_read_only
-        self._rollbackable = is_rollbackable
+        self._safe = is_read_only
         self.classify_calls: list[dict] = []
 
-    async def classify(self, tool_name: str, params: dict, server_name: str) -> dict:
+    async def classify_companion(self, tool_name: str, params: dict, server_name: str) -> dict:
         self.classify_calls.append({
             "tool_name": tool_name, "params": params, "server_name": server_name,
         })
-        return {"is_read_only": self._readonly, "is_rollbackable": self._rollbackable}
+        return {"safe": self._safe}
 
 
 class MockRuleEngine:
@@ -253,7 +252,7 @@ class TestReviewNode:
         assert result["rejected_tool_calls"] == []
 
     async def test_mutable_tool_calls_classify(self):
-        """Mutable tool triggers executor.classify() for dynamic classification."""
+        """Mutable tool triggers executor.classify_companion() for dynamic classification."""
         from unittest.mock import MagicMock, patch
         from src.agent.nodes import review_node
 

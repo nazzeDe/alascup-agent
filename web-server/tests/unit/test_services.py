@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -374,3 +375,158 @@ class TestContextManagerCompression:
         threshold = cm.window_size * cm.threshold
 
         assert tokens_after < threshold
+
+
+class TestDatabase:
+    """Unit tests for src.services.db.Database."""
+
+    def _mock_pool(self):
+        pool = MagicMock()
+        conn = MagicMock()
+        conn.execute = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        conn.fetchrow = AsyncMock(return_value=None)
+        pool.acquire = MagicMock()
+        pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+        pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+        pool.close = AsyncMock()
+        return pool, conn
+
+    def test_init_stores_dsn(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        assert db._dsn == "postgresql://localhost/test"
+        assert db.pool is None
+
+    @pytest.mark.asyncio
+    async def test_connect_creates_pool_and_runs_schema(self):
+        from src.services.db import CREATE_TABLES_SQL, Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+
+        with patch("asyncpg.create_pool", new=AsyncMock(return_value=pool)):
+            await db.connect()
+            conn.execute.assert_called_once_with(CREATE_TABLES_SQL)
+
+    @pytest.mark.asyncio
+    async def test_connect_uses_correct_pool_settings(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+
+        with patch("asyncpg.create_pool", new=AsyncMock()) as mock_create:
+            mock_create.return_value = MagicMock()
+            mock_create.return_value.acquire = MagicMock()
+            mock_create.return_value.acquire.return_value.__aenter__ = AsyncMock(
+                return_value=MagicMock(execute=AsyncMock())
+            )
+            mock_create.return_value.acquire.return_value.__aexit__ = AsyncMock()
+            await db.connect()
+            mock_create.assert_called_once_with(
+                "postgresql://localhost/test", min_size=2, max_size=10
+            )
+
+    @pytest.mark.asyncio
+    async def test_disconnect_closes_pool(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, _ = self._mock_pool()
+        db._pool = pool
+
+        await db.disconnect()
+        pool.close.assert_called_once()
+        assert db.pool is None
+
+    @pytest.mark.asyncio
+    async def test_disconnect_when_pool_is_none(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        await db.disconnect()  # should not raise
+
+    @pytest.mark.asyncio
+    async def test_execute_delegates_to_connection(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        conn.execute.return_value = "OK"
+        db._pool = pool
+
+        result = await db.execute("SELECT 1")
+        conn.execute.assert_called_once_with("SELECT 1")
+        assert result == "OK"
+
+    @pytest.mark.asyncio
+    async def test_fetch_delegates_to_connection(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        conn.fetch.return_value = [{"id": 1}]
+        db._pool = pool
+
+        result = await db.fetch("SELECT * FROM t")
+        conn.fetch.assert_called_once_with("SELECT * FROM t")
+        assert result == [{"id": 1}]
+
+    @pytest.mark.asyncio
+    async def test_fetchrow_delegates_to_connection(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        conn.fetchrow.return_value = {"id": 1}
+        db._pool = pool
+
+        result = await db.fetchrow("SELECT * FROM t LIMIT 1")
+        conn.fetchrow.assert_called_once_with("SELECT * FROM t LIMIT 1")
+        assert result == {"id": 1}
+
+    @pytest.mark.asyncio
+    async def test_fetchrow_returns_none_when_no_row(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        conn.fetchrow.return_value = None
+        db._pool = pool
+
+        result = await db.fetchrow("SELECT * FROM t WHERE FALSE")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_execute_passes_args(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        db._pool = pool
+
+        await db.execute("SELECT $1", 42)
+        conn.execute.assert_called_once_with("SELECT $1", 42)
+
+    @pytest.mark.asyncio
+    async def test_fetch_passes_args(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        db._pool = pool
+
+        await db.fetch("SELECT * FROM t WHERE id=$1", 42)
+        conn.fetch.assert_called_once_with("SELECT * FROM t WHERE id=$1", 42)
+
+    @pytest.mark.asyncio
+    async def test_fetchrow_passes_args(self):
+        from src.services.db import Database
+
+        db = Database("postgresql://localhost/test")
+        pool, conn = self._mock_pool()
+        db._pool = pool
+
+        await db.fetchrow("SELECT * FROM t WHERE id=$1", 42)
+        conn.fetchrow.assert_called_once_with("SELECT * FROM t WHERE id=$1", 42)

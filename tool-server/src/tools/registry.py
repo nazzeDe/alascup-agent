@@ -11,9 +11,12 @@ from src.config import ToolServerConfig
 class ToolMeta:
     name: str
     description: str
-    is_read_only: bool  # default classification; may be overridden by classify_tool for bash/systemd
+    is_read_only: bool  # default classification; may be overridden by classify tool for bash/systemd
     input_schema: dict[str, Any]
     fn: Callable  # fn(config: ToolServerConfig, **params) -> dict
+    classify_fn: Callable | None = None  # companion classification function for mutable tools
+    hidden: bool = False  # hidden from LLM tool list (used by companion tools)
+    meta: dict[str, Any] = field(default_factory=dict)  # fastmcp metadata (mutable, is_read_only, etc.)
 
 
 _registry: dict[str, ToolMeta] = {}

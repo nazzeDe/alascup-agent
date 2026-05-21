@@ -24,19 +24,52 @@
 | fastmcp | MCP Server 框架 |
 | psutil | 系统指标采集（CPU/内存/磁盘/网络/进程） |
 | systemd-python | systemd 服务管理（首版：status + restart） |
+| tree-sitter | bash 命令 AST 解析（安全分级） |
+| tree-sitter-bash | tree-sitter bash grammar |
 
-## 目录结构
+## 工具注册
 
+工具通过 fastmcp 的 `@server.tool()` 装饰器注册，自定义元数据通过 `meta` 参数声明：
+
+```python
+@server.tool(
+    name="get_cpu_info",
+    description="获取 CPU 使用率、负载和核心温度",
+    meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+)
+def get_cpu_info(config: ToolServerConfig = Depends()):
+    ...
+
+@server.tool(
+    name="bash",
+    description="在目标主机上执行 bash 命令",
+    meta={"is_read_only": False, "is_rollbackable": False, "mutable": True},
+)
+def run_bash(command: str, config: ToolServerConfig = Depends()):
+    ...
 ```
-tool-server/src/
-  tools/
-    perception/     # 感知工具（cpu, memory, disk, network, process, log_reader）
-    operation/      # 操作工具（bash, systemd）
-  security/         # 二次校验
-  cache/            # 工具结果缓存
-  error/            # 错误定义与格式化
-  main.py           # 入口
+
+### 可变工具与伴生分类工具
+
+可变工具（`meta.mutable = true`）需要附加分类函数 `__classify__`：
+
+```python
+def classify_bash(command: str) -> bool:
+    """使用 tree-sitter 解析命令 AST 判定安全/危险。FAIL-CLOSED。"""
+    ...
+
+run_bash.__classify__ = classify_bash
 ```
+
+tool-server 启动时自动扫描已注册工具，对带有 `__classify__` 属性的工具自动生成伴生分类工具：
+
+- 命名：`{tool_name}_classify`（如 `bash_classify`）
+- `meta.hidden = true`，不暴露给 LLM
+- `meta.mutable = false`，`meta.is_read_only = true`
+- `inputSchema` 由 `classify_fn` 的函数签名自动推断（仅关键参数）
+- 返回 `{"safe": bool}`
+
+注册流程见 `main.py` 的 `_register_classify_companions()`。
 
 ## 工具输出控制
 
