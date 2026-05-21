@@ -25,11 +25,11 @@ router = APIRouter()
 class ChatTurnRequest(BaseModel):
     message: str
     model: str | None = None
+    chat_id: str | None = None
 
 
-@router.post("/sessions/{chat_id}/messages")
-async def chat_turn(
-    chat_id: UUID,
+@router.post("/chat-turn")
+async def chat_turn_alt(
     body: ChatTurnRequest,
     request: Request,
     session_mgr=Depends(session_manager),
@@ -41,12 +41,38 @@ async def chat_turn(
     bridge=Depends(approval_bridge),
     graph=Depends(graph),
 ):
+    """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
+    from uuid import uuid4 as _uuid4
+
+    chat_id_str = body.chat_id
+    if not chat_id_str:
+        session = await session_mgr.create_session()
+        chat_id_str = str(session.chat_id)
+    try:
+        chat_id = UUID(chat_id_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid chat_id")
+    return await _handle_chat_turn(chat_id, body, request, session_mgr, prompt_mgr, llm, context_mgr, executor, audit_logger, bridge, graph)
+
+
+async def _handle_chat_turn(
+    chat_id: UUID,
+    body: ChatTurnRequest,
+    request: Request,
+    session_mgr,
+    prompt_mgr,
+    llm,
+    context_mgr,
+    executor,
+    audit_logger,
+    bridge,
+    graph,
+):
     try:
         session = await session_mgr.get_session(chat_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="session not found")
 
-    # 从已有会话加载非 meta 历史消息
     history: list[dict] = []
     for m in session.messages:
         if m.is_meta:
@@ -54,7 +80,6 @@ async def chat_turn(
         role = m.type.value if isinstance(m.type, MessageType) else m.type
         history.append({"role": role, "content": m.content})
 
-    # 追加当前用户消息
     user_msg = Message(
         message_id=uuid4(),
         chat_id=chat_id,
@@ -106,4 +131,23 @@ async def chat_turn(
 
     return EventSourceResponse(
         event_generator(), headers={"X-Session-ID": str(chat_id)}
+    )
+
+
+@router.post("/sessions/{chat_id}/messages")
+async def chat_turn(
+    chat_id: UUID,
+    body: ChatTurnRequest,
+    request: Request,
+    session_mgr=Depends(session_manager),
+    prompt_mgr=Depends(prompt_manager),
+    llm=Depends(llm_adapter),
+    context_mgr=Depends(context_manager),
+    executor=Depends(tool_executor),
+    audit_logger=Depends(audit_logger),
+    bridge=Depends(approval_bridge),
+    graph=Depends(graph),
+):
+    return await _handle_chat_turn(
+        chat_id, body, request, session_mgr, prompt_mgr, llm, context_mgr, executor, audit_logger, bridge, graph
     )

@@ -1,4 +1,3 @@
 [
-  {"name": "tool-server", "url": "http://tool-server:8001", "transport": "streamable-http"},
-  {"name": "rag-server", "url": "http://rag-server:8002", "transport": "streamable-http"}
+  {"name": "tool-server", "url": "http://tool-server:8001/mcp", "transport": "streamable-http"}
 ]

@@ -2,10 +2,10 @@ import asyncpg
 
 
 CREATE_TABLES_SQL = """
-CREATE TYPE IF NOT EXISTS msg_type AS ENUM ('user', 'assistant', 'tool_call', 'tool_result', 'system');
-CREATE TYPE IF NOT EXISTS approval_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED');
-CREATE TYPE IF NOT EXISTS execution_status AS ENUM ('PENDING_APPROVAL', 'RUNNING', 'SUCCEEDED', 'FAILED');
-CREATE TYPE IF NOT EXISTS audit_level AS ENUM ('INFO', 'WARN', 'ERROR', 'CRITICAL');
+DO $$ BEGIN CREATE TYPE msg_type AS ENUM ('user', 'assistant', 'tool_call', 'tool_result', 'system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE approval_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE execution_status AS ENUM ('PENDING_APPROVAL', 'RUNNING', 'SUCCEEDED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE audit_level AS ENUM ('INFO', 'WARN', 'ERROR', 'CRITICAL'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id UUID PRIMARY KEY,

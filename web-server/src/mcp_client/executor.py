@@ -19,6 +19,10 @@ class ToolExecutor:
 
     # ── tool discovery (delegated to registry) ──────────────────────────
 
+    async def discover(self) -> None:
+        """Connect to all configured MCP servers and populate the tool cache."""
+        await self._registry.discover()
+
     def list_tools(self) -> list[dict]:
         """Return the cached tool list from all connected servers."""
         return self._registry.list_tools()

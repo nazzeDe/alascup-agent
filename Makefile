@@ -70,6 +70,11 @@ test-integration-rag:
 test-e2e:
 	cd frontend/vue-project && bun run test:e2e
 
+# E2E Live 测试：需先手动启动 web-server + tool-server（见 plan Phase 1 步骤）。
+#   E2E_LIVE_HEADED=1 make test-e2e-live  显示浏览器窗口
+test-e2e-live:
+	cd frontend/vue-project && bun run test:e2e:live
+
 # === 覆盖率 ===
 test-coverage:
 	cd web-server && uv run pytest tests/ -m unit --cov=src --cov-report=term-missing

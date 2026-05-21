@@ -25,8 +25,11 @@ CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 
 def _build_services():
+    servers_path = os.environ.get("SERVERS_CONFIG", "")
+    servers_path = Path(servers_path) if servers_path else CONFIG_DIR / "servers.json"
+
     llm_config = load_llm_config(CONFIG_DIR / "llm.json")
-    servers = load_servers_config(CONFIG_DIR / "servers.json")
+    servers = load_servers_config(servers_path)
     rules_config = load_rules_config(CONFIG_DIR / "rules.json")
 
     dsn = os.environ.get("DATABASE_URL", "")
@@ -73,6 +76,7 @@ async def lifespan(app: FastAPI):
     services = _build_services()
     db = services.db
     await db.connect()
+    await services.tool_executor.discover()
     app.state.services = services
     yield
     await db.disconnect()
