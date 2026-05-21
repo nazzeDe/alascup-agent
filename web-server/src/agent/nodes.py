@@ -57,7 +57,7 @@ async def think_node(state: AgentState, *, llm, executor=None):
         result["messages"] = [{"role": "assistant", "content": text}]
 
     if executor is not None and tool_call_blocks:
-        pending_tool_calls, pre_executed = await _classify_and_dispatch(
+        pending_tool_calls, pre_executed = await _dispatch_tool_calls(
             tool_call_blocks, executor, available_tools
         )
     else:
@@ -318,12 +318,13 @@ def _format_tools(tools: list) -> list[dict]:
     return result
 
 
-async def _classify_and_dispatch(
+async def _dispatch_tool_calls(
     tool_call_blocks: list[dict], executor, available_tools: list[dict]
 ) -> tuple[list[dict], list[dict]]:
-    """Parse server_name prefix, attach metadata, pre-execute safe-pool tools.
+    """Parse server_name prefix, attach metadata, pre-execute readonly tools.
 
-    - Mutable tools → pending (classify_tool called later in review_node)
+    Dispatch based on static tool metadata:
+    - Mutable tools → pending (dynamic classify_tool called later in review_node)
     - Non-mutable readonly → pre-executed via executor.execute_parallel
     - Non-mutable write → pending (needs approval in review_node)
 

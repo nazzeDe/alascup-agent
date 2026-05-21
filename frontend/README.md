@@ -54,3 +54,27 @@ frontend/
         ToastContainer.vue # Toast 通知容器（右上角叠加）
     dist/               # Vite 构建产物（Docker 使用）
 ```
+
+## 前端开发闭环
+
+通过 Playwright MCP（`.claude/mcp.json`），支持agent自主完成：启动 dev server → 加载页面 → 截图验证 → 捕获运行时错误 → 修复 → 循环。
+
+### 关键 Playwright MCP 工具
+
+| 工具 | 用途 |
+|------|------|
+| `browser_navigate` | 加载页面（`http://localhost:5173`） |
+| `browser_screenshot` | 全页截图，Claude 直接看到渲染结果 |
+| `browser_console_messages` | 抓取 console.error / page error |
+| `browser_network_requests` | 检查 API 请求是否成功 |
+| `browser_snapshot` | 无障碍树快照，验证元素存在/文本内容 |
+| `browser_click` / `browser_type` | 交互测试 |
+
+### 典型流程
+
+1. 后台启动 dev server：`cd frontend/vue-project && bun run dev &`
+2. `curl -s -o /dev/null http://localhost:5173` 确认就绪
+3. `browser_navigate` → `browser_screenshot` → `browser_console_messages`
+4. 根据截图和错误日志修复代码
+5. 循环 3-4 直到无错误
+6. `bun run test:e2e` 最终验证

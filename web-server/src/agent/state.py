@@ -27,3 +27,4 @@ class AgentState(MessagesState):
     tool_results: list
     llm_error: dict | None = None # type: ignore
     streaming_tool_results: list
+    direct_tool_results: list
