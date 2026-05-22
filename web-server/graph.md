@@ -35,11 +35,12 @@ flowchart TD
     agent_decide{"继续循环<br/>还是退出？"}
 
     %% ── 审查层 ──
-    sec_entry["统一拦截点<br/>所有 tool_call 不可绕过"]
+    sec_entry["审查层入口<br/>静态写工具 + 可变工具"]
     sec_rule_engine{"Rule Engine<br/>rules.json 匹配"}
     sec_blacklist["黑名单拒绝<br/>审计: WARN"]
     sec_auto_approve["自动审批通过<br/>审计: INFO / WARN"]
     sec_create_request["生成 ToolRequest<br/>状态: PENDING"]
+    sec_readonly_pre["静态只读工具预执行<br/>think 节点内直接执行<br/>绕过审查层（AG-007）"]
     sec_state_machine[(ToolRequest 状态机<br/>PENDING → APPROVED / REJECTED / EXPIRED)]
     sec_wait_approval["等待用户确认<br/>5 分钟超时"]
     sec_approval_result{"审批结果？"}
@@ -110,7 +111,9 @@ flowchart TD
 
     %% 工具调用分支
     agent_router -- "tool_call" --> agent_toolcall
-    agent_toolcall --> sec_entry
+    agent_toolcall --> sec_readonly_pre
+    sec_readonly_pre -- "静态只读" --> agent_observe
+    agent_toolcall -- "静态写 / 可变" --> sec_entry
 
     %% ── 审查层 ──
     sec_entry --> sec_rule_engine
@@ -251,13 +254,16 @@ stateDiagram-v2
     ROUTE --> TEXT: AssistantMessage
     ROUTE --> TOOL: ToolCallMessage
 
-    TEXT --> PLAN_CHECK: LLM 自主判断
-    PLAN_CHECK --> STREAM: 直接输出 / 先输出计划
-    STREAM --> DECIDE: astream yield
+    TEXT --> DONE: 无 tool_call → 退出
+    DONE --> [*]: SSE done 事件
 
-    TOOL --> SECURITY: 审查层
-    SECURITY --> AUTO_EXEC: 只读 → 并行执行
-    SECURITY --> APPROVAL: 高风险 → interrupt() 暂停
+    TOOL --> THINK_PRE: 静态只读 → 预执行
+    TOOL --> REVIEW: 静态写 / 可变 → 审查层
+
+    THINK_PRE --> OBSERVE: ToolResult
+
+    REVIEW --> AUTO_EXEC: 只读/白名单 → 直接执行
+    REVIEW --> APPROVAL: 高风险 → interrupt() 暂停
 
     APPROVAL --> WAIT: yield approval_required SSE
     WAIT --> RESUME: POST /api/tool-requests/{id}/approval
@@ -268,21 +274,23 @@ stateDiagram-v2
     APPROVAL --> REJECT: 拒绝 → 记录审计
     REJECT --> OBSERVE: 拒绝通知
 
-    OBSERVE --> AGENT_STATE: 回写消息
-
-    DECIDE --> AGENT_STATE: 有 tool_call → 继续
-    DECIDE --> DONE: stop_reason=end → 结束
-    DONE --> [*]: SSE done 事件
+    OBSERVE --> AGENT_STATE: 回写消息 → 继续循环
 ```
 
 ### 图拓扑（简图）
 
 ```mermaid
 flowchart LR
-    think["think<br/>LLM 推理"] --> act["act<br/>工具执行"]
-    act --> observe["observe<br/>处理结果"]
+    think["think<br/>LLM 推理"]
+    review["review<br/>审查层"]
+    act["act<br/>工具执行"]
+    observe["observe<br/>处理结果"]
+    think -- "只读预执行" --> observe
+    think -- "写/可变" --> review
+    review --> act
+    act --> observe
     observe --> think
-    observe --> done["END"]
+    think -- "无输出" --> done["END"]
 ```
 
 ### 审批如何处理
@@ -296,12 +304,15 @@ LangGraph 的 `checkpointer` 自动持久化 Agent State。每个节点在返回
 ```mermaid
 graph LR
     node_user["user_message"] --> node_think["think: LLM 推理"]
-    node_think --> node_tools["tool_results"]
-    node_think --> node_approval["approval_pending<br/>(interrupt 暂停)"]
+    node_think -- "只读预执行" --> node_tools["tool_results"]
+    node_think -- "写/可变" --> node_review["review: 审查层"]
+    node_review --> node_approval["approval_pending<br/>(interrupt 暂停)"]
+    node_review --> node_act["act: 工具执行"]
     node_approval --> node_granted["approval_granted<br/>(Command.resume)"]
     node_approval --> node_rejected["approval_rejected"]
+    node_granted --> node_act
+    node_act --> node_tools
     node_tools --> node_think
-    node_granted --> node_tools
     node_think --> node_done["done"]
     node_think --> context_compacted["context_compacted"]
     context_compacted --> node_think
@@ -385,8 +396,8 @@ flowchart TD
     %% 声明
     llm_multi_response["LLM 单次响应<br/>含 N 个 tool_call"]
     classify{"分类 tool_call"}
-    readonly_group["只读工具组<br/>isReadOnly = true"]
-    highrisk_group["高风险工具组<br/>isReadOnly = false"]
+    readonly_group["只读工具组<br/>静态 is_read_only = true<br/>→ think 节点预执行"]
+    highrisk_group["写/可变工具组<br/>→ 审查层"]
     parallel_exec["并行执行<br/>全部只读同时发起"]
     parallel_wait["等待全部只读完成"]
     serial_queue["串行排队<br/>高风险依次处理"]
@@ -562,10 +573,11 @@ classDiagram
         }
         class Tool {
             +name
-            +server
-            +isReadOnly
-            +isRollbackable
-            +paramsSchema
+            +server_name
+            +description
+            +mutable
+            +is_read_only
+            +is_rollbackable
         }
         class ToolCall {
             +chatID
@@ -607,14 +619,15 @@ classDiagram
         class AgentState {
             +messages[]
             +available_tools[]
-            +add_message()
-            +assemble_prompt()
+            +system
+            +transition
         }
-        class ReActLoop {
-            +run(messages, tools) AsyncGenerator[SSEEvent]
+        class Query {
+            +run(messages, tools, system) AsyncGenerator[SSEEvent]
+            +resume(decisions) AsyncGenerator[SSEEvent]
         }
-        class Router {
-            +route(LLM_response) RouteTarget
+        class LoopOrchestrator {
+            +run(initial_state) AsyncIterator
         }
     }
 
@@ -623,17 +636,12 @@ classDiagram
     %% ============================================================
     namespace security {
         class RuleEngine {
-            +evaluate(tool_call) RuleDecision
+            +evaluate(tool_name, is_read_only, is_rollbackable) str
         }
-        class ToolRequestStateMachine {
-            +create_request(tool_call) ToolRequest
-            +approve(request_id) ToolRequest
-            +reject(request_id, reason) ToolRequest
-            +check_timeouts() ToolRequest[]
-        }
-        class ApprovalManager {
-            +process_approval(request_id, decision) ToolRequest
-            +get_pending() ToolRequest[]
+        class PendingApprovalBridge {
+            +register(request_id, chat_id)
+            +get_chat_id(request_id) str
+            +remove(request_id)
         }
     }
 
@@ -714,24 +722,20 @@ classDiagram
     %% ============================================================
     %% 关系：自定义内部
     %% ============================================================
-    ToolCall --|> Tool : extends
-    ToolRequest --|> Tool : extends
     ToolCall --> ToolResult : produces
-    ToolRequest "1" --> "0..1" ToolCall : approved→creates
 
-    ChatRouter --> ReActLoop : invokes
+    ChatRouter --> Query : invokes
     SessionRouter --> SessionManager : invokes
-    ToolRequestRouter --> ApprovalManager : invokes
+    ToolRequestRouter --> PendingApprovalBridge : uses
 
-    ReActLoop --> AgentState : owns
+    Query --> LoopOrchestrator : creates
+    LoopOrchestrator --> AgentState : drives
     AgentState --> ContextManager : uses
     AgentState "1" --> "*" Message : accumulates
     AgentState "1" --> "*" Tool : registers
 
     RuleEngine --> RulesConfig : reads
-    ToolRequestStateMachine "1" --> "*" ToolRequest : manages
-    ApprovalManager --> ToolRequestStateMachine : uses
-    ApprovalManager --> AuditLogger : writes
+    PendingApprovalBridge --> AuditLogger : writes
     RuleEngine --> AuditLogger : writes
 
     SessionManager "1" --> "*" ChatSession : persists

@@ -70,7 +70,7 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 
 1. 从 Session 加载历史消息，组装 system prompt（按 section 合并，结构见 `doc/详细设计.md`），进入循环
 2. 每轮迭代中 LLM 流式输出，产出文本或 tool_call
-3. 所有 tool_call 进入审查层：只读放行，高风险生成审批请求
+3. 静态只读 tool_call 在 think 节点内预执行（流式工具执行），其余 tool_call 进入审查层：只读放行，高风险生成审批请求
 4. 审批通过后调用 tool-server/rag-server 执行，结果回写消息历史
 5. LLM 判断任务完成或无 tool_call 时退出循环
 6. 循环过程中通过 SSE 流式推送状态到前端
@@ -246,7 +246,7 @@ LLM 流式输出 token
 | event | data | 说明 |
 |-------|------|------|
 | `assistant` | `{chat_id, message_id, delta}` | LLM 文本流式输出 |
-| `tool_call` | `{chat_id, message_id, tool_name, params, isReadOnly}` | LLM 请求调用工具 |
+| `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only}` | LLM 请求调用工具 |
 | `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?}` | 工具执行结果 |
 | `tool_approval_required` | `{chat_id, request_id, tool_name, description, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
 | `turn_limit_reached` | `{chat_id, turn_count, message}` | 循环轮次达阈值，流暂停等用户确认 |
