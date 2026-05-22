@@ -55,39 +55,51 @@ class TestEmitEvents:
     def test_tool_calls_emitted(self):
         state = {
             "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": '{"unit":"percent"}'}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": '{"unit":"percent"}'}, "is_read_only": True},
             ]
         }
-        events = emit_events(state)
+        events = emit_events(state, chat_id="c1")
         assert len(events) == 1
         assert events[0]["event"] == "tool_call"
         data = json.loads(events[0]["data"])
         assert data["tool_name"] == "get_cpu"
-        assert "percent" in data["params"]
+        assert data["chat_id"] == "c1"
+        assert data["message_id"] == "tc-1"
+        assert data["is_read_only"] is True
+        assert data["params"] == {"unit": "percent"}
 
     def test_tool_results_emitted(self):
         state = {
             "tool_results": [
-                {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+                {"tool_call_id": "tr-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
             ]
         }
-        events = emit_events(state)
+        events = emit_events(state, chat_id="c1")
         assert len(events) == 1
         assert events[0]["event"] == "tool_result"
         data = json.loads(events[0]["data"])
+        assert data["chat_id"] == "c1"
+        assert data["message_id"] == "tr-1"
         assert data["execution_status"] == "SUCCEEDED"
 
     def test_streaming_tool_results_emit_pair(self):
         """streaming_tool_result → tool_call + tool_result pair."""
         state = {
             "streaming_tool_results": [
-                {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+                {"tool_call_id": "st-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
             ]
         }
-        events = emit_events(state)
+        events = emit_events(state, chat_id="c1")
         assert len(events) == 2
         assert events[0]["event"] == "tool_call"
+        data0 = json.loads(events[0]["data"])
+        assert data0["chat_id"] == "c1"
+        assert data0["message_id"] == "st-1"
+        assert data0["is_read_only"] is True
         assert events[1]["event"] == "tool_result"
+        data1 = json.loads(events[1]["data"])
+        assert data1["chat_id"] == "c1"
+        assert data1["message_id"] == "st-1"
 
     def test_mixed_state_emits_in_order(self):
         state = {
@@ -108,7 +120,7 @@ class TestEmitEvents:
                 },
             ],
         }
-        events = emit_events(state)
+        events = emit_events(state, chat_id="c1")
         event_types = [e["event"] for e in events]
         assert event_types == [
             "assistant",
@@ -119,7 +131,7 @@ class TestEmitEvents:
         ]
 
     def test_empty_state_returns_empty_list(self):
-        assert emit_events({}) == []
+        assert emit_events({}, chat_id="c1") == []
 
     def test_messages_is_missing_returns_empty(self):
         assert emit_events({}) == []
@@ -241,7 +253,9 @@ class TestHandleInterrupt:
                 {
                     "event": "approval_required",
                     "request_id": "req-1",
-                    "pending_tool_calls": [],
+                    "pending_tool_calls": [
+                        {"function": {"name": "health", "arguments": "{}"}},
+                    ],
                 },
             ]
         }
@@ -255,12 +269,16 @@ class TestHandleInterrupt:
         assert events[0]["event"] == "tool_approval_required"
         data = json.loads(events[0]["data"])
         assert data["request_id"] == "req-1"
+        assert data["chat_id"] == "s1"
+        assert data["tool_name"] == "health"
+        assert data["params"] == {}
+        assert "needs your approval" in data["reason"]
 
     async def test_bridge_gets_request_session_mapping(self):
         bridge = MockBridge()
         state = {
             "__interrupt__": [
-                {"event": "approval_required", "request_id": "req-abc"},
+                {"event": "approval_required", "request_id": "req-abc", "pending_tool_calls": []},
             ]
         }
         async for _ in handle_interrupt(
@@ -272,18 +290,19 @@ class TestHandleInterrupt:
 
     async def test_no_bridge_no_crash(self):
         """handle_interrupt gracefully handles missing bridge."""
-        state = {"__interrupt__": [{"event": "approval_required"}]}
+        state = {"__interrupt__": [{"event": "approval_required", "pending_tool_calls": []}]}
         events = []
         async for e in handle_interrupt(
             state, bridge=None, audit_logger=None, chat_id="s1"
         ):
             events.append(e)
+        assert len(events) == 1
         assert events[0]["event"] == "tool_approval_required"
 
     async def test_logs_approval_pending_transition(self):
         audit = MockAuditLogger()
         state = {
-            "__interrupt__": [{"event": "approval_required", "request_id": "req-1"}]
+            "__interrupt__": [{"event": "approval_required", "request_id": "req-1", "pending_tool_calls": []}]
         }
         async for _ in handle_interrupt(
             state, bridge=None, audit_logger=audit, chat_id="s1"

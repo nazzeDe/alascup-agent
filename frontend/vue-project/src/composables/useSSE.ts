@@ -42,6 +42,8 @@ export function useSSE() {
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let currentEvent: SSEEventType | '' = ''
+      let currentData = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -51,23 +53,37 @@ export function useSSE() {
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
-        let currentEvent: SSEEventType | '' = ''
-        let currentData = ''
-
-        for (const line of lines) {
+        for (const rawLine of lines) {
+          const line = rawLine.replace(/\r$/, '')
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim() as SSEEventType
           } else if (line.startsWith('data: ')) {
             currentData = line.slice(6)
-          } else if (line === '' && currentEvent && currentData) {
-            try {
-              const parsed = JSON.parse(currentData)
-              dispatchEvent(currentEvent, parsed, callbacks)
-            } catch { /* skip malformed */ }
+          } else if (line === '') {
+            if (currentEvent && currentData) {
+              try {
+                const parsed = JSON.parse(currentData)
+                dispatchEvent(currentEvent, parsed, callbacks)
+              } catch { /* skip malformed */ }
+            }
             currentEvent = ''
             currentData = ''
           }
         }
+      }
+
+      // Flush final event in buffer: the un-popped remainder is a partial
+      // line (empty or data), and any non-empty remaining content should be
+      // treated as trailing data for the last event.
+      const remainder = buffer.trim()
+      if (remainder) {
+        currentData += remainder
+      }
+      if (currentEvent && currentData) {
+        try {
+          const parsed = JSON.parse(currentData)
+          dispatchEvent(currentEvent, parsed, callbacks)
+        } catch { /* skip malformed */ }
       }
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return

@@ -59,16 +59,27 @@ async def approve_tool_request(
         chat_id=chat_id,
     )
 
-    decisions = [status.value]
+    # Loop until the agent finishes — each resume may hit another interrupt
+    # if the LLM requests more tools after seeing results.
     collected_text: list[str] = []
-    async for event in agent.resume(decisions):
-        if event.get("event") == "assistant":
-            try:
-                data = json.loads(event["data"])
-                collected_text.append(data.get("delta", ""))
-            except (json.JSONDecodeError, KeyError):
-                pass
+    pending_decisions: list[str] = [status.value]
 
+    while True:
+        saw_approval = False
+        async for event in agent.resume(pending_decisions):
+            if event.get("event") == "assistant":
+                try:
+                    data = json.loads(event["data"])
+                    collected_text.append(data.get("delta", ""))
+                except (json.JSONDecodeError, KeyError):
+                    pass
+            elif event.get("event") == "tool_approval_required":
+                saw_approval = True
+                pending_decisions = ["APPROVED"]
+                break  # restart loop with approval decision
+
+        if not saw_approval:
+            break
     full_text = "".join(collected_text)
     if full_text:
         assistant_msg = Message(

@@ -13,3 +13,4 @@ test-results
 .coverage
 .claude
 llm.json
+.playwright-mcp/

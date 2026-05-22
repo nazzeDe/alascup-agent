@@ -218,16 +218,11 @@ export function useChat() {
           drainQueue()
         }
 
-        // Show meta message
-        const action = status === 'APPROVED' ? 'approved' : 'rejected'
-        messages.value = [...messages.value, {
-          message_id: crypto.randomUUID(),
-          chat_id: pending?.chat_id ?? activeChatId.value ?? '',
-          timestamp: new Date().toISOString(),
-          type: 'system',
-          content: `Tool execution ${action}`,
-          is_meta: true,
-        }]
+        // Reload session history to show assistant response and tool results
+        const chatId = pending?.chat_id ?? activeChatId.value
+        if (chatId) {
+          await loadHistory(chatId)
+        }
       } else {
         // FE-015: keep modal open on server error, show toast
         showToast('error', `Approval failed: server returned ${res.status}`)

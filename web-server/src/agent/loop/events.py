@@ -19,11 +19,20 @@ def emit_events(state: dict, chat_id: str = "") -> list[dict]:
 
     for tc in state.get("tool_calls") or []:
         fn = tc.get("function", {})
+        params = fn.get("arguments", "{}")
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (json.JSONDecodeError, TypeError):
+                params = {}
         events.append({
             "event": "tool_call",
             "data": _json_dumps({
+                "chat_id": chat_id,
+                "message_id": tc.get("id") or str(uuid4()),
                 "tool_name": fn.get("name", ""),
-                "params": fn.get("arguments", "{}"),
+                "params": params,
+                "is_read_only": tc.get("is_read_only", False),
             }),
         })
 
@@ -32,6 +41,8 @@ def emit_events(state: dict, chat_id: str = "") -> list[dict]:
         events.append({
             "event": "tool_result",
             "data": _json_dumps({
+                "chat_id": chat_id,
+                "message_id": r.get("tool_call_id") or str(uuid4()),
                 "tool_name": r.get("tool_name", ""),
                 "execution_status": res.get("execution_status", "SUCCEEDED"),
             }),
@@ -41,14 +52,19 @@ def emit_events(state: dict, chat_id: str = "") -> list[dict]:
         events.append({
             "event": "tool_call",
             "data": _json_dumps({
+                "chat_id": chat_id,
+                "message_id": sr.get("tool_call_id") or str(uuid4()),
                 "tool_name": sr.get("tool_name", ""),
-                "params": "{}",
+                "params": {},
+                "is_read_only": True,
             }),
         })
         res = sr.get("result", {})
         events.append({
             "event": "tool_result",
             "data": _json_dumps({
+                "chat_id": chat_id,
+                "message_id": sr.get("tool_call_id") or str(uuid4()),
                 "tool_name": sr.get("tool_name", ""),
                 "execution_status": res.get("execution_status", "SUCCEEDED"),
             }),

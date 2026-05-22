@@ -73,7 +73,8 @@ class ToolExecutor:
         for attempt in range(self._max_retries + 1):
             try:
                 async with Client(url) as client:
-                    result = await client.call_tool(tool_name, arguments)
+                    args = arguments if isinstance(arguments, dict) and arguments else None
+                    result = await client.call_tool(tool_name, args)
                     return {
                         "execution_status": (
                             ExecutionStatus.SUCCEEDED

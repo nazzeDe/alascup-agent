@@ -155,8 +155,13 @@ class LLMAdapter:
                 idx = tc.get("index", 0)
                 if idx not in accumulated:
                     accumulated[idx] = {
-                        "function": {"name": "", "arguments": ""}
+                        "id": tc.get("id", ""),
+                        "function": {"name": "", "arguments": ""},
                     }
+                else:
+                    tid = tc.get("id", "")
+                    if tid and not accumulated[idx].get("id"):
+                        accumulated[idx]["id"] = tid
                 fn = tc.get("function", {})
                 if "name" in fn:
                     accumulated[idx]["function"]["name"] += fn["name"]
