@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = 'http://localhost:11450'
 
 export async function createSession(page: Page): Promise<string> {
   const resp = await page.request.post(`${API_BASE}/api/sessions`)

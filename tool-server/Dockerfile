@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir .
 
 COPY src/ src/
 
-EXPOSE 8001
+EXPOSE 11451
 
 CMD ["python", "-m", "src.main"]

@@ -14,8 +14,8 @@ export default defineConfig({
   webServer: process.env.E2E_SKIP_WEB_SERVER
     ? undefined
     : {
-        command: 'bun run dev --port 5173',
-        port: 5173,
+        command: 'bun run dev --port 5174',
+        port: 5174,
         reuseExistingServer: true,
         timeout: 30000,
       },
