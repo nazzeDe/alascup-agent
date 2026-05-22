@@ -4,16 +4,17 @@ import json
 from uuid import uuid4
 
 
-def emit_events(state: dict, chat_id: str = "") -> list[dict]:
-    """Convert agent state into SSE events for streaming to client."""
+def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -> list[dict]:
+    """Convert agent state into SSE events for streaming to client.
+
+    Only emits assistant messages beyond ``skip_assistant_count`` to
+    avoid re-sending messages that were already emitted in prior loop
+    iterations.
+    """
     events: list[dict] = []
 
-    # Only emit the last assistant message — previous ones were already
-    # emitted in prior loop iterations.  The state accumulates them all
-    # via LangGraph's add_messages reducer.
     assistant_msgs = [m for m in state.get("messages", []) if _msg_role(m) == "assistant"]
-    if assistant_msgs:
-        m = assistant_msgs[-1]
+    for m in assistant_msgs[skip_assistant_count:]:
         if isinstance(m, dict):
             msg_id = m.get("id") or str(uuid4())
         else:

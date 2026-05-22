@@ -46,6 +46,7 @@ class LoopOrchestrator:
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute the ReAct loop until interrupt or DONE."""
         state = dict(initial_state)
+        emitted_assistant_count = 0
 
         while True:
             # 1. Context compression
@@ -77,7 +78,10 @@ class LoopOrchestrator:
                 continue
 
             # 5. Emit SSE events
-            for ev in emit_events(state, chat_id=self._chat_id):
+            evs = emit_events(state, chat_id=self._chat_id, skip_assistant_count=emitted_assistant_count)
+            for ev in evs:
+                if ev.get("event") == "assistant":
+                    emitted_assistant_count += 1
                 yield ev
 
             # 6. Clear per-iteration transient fields

@@ -62,8 +62,10 @@ export function useChat() {
             queuedEvents.push({ type: 'assistant', data })
             return
           }
-          if (!currentAssistantMsgId) {
+          // New message_id → start a new assistant message (e.g. after tool results)
+          if (data.message_id !== currentAssistantMsgId) {
             currentAssistantMsgId = data.message_id
+            assistantBuffer = ''
             const msg: Message = {
               message_id: data.message_id,
               chat_id: data.chat_id,
