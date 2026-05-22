@@ -8,14 +8,17 @@ def emit_events(state: dict, chat_id: str = "") -> list[dict]:
     """Convert agent state into SSE events for streaming to client."""
     events: list[dict] = []
 
-    for m in state.get("messages", []):
-        role = _msg_role(m)
-        if role == "assistant":
-            if isinstance(m, dict):
-                msg_id = m.get("id") or str(uuid4())
-            else:
-                msg_id = str(getattr(m, "id", uuid4()))
-            events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": _msg_content(m)})})
+    # Only emit the last assistant message — previous ones were already
+    # emitted in prior loop iterations.  The state accumulates them all
+    # via LangGraph's add_messages reducer.
+    assistant_msgs = [m for m in state.get("messages", []) if _msg_role(m) == "assistant"]
+    if assistant_msgs:
+        m = assistant_msgs[-1]
+        if isinstance(m, dict):
+            msg_id = m.get("id") or str(uuid4())
+        else:
+            msg_id = str(getattr(m, "id", uuid4()))
+        events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": _msg_content(m)})})
 
     for tc in state.get("tool_calls") or []:
         fn = tc.get("function", {})
