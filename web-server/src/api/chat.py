@@ -47,7 +47,7 @@ async def chat_turn_alt(
     chat_id_str = body.chat_id
     if not chat_id_str:
         session = await session_mgr.create_session()
-        chat_id_str = str(session.chat_id)
+        chat_id_str = str(session.id)
     try:
         chat_id = UUID(chat_id_str)
     except ValueError:
