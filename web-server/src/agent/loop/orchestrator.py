@@ -91,6 +91,10 @@ class LoopOrchestrator:
             if action == "continue":
                 continue
 
+            # Unknown transition — exit safely
+            yield {"event": "done", "data": "{}"}
+            return
+
     async def _compress_context(self, state: dict) -> None:
         """Compress message context if over token threshold."""
         tokens = self._context_manager.count_tokens(state.get("messages", []))

@@ -18,6 +18,7 @@ class Transition(StrEnum):
 
 
 class AgentState(MessagesState):
+    system: str | None = None # type: ignore
     available_tools: list
     transition: Transition | None = None # type: ignore
     tool_calls: list

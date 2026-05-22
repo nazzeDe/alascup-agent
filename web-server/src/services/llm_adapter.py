@@ -130,14 +130,13 @@ class LLMAdapter:
                         continue
                     data_str = line[6:]
                     if data_str == "[DONE]":
+                        for tc in accumulated.values():
+                            yield {"event": "tool_call", "data": json.dumps(tc)}
                         yield {"event": "done", "data": "{}"}
-                        continue
+                        break
 
                     for event in self._process_chunk(data_str, accumulated):
                         yield event
-
-                for tc in accumulated.values():
-                    yield {"event": "tool_call", "data": json.dumps(tc)}
 
     @staticmethod
     def _process_chunk(data_str: str, accumulated: dict[int, dict]):
@@ -211,7 +210,6 @@ class LLMAdapter:
             "model": self._config.model,
             "messages": msgs,
             "stream": stream,
-            "max_tokens": self._max_tokens,
         }
         if tools:
             payload["tools"] = tools

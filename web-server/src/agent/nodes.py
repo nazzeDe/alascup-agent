@@ -310,14 +310,17 @@ def route_after_think(state: AgentState) -> str:
     return "__end__"
 
 
+_ROLE_MAP = {"human": "user", "ai": "assistant"}
+
 def _messages(state: AgentState) -> list[dict]:
     result: list[dict] = []
     for m in state.get("messages", []):
         if isinstance(m, dict):
-            result.append({"role": m.get("role", ""), "content": m.get("content", "")})
+            role = _ROLE_MAP.get(m.get("role", ""), m.get("role", ""))
+            result.append({"role": role, "content": m.get("content", "")})
         else:
-            # LangGraph message object (HumanMessage, AIMessage, ToolMessage...)
             role = getattr(m, "type", "unknown")
+            role = _ROLE_MAP.get(role, role)
             content = getattr(m, "content", "")
             result.append({"role": role, "content": content})
     return result
@@ -336,7 +339,9 @@ def _format_tools(tools: list) -> list[dict]:
             server = getattr(t, "server_name", "")
             desc = getattr(t, "description", "")
             params = getattr(t, "params_schema", {})
-        full_name = f"{server}/{name}" if server else name
+        full_name = f"{server}__{name}" if server else name
+        if not params or not isinstance(params, dict) or params.get("type") != "object":
+            params = {"type": "object", "properties": {}}
         result.append({
             "type": "function",
             "function": {"name": full_name, "description": desc, "parameters": params},
@@ -362,7 +367,7 @@ async def _dispatch_tool_calls(
         server = t.get("server_name", "")
         name = t.get("name", "")
         if server and name:
-            tool_index[f"{server}/{name}"] = t
+            tool_index[f"{server}__{name}"] = t
             tool_index[name] = t  # fallback for tools without prefix
 
     pending: list[dict] = []
@@ -372,9 +377,9 @@ async def _dispatch_tool_calls(
         full_name = fn.get("name", "")
         args = _parse_args(fn.get("arguments", "{}"))
 
-        # Parse "server_name/tool_name" prefix (Q24)
-        if "/" in full_name:
-            server_name, tool_name = full_name.split("/", 1)
+        # Parse "server_name__tool_name" prefix (Q24)
+        if "__" in full_name:
+            server_name, tool_name = full_name.split("__", 1)
         else:
             server_name = ""
             tool_name = full_name

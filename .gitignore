@@ -12,3 +12,4 @@ reference-code/
 test-results
 .coverage
 .claude
+llm.json

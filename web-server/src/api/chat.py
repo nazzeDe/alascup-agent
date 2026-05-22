@@ -99,7 +99,7 @@ async def _handle_chat_turn(
         chat_id=chat_id,
     )
 
-    available_tools = await executor.list_tools()
+    available_tools = executor.list_tools()
     messages = history + [{"role": "user", "content": body.message}]
 
     async def event_generator():

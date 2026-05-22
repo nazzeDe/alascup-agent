@@ -50,14 +50,14 @@ class PostgresSessionManager:
 
     async def create_session(self) -> ChatSession:
         chat_id = uuid.uuid4()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
         await self._db.execute(
             "INSERT INTO chat_sessions (id, created_at, updated_at) VALUES ($1, $2, $2)",
             chat_id,
             now,
         )
         return ChatSession(
-            id=chat_id, messages=[], executed_tool_list=[], timestamp=now
+            id=chat_id, messages=[], executed_tool_list=[], timestamp=now.isoformat()
         )
 
     async def get_session(self, chat_id: uuid.UUID) -> ChatSession:
@@ -94,12 +94,13 @@ class PostgresSessionManager:
         ]
 
     async def add_message(self, chat_id: uuid.UUID, msg: Message) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        msg_ts = datetime.fromisoformat(msg.timestamp)
         await self._db.execute(
             "INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta) VALUES ($1,$2,$3,$4,$5,$6)",
             msg.message_id,
             chat_id,
-            msg.timestamp,
+            msg_ts,
             msg.type.value,
             msg.content,
             msg.is_meta,
@@ -111,7 +112,7 @@ class PostgresSessionManager:
         )
 
     async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
         await self._db.execute(
             """INSERT INTO tool_calls (id, chat_id, message_id, tool_name, server_name,
                is_read_only, is_rollbackable, params, request_id, approval_status,
