@@ -77,7 +77,7 @@ class LoopOrchestrator:
                 continue
 
             # 5. Emit SSE events
-            for ev in emit_events(state):
+            for ev in emit_events(state, chat_id=self._chat_id):
                 yield ev
 
             # 6. Clear per-iteration transient fields

@@ -1,16 +1,21 @@
 """SSE event emission from agent state."""
 
 import json
+from uuid import uuid4
 
 
-def emit_events(state: dict) -> list[dict]:
+def emit_events(state: dict, chat_id: str = "") -> list[dict]:
     """Convert agent state into SSE events for streaming to client."""
     events: list[dict] = []
 
     for m in state.get("messages", []):
         role = _msg_role(m)
         if role == "assistant":
-            events.append({"event": "assistant", "data": _json_dumps({"delta": _msg_content(m)})})
+            if isinstance(m, dict):
+                msg_id = m.get("id") or str(uuid4())
+            else:
+                msg_id = str(getattr(m, "id", uuid4()))
+            events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": _msg_content(m)})})
 
     for tc in state.get("tool_calls") or []:
         fn = tc.get("function", {})
