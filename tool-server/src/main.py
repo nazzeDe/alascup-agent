@@ -285,5 +285,13 @@ def main() -> int:
         return 1
 
 
+# Module-level FastMCP server for CLI (fastmcp run src/main.py)
+def _get_server() -> FastMCP:
+    config = load_config()
+    return create_server(config)
+
+
+mcp = _get_server()
+
 if __name__ == "__main__":
     raise SystemExit(main())

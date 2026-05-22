@@ -2,7 +2,13 @@ import json
 
 import pytest
 
-from src.agent.nodes import act_node, observe_node, think_node
+from src.agent.nodes import (
+    act_node,
+    observe_node,
+    think_node,
+    _messages,
+    _merge_tool_block,
+)
 from src.agent.state import AgentState, Transition
 
 
@@ -355,3 +361,157 @@ class TestObserveNode:
 
         assert len(result["messages"]) == 2
         assert result["transition"] == Transition.TOOL_RESULTS
+
+    def test_clears_streaming_tool_results(self):
+        """observe_node clears streaming_tool_results and tool_results, preserves _emitted_results."""
+        state = _state_with_tools()
+        state["streaming_tool_results"] = [
+            {"tool_name": "get_cpu", "tool_call_id": "t1", "result": {"execution_status": "SUCCEEDED"}},
+        ]
+
+        result = observe_node(state, tool_results=[
+            {"tool_name": "get_mem", "tool_call_id": "t2", "result": {"execution_status": "SUCCEEDED"}},
+        ])
+
+        assert result.get("streaming_tool_results") == []
+        assert result.get("tool_results") == []
+        assert len(result.get("_emitted_results", [])) == 2
+
+
+class TestMessagesConversion:
+    """Verify _messages preserves fields required by the LLM API."""
+
+    def test_preserves_tool_calls_on_assistant(self):
+        """Assistant messages must carry tool_calls for the LLM to accept tool responses."""
+        state = {
+            "messages": [
+                {"role": "assistant", "content": "Let me check.",
+                 "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
+            ]
+        }
+        result = _messages(state)
+        assert len(result) == 1
+        assert result[0]["role"] == "assistant"
+        assert "tool_calls" in result[0]
+        assert result[0]["tool_calls"][0]["id"] == "tc1"
+
+    def test_preserves_tool_call_id_on_tool(self):
+        """Tool messages must carry tool_call_id for the LLM to associate with tool_calls."""
+        state = {
+            "messages": [
+                {"role": "tool", "content": "[get_cpu] SUCCEEDED", "tool_call_id": "tc1"},
+            ]
+        }
+        result = _messages(state)
+        assert len(result) == 1
+        assert result[0]["role"] == "tool"
+        assert result[0]["tool_call_id"] == "tc1"
+
+    def test_preserves_name_on_tool(self):
+        """Tool messages must carry name — DeepSeek requires this field."""
+        state = {
+            "messages": [
+                {"role": "tool", "content": "[get_cpu] SUCCEEDED",
+                 "tool_call_id": "tc1", "name": "get_cpu"},
+            ]
+        }
+        result = _messages(state)
+        assert len(result) == 1
+        assert result[0]["role"] == "tool"
+        assert result[0]["name"] == "get_cpu"
+
+    def test_maps_human_to_user(self):
+        """LangGraph human role → user for API."""
+        state = {"messages": [{"role": "human", "content": "hello"}]}
+        result = _messages(state)
+        assert result[0]["role"] == "user"
+
+    def test_maps_ai_to_assistant(self):
+        """LangGraph ai role → assistant for API."""
+        state = {"messages": [{"role": "ai", "content": "hello there"}]}
+        result = _messages(state)
+        assert result[0]["role"] == "assistant"
+
+
+class TestMessagesConversionWithLangGraphObjects:
+    """Verify _messages preserves fields from LangGraph objects (after add_messages reducer)."""
+
+    def test_preserves_name_from_toolmessage(self):
+        """ToolMessage.name must survive the round-trip through _messages()."""
+        from langchain_core.messages import ToolMessage
+        state = {
+            "messages": [
+                ToolMessage(content="[get_cpu] SUCCEEDED", tool_call_id="tc1", name="get_cpu"),
+            ]
+        }
+        result = _messages(state)
+        assert result[0]["role"] == "tool"
+        assert result[0]["name"] == "get_cpu"
+        assert result[0]["tool_call_id"] == "tc1"
+
+    def test_preserves_name_from_aimessage_tool_calls(self):
+        """AIMessage.tool_calls must be converted from LangChain to OpenAI format."""
+        from langchain_core.messages import AIMessage
+        state = {
+            "messages": [
+                AIMessage(content="", tool_calls=[{"name": "get_cpu", "args": {}, "id": "tc1", "type": "tool_call"}]),
+            ]
+        }
+        result = _messages(state)
+        assert result[0]["role"] == "assistant"
+        assert "tool_calls" in result[0]
+        tc = result[0]["tool_calls"][0]
+        assert tc["id"] == "tc1"
+        assert tc["type"] == "function"
+        assert tc["function"]["name"] == "get_cpu"
+        assert tc["function"]["arguments"] == "{}"
+
+    def test_full_tool_roundtrip(self):
+        """Simulate full graph state after think→observe with LangGraph objects."""
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+        state = {
+            "messages": [
+                HumanMessage(content="check cpu"),
+                AIMessage(content="", tool_calls=[{"name": "get_cpu", "args": {}, "id": "tc1", "type": "tool_call"}]),
+                ToolMessage(content="[get_cpu] SUCCEEDED", tool_call_id="tc1", name="get_cpu"),
+            ]
+        }
+        result = _messages(state)
+        assert len(result) == 3
+        # User
+        assert result[0]["role"] == "user"
+        # Assistant with tool_calls
+        assert result[1]["role"] == "assistant"
+        assert "tool_calls" in result[1]
+        # Tool with name
+        assert result[2]["role"] == "tool"
+        assert result[2].get("name") == "get_cpu"
+        assert result[2].get("tool_call_id") == "tc1"
+
+
+class TestMergeToolBlock:
+    """Verify _merge_tool_block sets required fields."""
+
+    def test_new_block_has_id(self):
+        """First chunk (with name) must create a block with a valid id."""
+        blocks: list[dict] = []
+        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
+        _merge_tool_block(blocks, chunk)
+        assert len(blocks) == 1
+        assert "id" in blocks[0]
+        assert blocks[0]["id"] != ""
+
+    def test_chunk_with_id_preserves_it(self):
+        """If the chunk carries an id, it should be used."""
+        blocks: list[dict] = []
+        chunk = {"id": "explicit-id", "function": {"name": "get_cpu", "arguments": "{}"}}
+        _merge_tool_block(blocks, chunk)
+        assert blocks[0]["id"] == "explicit-id"
+
+    def test_arguments_only_chunk_appends(self):
+        """Arguments-only chunk appends to the last block without creating a new one."""
+        blocks = [{"id": "t1", "function": {"name": "get_cpu", "arguments": '{"unit":'}}]
+        chunk = {"function": {"arguments": '"percent"}'}}
+        _merge_tool_block(blocks, chunk)
+        assert len(blocks) == 1
+        assert blocks[0]["function"]["arguments"] == '{"unit":"percent"}'

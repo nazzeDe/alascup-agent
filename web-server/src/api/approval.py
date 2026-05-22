@@ -76,7 +76,7 @@ async def approve_tool_request(
             elif event.get("event") == "tool_approval_required":
                 saw_approval = True
                 pending_decisions = ["APPROVED"]
-                break  # restart loop with approval decision
+                break
 
         if not saw_approval:
             break

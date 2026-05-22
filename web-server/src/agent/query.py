@@ -2,7 +2,7 @@
 
 Outer layer: context compression, approval pause/resume, exit detection,
 audit logging, SSE streaming.
-Inner graph: think → review → act → observe → END (pre-compiled once at startup).
+Inner graph: think → review → act → observe → think → … → END.
 
 Async approval model:
   - run() executes until interrupt, then returns immediately.
@@ -16,7 +16,10 @@ from uuid import uuid4
 from langgraph.types import Command
 
 from src.agent.loop.audit import log_transition
+from src.agent.loop.events import emit_events
+from src.agent.loop.handlers import handle_interrupt
 from src.agent.loop.orchestrator import LoopOrchestrator
+from src.agent.loop.transitions import has_interrupt
 from src.agent.state import Transition
 
 
@@ -58,17 +61,38 @@ class Query:
             yield event
 
     async def resume(self, decisions: list[str]):
-        """Resume from checkpoint after human approval."""
+        """Resume from checkpoint after human approval.
+
+        The graph now loops observe→think internally, so a single
+        ainvoke(Command(resume=...)) runs from the interrupt point
+        all the way to END (or another interrupt).
+        """
         await log_transition(self._audit, Transition.APPROVAL_GRANTED)
 
         result = await self._graph.ainvoke(
             Command(resume={"decisions": decisions}),
             {"configurable": {"thread_id": self._chat_id}},
         )
+        msgs = result.get("messages", [])
+        print(f"RESUME_GRAPH: msgs={len(msgs)} tool_results={len(result.get('tool_results',[]))} streaming={len(result.get('streaming_tool_results',[]))} emitted={len(result.get('_emitted_results',[]))} transition={result.get('transition')} interrupt={'__interrupt__' in result}", flush=True)
 
-        orch = self._build_orchestrator()
-        async for event in orch.run(result):
-            yield event
+        # If the graph hit another interrupt, yield the approval event
+        if has_interrupt(result):
+            async for event in handle_interrupt(
+                result,
+                bridge=self._bridge,
+                audit_logger=self._audit,
+                chat_id=self._chat_id,
+            ):
+                yield event
+            return
+
+        # Graph reached END — emit final events
+        evs = emit_events(result, chat_id=self._chat_id)
+        print(f"RESUME_EVENTS: {[e.get('event','') for e in evs]}", flush=True)
+        for ev in evs:
+            yield ev
+        yield {"event": "done", "data": "{}"}
 
     def _build_orchestrator(self) -> LoopOrchestrator:
         return LoopOrchestrator(

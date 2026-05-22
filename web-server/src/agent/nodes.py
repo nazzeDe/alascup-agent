@@ -27,13 +27,15 @@ async def think_node(state: AgentState, *, llm, executor=None):
     system = state.get("system")
 
     accumulated_text: list[str] = []
+    accumulated_reasoning: list[str] = []
     tool_call_blocks: list[dict] = []
 
     async for event in llm.generate_stream(messages, tools=tools, system=system):
-        result = _process_stream_event(event, accumulated_text, tool_call_blocks)
+        result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
         if result is True:
             break
         if result is not None:
+            print(f"THINK_ERR: code={result.get('code','?')} msg={json.dumps(result.get('message',''))[:300]}", flush=True)
             return {
                 "messages": [],
                 "tool_calls": [],
@@ -43,9 +45,15 @@ async def think_node(state: AgentState, *, llm, executor=None):
 
     result: dict = {}
     text = "".join(accumulated_text)
+    reasoning = "".join(accumulated_reasoning)
 
-    if text:
-        result["messages"] = [{"role": "assistant", "content": text}]
+    if text or reasoning or tool_call_blocks:
+        assistant_msg: dict = {"role": "assistant", "content": text or ""}
+        if reasoning:
+            assistant_msg["reasoning_content"] = reasoning
+        if tool_call_blocks:
+            assistant_msg["tool_calls"] = tool_call_blocks
+        result["messages"] = [assistant_msg]
 
     if executor is not None and tool_call_blocks:
         pending_tool_calls, pre_executed = await _dispatch_tool_calls(
@@ -64,7 +72,7 @@ async def think_node(state: AgentState, *, llm, executor=None):
 
 
 def _process_stream_event(
-    event: dict, accumulated_text: list[str], tool_call_blocks: list[dict]
+    event: dict, accumulated_text: list[str], accumulated_reasoning: list[str], tool_call_blocks: list[dict]
 ) -> dict | bool | None:
     """Process a single stream event.
 
@@ -76,6 +84,9 @@ def _process_stream_event(
     if event["event"] == "assistant":
         data = json.loads(event["data"])
         accumulated_text.append(data.get("delta", ""))
+        rc = data.get("reasoning_content", "")
+        if rc:
+            accumulated_reasoning.append(rc)
     elif event["event"] == "tool_call":
         data = json.loads(event["data"])
         _merge_tool_block(tool_call_blocks, data)
@@ -106,14 +117,16 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
             "request_id": tc.get("request_id", str(uuid4())),
         })
 
+    print(f"ACT_NODE: executing {len(calls)} tools: {[c['tool_name'] for c in calls]}", flush=True)
     results = await executor.execute_parallel(calls)
 
     formatted = []
     for i, r in enumerate(results):
+        tc_id = tool_calls[i].get("id", str(uuid4()))
         formatted.append({
             "tool_name": calls[i]["tool_name"],
             "result": r,
-            "tool_call_id": str(uuid4()),
+            "tool_call_id": tc_id,
         })
         await _log_act(
             audit_logger, calls[i]["tool_name"],
@@ -180,6 +193,7 @@ async def review_node(state: AgentState, *, executor, rule_engine, audit_logger)
     6. High-risk → interrupt() for user approval
     """
     tool_calls = state.get("tool_calls", []) or []
+    print(f"REVIEW_NODE: tc_count={len(tool_calls)}", flush=True)
     approved: list[dict] = []
     rejected: list[dict] = []
     pending: list[dict] = []
@@ -261,6 +275,9 @@ def observe_node(state: AgentState, *, tool_results=None):
     对应 tests/README.md AG-001、AG-007。
     """
     results = list(tool_results or [])
+    # Also read tool_results from state (set by act_node during resume flow)
+    state_tr = state.get("tool_results") or []
+    results.extend(state_tr)
     streaming = state.get("streaming_tool_results") or []
     results.extend(streaming)
 
@@ -271,10 +288,15 @@ def observe_node(state: AgentState, *, tool_results=None):
             "role": "tool",
             "content": _format_tool_result(r),
             "tool_call_id": r.get("tool_call_id", "unknown"),
+            "name": r.get("tool_name", "unknown"),
         })
 
     return {
         "messages": tool_messages,
+        "streaming_tool_results": [],   # consumed — prevents re-processing in next iteration
+        "tool_results": [],             # consumed
+        # Preserve results for SSE event emission
+        "_emitted_results": results,
         "transition": Transition.TOOL_RESULTS,
     }
 
@@ -312,18 +334,90 @@ def route_after_think(state: AgentState) -> str:
 
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
 
+
+def _langchain_tc_to_openai(tc: dict) -> dict:
+    """Convert LangChain tool_call format to OpenAI format.
+
+    LangChain: {"name": ..., "args": {...}, "id": "...", "type": "tool_call"}
+    OpenAI:    {"id": "...", "type": "function", "function": {"name": ..., "arguments": ...}}
+    """
+    fn = tc.get("function")
+    if fn is not None:
+        return {"id": tc.get("id", ""), "function": fn, "type": "function"}
+    args = tc.get("args", {})
+    if not isinstance(args, str):
+        args = json.dumps(args)
+    return {
+        "id": tc.get("id", ""),
+        "type": "function",
+        "function": {"name": tc.get("name", ""), "arguments": args},
+    }
+
 def _messages(state: AgentState) -> list[dict]:
+    """Convert LangGraph messages to OpenAI-compatible dicts.
+
+    Preserves tool_calls on assistant messages and tool_call_id on tool
+    messages — both are required by the LLM API.
+    """
     result: list[dict] = []
     for m in state.get("messages", []):
-        if isinstance(m, dict):
-            role = _ROLE_MAP.get(m.get("role", ""), m.get("role", ""))
-            result.append({"role": role, "content": m.get("content", "")})
-        else:
-            role = getattr(m, "type", "unknown")
-            role = _ROLE_MAP.get(role, role)
-            content = getattr(m, "content", "")
-            result.append({"role": role, "content": content})
+        role, content, meta = _normalize_message(m)
+        entry: dict = {"role": role, "content": content}
+        if role == "assistant":
+            tcs = meta.get("tool_calls")
+            if tcs:
+                entry["tool_calls"] = tcs
+            rc = meta.get("reasoning_content", "")
+            if rc:
+                entry["reasoning_content"] = rc
+        elif role == "tool":
+            tc_id = meta.get("tool_call_id", "")
+            if tc_id:
+                entry["tool_call_id"] = tc_id
+            nm = meta.get("name", "")
+            if nm:
+                entry["name"] = nm
+        result.append(entry)
     return result
+
+
+def _normalize_message(m: dict | object) -> tuple[str, str, dict]:
+    """Normalize a dict or LangGraph message object into (role, content, meta)."""
+    if isinstance(m, dict):
+        role = _ROLE_MAP.get(m.get("role", ""), m.get("role", ""))
+        content = m.get("content", "")
+        meta: dict = {}
+        tcs = m.get("tool_calls")
+        if tcs:
+            meta["tool_calls"] = tcs
+        rc = m.get("reasoning_content", "")
+        if rc:
+            meta["reasoning_content"] = rc
+        tc_id = m.get("tool_call_id", "")
+        if tc_id:
+            meta["tool_call_id"] = tc_id
+        nm = m.get("name", "")
+        if nm:
+            meta["name"] = nm
+        return role, content, meta
+
+    role = getattr(m, "type", "unknown")
+    role = _ROLE_MAP.get(role, role)
+    content = getattr(m, "content", "")
+    meta = {}
+    tcs = getattr(m, "tool_calls", None)
+    if tcs:
+        meta["tool_calls"] = [_langchain_tc_to_openai(tc) for tc in tcs]
+    rc = getattr(m, "additional_kwargs", {}).get("reasoning_content", "")
+    if rc:
+        meta["reasoning_content"] = rc
+    tc_id = getattr(m, "tool_call_id", "")
+    if tc_id:
+        meta["tool_call_id"] = tc_id
+    nm = getattr(m, "name", "")
+    if nm:
+        meta["name"] = nm
+    return role, content, meta
 
 
 def _format_tools(tools: list) -> list[dict]:
@@ -372,10 +466,12 @@ async def _dispatch_tool_calls(
 
     pending: list[dict] = []
     dispatch: list[dict] = []
+    dispatch_call_ids: list[str] = []  # track original tc id for matching
     for tc in tool_call_blocks:
         fn = tc.get("function", {})
         full_name = fn.get("name", "")
         args = _parse_args(fn.get("arguments", "{}"))
+        tc_id = tc.get("id", str(uuid4()))
 
         # Parse "server_name__tool_name" prefix (Q24)
         if "__" in full_name:
@@ -384,10 +480,14 @@ async def _dispatch_tool_calls(
             server_name = ""
             tool_name = full_name
 
-        tc["server_name"] = server_name
         tc["function"]["name"] = tool_name  # restore bare name for MCP call
 
         meta = tool_index.get(full_name, {})
+        # Fallback: use server_name from metadata when not prefixed
+        if not server_name:
+            server_name = meta.get("server_name", "")
+        tc["server_name"] = server_name
+
         is_mutable = meta.get("mutable", False)
         is_read_only = meta.get("is_read_only", False)
 
@@ -403,6 +503,7 @@ async def _dispatch_tool_calls(
                 "approval_status": "APPROVED",
                 "request_id": str(uuid4()),
             })
+            dispatch_call_ids.append(tc_id)
         else:
             tc["mutable"] = False
             tc["is_read_only"] = False
@@ -415,7 +516,7 @@ async def _dispatch_tool_calls(
             pre_executed.append({
                 "tool_name": dispatch[i]["tool_name"],
                 "result": dr,
-                "tool_call_id": str(uuid4()),
+                "tool_call_id": dispatch_call_ids[i],
             })
 
     return pending, pre_executed
@@ -440,8 +541,14 @@ def _merge_tool_block(blocks: list[dict], chunk: dict) -> None:
     args_chunk = fn.get("arguments", "")
 
     if name:
-        blocks.append({"function": {"name": name, "arguments": args_chunk}})
+        blocks.append({
+            "id": chunk.get("id") or str(uuid4()),
+            "function": {"name": name, "arguments": args_chunk},
+        })
     elif args_chunk and blocks:
         blocks[-1]["function"]["arguments"] += args_chunk
     elif args_chunk:
-        blocks.append({"function": {"name": "", "arguments": args_chunk}})
+        blocks.append({
+            "id": chunk.get("id") or str(uuid4()),
+            "function": {"name": "", "arguments": args_chunk},
+        })

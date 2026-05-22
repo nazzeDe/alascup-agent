@@ -148,14 +148,16 @@ class LLMAdapter:
 
         delta = chunk.get("choices", [{}])[0].get("delta", {})
         content = delta.get("content", "")
+        reasoning = delta.get("reasoning_content", "")
         tool_calls = delta.get("tool_calls")
 
         if tool_calls:
             for tc in tool_calls:
                 idx = tc.get("index", 0)
                 if idx not in accumulated:
+                    from uuid import uuid4 as _uuid4
                     accumulated[idx] = {
-                        "id": tc.get("id", ""),
+                        "id": tc.get("id") or str(_uuid4()),
                         "function": {"name": "", "arguments": ""},
                     }
                 else:
@@ -170,10 +172,15 @@ class LLMAdapter:
                         "arguments"
                     ]
 
-        if content:
+        if content or reasoning:
+            data: dict[str, str] = {}
+            if content:
+                data["delta"] = content
+            if reasoning:
+                data["reasoning_content"] = reasoning
             yield {
                 "event": "assistant",
-                "data": json.dumps({"delta": content}),
+                "data": json.dumps(data),
             }
 
     async def summarize(self, messages: list[dict]) -> str:

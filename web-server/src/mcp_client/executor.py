@@ -75,13 +75,14 @@ class ToolExecutor:
                 async with Client(url) as client:
                     args = arguments if isinstance(arguments, dict) and arguments else None
                     result = await client.call_tool(tool_name, args)
+                    output = _extract_output(result)
                     return {
                         "execution_status": (
                             ExecutionStatus.SUCCEEDED
                             if not getattr(result, "isError", False)
                             else ExecutionStatus.FAILED
                         ),
-                        "output": getattr(result, "content", None),
+                        "output": output,
                     }
             except (ConnectionError, ConnectionRefusedError) as e:
                 if attempt == self._max_retries:
@@ -114,3 +115,20 @@ class ToolExecutor:
     @staticmethod
     def _is_connect_error(exc: Exception) -> bool:
         return isinstance(exc, (ConnectionError, ConnectionRefusedError, TimeoutError))
+
+
+def _extract_output(result) -> str | None:
+    """Extract text content from an MCP CallToolResult.
+
+    Handles fastmcp TextContent blocks (content is a list of blocks each
+    with a ``.text`` attribute).
+    """
+    content = getattr(result, "content", None)
+    if not content or not isinstance(content, list):
+        return None
+    texts: list[str] = []
+    for block in content:
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            texts.append(text)
+    return "\n".join(texts) if texts else None

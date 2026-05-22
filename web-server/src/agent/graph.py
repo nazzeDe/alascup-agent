@@ -40,6 +40,8 @@ def build_graph(*, llm, executor, rule_engine, audit_logger, checkpointer) -> Co
     graph.add_conditional_edges("think", route_after_think, {"review": "review", "observe": "observe", END: END})
     graph.add_edge("review", "act")
     graph.add_edge("act", "observe")
-    graph.add_edge("observe", END)
+    # Loop observe → think for continuous ReAct.  think routes to
+    # END when it produces no output (no tool_calls, no streaming).
+    graph.add_edge("observe", "think")
 
     return graph.compile(checkpointer=checkpointer)

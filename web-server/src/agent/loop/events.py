@@ -14,12 +14,15 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
     events: list[dict] = []
 
     assistant_msgs = [m for m in state.get("messages", []) if _msg_role(m) == "assistant"]
-    for m in assistant_msgs[skip_assistant_count:]:
+    for i, m in enumerate(assistant_msgs[skip_assistant_count:]):
         if isinstance(m, dict):
             msg_id = m.get("id") or str(uuid4())
         else:
             msg_id = str(getattr(m, "id", uuid4()))
-        events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": _msg_content(m)})})
+        delta = _msg_content(m)
+        if not delta:
+            continue
+        events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": delta})})
 
     for tc in state.get("tool_calls") or []:
         fn = tc.get("function", {})
@@ -56,7 +59,9 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
             evt["error"] = error
         events.append({"event": "tool_result", "data": _json_dumps(evt)})
 
-    for sr in state.get("streaming_tool_results") or []:
+    # _emitted_results (preserved across observe clears) or streaming_tool_results
+    emitted = state.get("_emitted_results") or state.get("streaming_tool_results") or []
+    for sr in emitted:
         events.append({
             "event": "tool_call",
             "data": _json_dumps({

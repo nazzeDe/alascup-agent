@@ -62,7 +62,7 @@ class TestToolExecutorExecute:
             )
 
             MockClient.assert_called_once_with("http://my:8001")
-            mock_client.call_tool.assert_called_once_with("get_cpu_info", {})
+            mock_client.call_tool.assert_called_once_with("get_cpu_info", None)
             assert result["execution_status"] == "SUCCEEDED"
 
     @pytest.mark.asyncio
