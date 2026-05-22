@@ -14,3 +14,4 @@ test-results
 .claude
 llm.json
 .playwright-mcp/
+package-lock.json
