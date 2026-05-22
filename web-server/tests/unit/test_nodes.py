@@ -220,7 +220,7 @@ class TestStreamingThink:
         """Safe-pool (non-mutable, readonly) → pre-executed, streaming_tool_results."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server/get_cpu", "arguments": "{}"}
+                "function": {"name": "tool-server__get_cpu", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
@@ -239,7 +239,7 @@ class TestStreamingThink:
         """Approval-pool (non-mutable, not readonly) → stays in tool_calls."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server/restart_service", "arguments": "{}"}
+                "function": {"name": "tool-server__restart_service", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
@@ -258,10 +258,10 @@ class TestStreamingThink:
         """Mixed: readonly pre-executed, write stays in tool_calls."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server/get_cpu", "arguments": "{}"}
+                "function": {"name": "tool-server__get_cpu", "arguments": "{}"}
             })},
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server/restart_service", "arguments": "{}"}
+                "function": {"name": "tool-server__restart_service", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
@@ -282,7 +282,7 @@ class TestStreamingThink:
         """Mutable pool — not pre-executed, stays in tool_calls for review_node classification."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server/bash", "arguments": '{"cmd":"ls"}'}
+                "function": {"name": "tool-server__bash", "arguments": '{"cmd":"ls"}'}
             })},
             {"event": "done", "data": "{}"},
         ])
@@ -304,7 +304,7 @@ class TestStreamingThink:
         """Server prefix is parsed once and attached to the tool_call dict (Q24)."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "rag-server/search_experience", "arguments": "{}"}
+                "function": {"name": "rag-server__search_experience", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])

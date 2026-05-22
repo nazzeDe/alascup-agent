@@ -581,3 +581,116 @@ class TestLogTransition:
 
     async def test_none_audit_logger_no_crash(self):
         await log_transition(None, Transition.DONE)
+
+
+# ── orchestrator termination ────────────────────────────────────────────
+
+class _MockAuditLogger:
+    def __init__(self):
+        self.events = []
+
+    async def log(self, event):
+        self.events.append(event)
+
+
+class _NoopGraph:
+    """Graph that returns the given state unchanged (one-shot)."""
+
+    async def ainvoke(self, state, config=None):
+        return dict(state)
+
+
+class _NoopCtx:
+    def count_tokens(self, messages):
+        return 0
+
+    def needs_compression(self, tokens):
+        return False
+
+    async def compress(self, messages):
+        return messages
+
+
+class TestOrchestratorTermination:
+    @pytest.mark.asyncio
+    async def test_exits_when_transition_is_done(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        audit = _MockAuditLogger()
+        graph = _NoopGraph()
+
+        orch = LoopOrchestrator(
+            graph=graph,
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=audit,
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {
+            "messages": [{"role": "assistant", "content": "OK"}],
+            "transition": Transition.DONE,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+
+        events = []
+        async for ev in orch.run(state):
+            events.append(ev)
+
+        assert any(e["event"] == "done" for e in events)
+
+    @pytest.mark.asyncio
+    async def test_continues_when_transition_is_tool_results(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        audit = _MockAuditLogger()
+
+        call_count = 0
+
+        class CountingGraph:
+            async def ainvoke(self, state, config=None):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return {
+                        "messages": state.get("messages", []),
+                        "transition": Transition.TOOL_RESULTS,
+                        "tool_calls": [],
+                        "tool_results": [{"tool_name": "get_cpu_info", "result": {"execution_status": "SUCCEEDED"}}],
+                        "streaming_tool_results": [],
+                    }
+                return {
+                    "messages": state.get("messages", []) + [{"role": "assistant", "content": "done"}],
+                    "transition": Transition.DONE,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "streaming_tool_results": [],
+                }
+
+        orch = LoopOrchestrator(
+            graph=CountingGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=audit,
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {
+            "messages": [{"role": "user", "content": "check CPU"}],
+            "transition": None,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+
+        events = []
+        async for ev in orch.run(state):
+            events.append(ev)
+
+        assert call_count >= 2, f"orchestrator should loop at least once, got {call_count} iterations"
+        assert any(e["event"] == "done" for e in events)
+

@@ -187,7 +187,44 @@ class TestLLMAdapterGenerateStream:
             events.append(event)
 
         tool_call_events = [e for e in events if e.get("event") == "tool_call"]
+        done_events = [e for e in events if e.get("event") == "done"]
         assert len(tool_call_events) >= 1
+        assert len(done_events) >= 1
+        # tool_calls must be yielded BEFORE done — otherwise think_node breaks too early
+        last_tc_idx = max(events.index(e) for e in tool_call_events)
+        first_done_idx = min(events.index(e) for e in done_events)
+        assert last_tc_idx < first_done_idx, "tool_call events must come BEFORE done event"
+
+    @pytest.mark.asyncio
+    async def test_generate_stream_tool_calls_before_done(self, llm_config):
+        """Multi-chunk tool call deltas: tool_calls must appear before done."""
+        from src.services.llm_adapter import LLMAdapter
+
+        chunks = [
+            'data: {"choices":[{"delta":{"content":null,"tool_calls":[{"index":0,"function":{"name":"get_cpu_info","arguments":""}}]}}]}',
+            'data: {"choices":[{"delta":{"content":null,"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
+            'data: [DONE]',
+        ]
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
+
+        adapter = LLMAdapter(llm_config)
+        adapter._client = lambda: mock_client
+
+        events = []
+        async for event in adapter.generate_stream([{"role": "user", "content": "check"}]):
+            events.append(event)
+
+        event_types = [e["event"] for e in events]
+        tc_indices = [i for i, t in enumerate(event_types) if t == "tool_call"]
+        done_index = next(i for i, t in enumerate(event_types) if t == "done")
+
+        assert tc_indices, "expected at least one tool_call event"
+        assert all(i < done_index for i in tc_indices), (
+            f"tool_calls at indices {tc_indices} must all be before done at {done_index}"
+        )
 
     @pytest.mark.asyncio
     async def test_generate_stream_with_system_prompt(self, llm_config):

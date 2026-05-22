@@ -20,8 +20,14 @@ class _MockLLMAdapter:
 
 
 class _MockToolExecutor:
-    async def list_tools(self):
+    async def discover(self):
+        pass
+
+    def list_tools(self):
         return []
+
+    async def classify_companion(self, tool_name, params, server_name):
+        return {"safe": True}
 
     async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None):
         return {"execution_status": "SUCCEEDED", "output": {}}
