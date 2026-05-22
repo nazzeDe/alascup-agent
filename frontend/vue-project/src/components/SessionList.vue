@@ -32,13 +32,13 @@ const emit = defineEmits<{
       </div>
       <div
         v-for="session in sessions"
-        :key="session.chatID"
-        :class="['session-item p-2 border-bottom', { 'bg-primary-subtle': session.chatID === activeChatId }]"
+        :key="session.id"
+        :class="['session-item p-2 border-bottom', { 'bg-primary-subtle': session.id === activeChatId }]"
         style="cursor: pointer"
-        @click="emit('select', session.chatID)"
+        @click="emit('select', session.id)"
       >
         <div class="fw-semibold small text-truncate">
-          {{ session.title || session.chatID?.slice(0, 8) || 'New Session' }}
+          {{ session.title || session.id?.slice(0, 8) || 'New Session' }}
         </div>
         <div class="text-muted small">
           {{ new Date(session.timestamp).toLocaleString() }}

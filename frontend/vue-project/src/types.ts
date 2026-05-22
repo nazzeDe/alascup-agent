@@ -6,12 +6,12 @@ export type MessageType =
   | "system";
 
 export interface Message {
-  messageID: string;
-  chatID: string;
+  message_id: string;
+  chat_id: string;
   timestamp: string;
   type: MessageType;
   content: string;
-  isMeta?: boolean;
+  is_meta?: boolean;
 }
 
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
@@ -22,12 +22,12 @@ export type ExecutionStatus =
   | "FAILED";
 
 export interface ToolCallInfo {
-  messageID: string;
-  chatID: string;
+  message_id: string;
+  chat_id: string;
   tool_name: string;
   server?: string;
-  isReadOnly: boolean;
-  isRollbackable?: boolean;
+  is_read_only: boolean;
+  is_rollbackable?: boolean;
   params?: Record<string, unknown>;
   request_id?: string;
   approval_status?: ApprovalStatus;
@@ -38,7 +38,7 @@ export interface ToolCallInfo {
 }
 
 export interface ChatSession {
-  chat_id: string;
+  id: string;
   title?: string;
   messages: Message[];
   executed_tool_list: ToolCallInfo[];
@@ -57,7 +57,7 @@ export interface ToolCallEvent {
   message_id: string;
   tool_name: string;
   params: Record<string, unknown>;
-  isReadOnly: boolean;
+  is_read_only: boolean;
 }
 
 export interface ToolResultEvent {

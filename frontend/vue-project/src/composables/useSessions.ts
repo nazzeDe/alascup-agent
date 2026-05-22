@@ -27,8 +27,8 @@ export function useSessions() {
       if (!res.ok) return undefined
       const session: ChatSession = await res.json()
       sessions.value = [session, ...sessions.value]
-      activeChatId.value = session.chatID
-      return session.chatID
+      activeChatId.value = session.id
+      return session.id
     } catch {
       return undefined
     } finally {

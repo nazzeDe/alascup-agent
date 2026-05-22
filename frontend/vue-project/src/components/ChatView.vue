@@ -92,7 +92,7 @@ function onKeydown(e: KeyboardEvent) {
       </div>
 
       <!-- FE-013: timeline renders messages and tool cards in chronological order -->
-      <template v-for="item in timeline" :key="item.type === 'message' ? item.data.messageID : item.data.messageID">
+      <template v-for="item in timeline" :key="item.type === 'message' ? item.data.message_id : item.data.message_id">
         <MessageItem v-if="item.type === 'message'" :message="item.data" />
         <ToolCallCard v-else :tool-call="item.data" />
       </template>

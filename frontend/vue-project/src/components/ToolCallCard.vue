@@ -34,7 +34,7 @@ const hasOutput = computed(() => {
   <div class="tool-call-card border rounded-3 p-2 my-2 bg-white" style="max-width: 400px">
     <div class="d-flex justify-content-between align-items-center">
       <div>
-        <span v-if="toolCall.isReadOnly" class="badge bg-info me-1">R</span>
+        <span v-if="toolCall.is_read_only" class="badge bg-info me-1">R</span>
         <span v-else class="badge bg-warning me-1">W</span>
         <strong class="tool-name">{{ toolCall.tool_name }}</strong>
       </div>

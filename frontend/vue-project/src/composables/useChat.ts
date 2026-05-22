@@ -43,8 +43,8 @@ export function useChat() {
     const chatId = activeChatId.value
 
     const userMsg: Message = {
-      messageID: crypto.randomUUID(),
-      chatID: chatId ?? '',
+      message_id: crypto.randomUUID(),
+      chat_id: chatId ?? '',
       timestamp: new Date().toISOString(),
       type: 'user',
       content: text,
@@ -65,8 +65,8 @@ export function useChat() {
           if (!currentAssistantMsgId) {
             currentAssistantMsgId = data.message_id
             const msg: Message = {
-              messageID: data.message_id,
-              chatID: data.chat_id,
+              message_id: data.message_id,
+              chat_id: data.chat_id,
               timestamp: new Date().toISOString(),
               type: 'assistant',
               content: '',
@@ -74,7 +74,7 @@ export function useChat() {
             messages.value = [...messages.value, msg]
           }
           assistantBuffer += data.delta
-          const idx = messages.value.findIndex(m => m.messageID === currentAssistantMsgId)
+          const idx = messages.value.findIndex(m => m.message_id === currentAssistantMsgId)
           if (idx !== -1) {
             const updated = [...messages.value]
             updated[idx] = { ...updated[idx]!, content: assistantBuffer }
@@ -88,10 +88,10 @@ export function useChat() {
             return
           }
           const tc: ToolCallInfo = {
-            messageID: data.message_id,
-            chatID: data.chat_id,
+            message_id: data.message_id,
+            chat_id: data.chat_id,
             tool_name: data.tool_name,
-            isReadOnly: data.isReadOnly,
+            is_read_only: data.is_read_only,
             params: data.params,
             execution_status: 'RUNNING',
             timestamp: new Date().toISOString(),
@@ -124,10 +124,10 @@ export function useChat() {
           isApprovalPaused = true
 
           const tc: ToolCallInfo = {
-            messageID: crypto.randomUUID(),
-            chatID: data.chat_id,
+            message_id: crypto.randomUUID(),
+            chat_id: data.chat_id,
             tool_name: data.tool_name,
-            isReadOnly: false,
+            is_read_only: false,
             params: data.params,
             request_id: data.request_id,
             approval_status: 'PENDING',
@@ -135,7 +135,7 @@ export function useChat() {
             timestamp: new Date().toISOString(),
           }
           const updated = new Map(toolCalls.value)
-          updated.set(tc.messageID, tc)
+          updated.set(tc.message_id, tc)
           toolCalls.value = updated
         },
 
@@ -174,15 +174,15 @@ export function useChat() {
         case 'assistant': {
           const d = evt.data as AssistantEvent
           // Find or create assistant message
-          const idx = messages.value.findIndex(m => m.messageID === d.message_id)
+          const idx = messages.value.findIndex(m => m.message_id === d.message_id)
           if (idx !== -1) {
             const updated = [...messages.value]
             updated[idx] = { ...updated[idx]!, content: updated[idx]!.content + d.delta }
             messages.value = updated
           } else {
             messages.value = [...messages.value, {
-              messageID: d.message_id,
-              chatID: d.chat_id,
+              message_id: d.message_id,
+              chat_id: d.chat_id,
               timestamp: new Date().toISOString(),
               type: 'assistant',
               content: d.delta,
@@ -221,12 +221,12 @@ export function useChat() {
         // Show meta message
         const action = status === 'APPROVED' ? 'approved' : 'rejected'
         messages.value = [...messages.value, {
-          messageID: crypto.randomUUID(),
-          chatID: pending?.chat_id ?? activeChatId.value ?? '',
+          message_id: crypto.randomUUID(),
+          chat_id: pending?.chat_id ?? activeChatId.value ?? '',
           timestamp: new Date().toISOString(),
           type: 'system',
           content: `Tool execution ${action}`,
-          isMeta: true,
+          is_meta: true,
         }]
       } else {
         // FE-015: keep modal open on server error, show toast
@@ -248,7 +248,7 @@ export function useChat() {
       const map = new Map<string, ToolCallInfo>()
       if (session.executed_tool_list) {
         for (const tc of session.executed_tool_list) {
-          map.set(tc.messageID, tc)
+          map.set(tc.message_id, tc)
         }
       }
       toolCalls.value = map

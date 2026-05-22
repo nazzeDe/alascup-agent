@@ -8,7 +8,7 @@ const props = defineProps<{ message: Message }>()
 const contentRef = ref<HTMLElement | null>(null)
 
 const renderedHtml = computed(() => {
-  if (props.message.type === 'assistant' && !props.message.isMeta) {
+  if (props.message.type === 'assistant' && !props.message.is_meta) {
     return marked.parse(props.message.content) as string
   }
   return ''
@@ -38,8 +38,8 @@ watch(renderedHtml, async () => {
 </script>
 
 <template>
-  <!-- FE-012: isMeta takes precedence over type -->
-  <div v-if="message.isMeta" class="d-flex justify-content-center mb-2">
+  <!-- FE-012: is_meta takes precedence over type -->
+  <div v-if="message.is_meta" class="d-flex justify-content-center mb-2">
     <div class="chat-meta text-muted small">
       {{ message.content }}
     </div>
