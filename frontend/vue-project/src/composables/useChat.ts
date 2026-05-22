@@ -203,33 +203,68 @@ export function useChat() {
   }
 
   async function submitApproval(requestId: string, status: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
-    try {
-      const res = await fetch(`/api/tool-requests/${requestId}/approval`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_status: status, reason }),
-      })
-      if (res.ok) {
-        const pending = approvalPending.value
-        approvalPending.value = null
+    const pending = approvalPending.value
+    approvalPending.value = null
 
-        // FE-016: drain queued events after approval
-        if (pending) {
-          drainQueue()
-        }
+    if (status === 'APPROVED') {
+      // Show processing placeholder while approval finishes and agent responds
+      const processingId = crypto.randomUUID()
+      messages.value = [...messages.value, {
+        message_id: processingId,
+        chat_id: pending?.chat_id ?? activeChatId.value ?? '',
+        timestamp: new Date().toISOString(),
+        type: 'system',
+        content: 'Processing…',
+        is_meta: true,
+      }]
+      try {
+        const res = await fetch(`/api/tool-requests/${requestId}/approval`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approval_status: status, reason }),
+        })
+        if (res.ok) {
+          // drain queued events after approval
+          if (pending) drainQueue()
 
-        // Reload session history to show assistant response and tool results
-        const chatId = pending?.chat_id ?? activeChatId.value
-        if (chatId) {
-          await loadHistory(chatId)
+          // Reload session history — replaces processing placeholder
+          const chatId = pending?.chat_id ?? activeChatId.value
+          if (chatId) {
+            await loadHistory(chatId)
+          }
+        } else {
+          // Remove processing placeholder on error
+          messages.value = messages.value.filter(m => m.message_id !== processingId)
+          showToast('error', `Approval failed: server returned ${res.status}`)
         }
-      } else {
-        // FE-015: keep modal open on server error, show toast
-        showToast('error', `Approval failed: server returned ${res.status}`)
+      } catch (err: unknown) {
+        messages.value = messages.value.filter(m => m.message_id !== processingId)
+        showToast('error', `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       }
-    } catch (err: unknown) {
-      // FE-015: keep modal open on network error, show toast
-      showToast('error', `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } else {
+      // Rejection: just send, drain queue, and show meta message
+      try {
+        const res = await fetch(`/api/tool-requests/${requestId}/approval`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approval_status: status, reason }),
+        })
+        if (res.ok) {
+          if (pending) drainQueue()
+          messages.value = [...messages.value, {
+            message_id: crypto.randomUUID(),
+            chat_id: pending?.chat_id ?? activeChatId.value ?? '',
+            timestamp: new Date().toISOString(),
+            type: 'system',
+            content: 'Tool execution rejected',
+            is_meta: true,
+          }]
+        } else {
+          showToast('error', `Approval failed: server returned ${res.status}`)
+        }
+      } catch (err: unknown) {
+        showToast('error', `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      }
     }
   }
 
