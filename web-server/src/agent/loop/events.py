@@ -42,15 +42,19 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
 
     for r in state.get("tool_results") or []:
         res = r.get("result", {})
-        events.append({
-            "event": "tool_result",
-            "data": _json_dumps({
-                "chat_id": chat_id,
-                "message_id": r.get("tool_call_id") or str(uuid4()),
-                "tool_name": r.get("tool_name", ""),
-                "execution_status": res.get("execution_status", "SUCCEEDED"),
-            }),
-        })
+        evt = {
+            "chat_id": chat_id,
+            "message_id": r.get("tool_call_id") or str(uuid4()),
+            "tool_name": r.get("tool_name", ""),
+            "execution_status": res.get("execution_status", "SUCCEEDED"),
+        }
+        output = res.get("output")
+        if output is not None:
+            evt["output"] = output
+        error = res.get("error")
+        if error is not None:
+            evt["error"] = error
+        events.append({"event": "tool_result", "data": _json_dumps(evt)})
 
     for sr in state.get("streaming_tool_results") or []:
         events.append({
@@ -64,15 +68,19 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
             }),
         })
         res = sr.get("result", {})
-        events.append({
-            "event": "tool_result",
-            "data": _json_dumps({
-                "chat_id": chat_id,
-                "message_id": sr.get("tool_call_id") or str(uuid4()),
-                "tool_name": sr.get("tool_name", ""),
-                "execution_status": res.get("execution_status", "SUCCEEDED"),
-            }),
-        })
+        evt = {
+            "chat_id": chat_id,
+            "message_id": sr.get("tool_call_id") or str(uuid4()),
+            "tool_name": sr.get("tool_name", ""),
+            "execution_status": res.get("execution_status", "SUCCEEDED"),
+        }
+        output = res.get("output")
+        if output is not None:
+            evt["output"] = output
+        error = res.get("error")
+        if error is not None:
+            evt["error"] = error
+        events.append({"event": "tool_result", "data": _json_dumps(evt)})
 
     return events
 
