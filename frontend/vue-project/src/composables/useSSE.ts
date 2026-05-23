@@ -107,6 +107,7 @@ export function useSSE() {
 
 function dispatchEvent(type: SSEEventType, data: unknown, callbacks: SSECallbacks): void {
   switch (type) {
+    case 'reasoning': callbacks.onReasoning?.(data as never); break
     case 'assistant': callbacks.onAssistant?.(data as never); break
     case 'tool_call': callbacks.onToolCall?.(data as never); break
     case 'tool_result': callbacks.onToolResult?.(data as never); break

@@ -8,7 +8,7 @@ import ChatView from '@/components/ChatView.vue'
 import ApprovalModal from '@/components/ApprovalModal.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 
-const { messages, toolCalls, isStreaming, approvalPending, isLoadingHistory, sendMessage, submitApproval, loadHistory, abort } = useChat()
+const { messages, toolCalls, reasonings, isStreaming, phaseLabel, approvalPending, isLoadingHistory, sendMessage, submitApproval, loadHistory, abort } = useChat()
 const { sessions, activeChatId, isLoadingSessions, isCreatingSession, loadSessions, createSession, switchSession } = useSessions()
 
 const isProcessingApproval = ref(false)
@@ -26,6 +26,7 @@ async function handleCreateSession() {
   await createSession()
   messages.value = []
   toolCalls.value = new Map()
+  reasonings.value = []
 }
 
 function handleSendMessage(text: string) {
@@ -72,7 +73,9 @@ async function handleReject(requestId: string, reason?: string) {
         <ChatView
           :messages="messages"
           :tool-calls="toolCalls"
+          :reasonings="reasonings"
           :is-streaming="isStreaming"
+          :phase-label="phaseLabel"
           :is-loading-history="isLoadingHistory"
           @send-message="handleSendMessage"
           @abort="handleAbort"

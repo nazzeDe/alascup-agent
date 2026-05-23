@@ -1,4 +1,6 @@
+import contextvars
 import json
+import time as time_mod
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -7,6 +9,10 @@ from loguru import logger
 
 from src.agent.state import AgentState, Transition
 from src.models.audit import AuditEvent, AuditLevel
+
+# Per-chat-turn queue for streaming reasoning tokens to the SSE handler.
+# Set by chat.py before agent.run(), read by think_node during LLM streaming.
+_event_queue: contextvars.ContextVar = contextvars.ContextVar("event_queue", default=None)
 
 
 async def think_node(state: AgentState, *, llm, executor=None):
@@ -29,6 +35,7 @@ async def think_node(state: AgentState, *, llm, executor=None):
     accumulated_text: list[str] = []
     accumulated_reasoning: list[str] = []
     tool_call_blocks: list[dict] = []
+    queue = _event_queue.get()
 
     async for event in llm.generate_stream(messages, tools=tools, system=system):
         result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
@@ -42,6 +49,15 @@ async def think_node(state: AgentState, *, llm, executor=None):
                 "llm_error": result,
                 "transition": Transition.ERROR_EXIT,
             }
+        # Stream reasoning token to SSE handler via side-channel queue
+        if queue is not None and event["event"] == "assistant":
+            data = json.loads(event["data"])
+            rc = data.get("reasoning_content", "")
+            if rc:
+                await queue.put({"event": "reasoning", "data": json.dumps({"delta": rc})})
+
+    if queue is not None:
+        await queue.put({"event": "thinking_done"})
 
     result: dict = {}
     text = "".join(accumulated_text)
@@ -118,11 +134,14 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
         })
 
     print(f"ACT_NODE: executing {len(calls)} tools: {[c['tool_name'] for c in calls]}", flush=True)
+    start = time_mod.monotonic()
     results = await executor.execute_parallel(calls)
+    elapsed_ms = int((time_mod.monotonic() - start) * 1000)
 
     formatted = []
     for i, r in enumerate(results):
         tc_id = tool_calls[i].get("id", str(uuid4()))
+        r["execution_time_ms"] = elapsed_ms
         formatted.append({
             "tool_name": calls[i]["tool_name"],
             "result": r,

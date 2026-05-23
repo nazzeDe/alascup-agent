@@ -32,6 +32,7 @@ export interface ToolCallInfo {
   request_id?: string;
   approval_status?: ApprovalStatus;
   execution_status: ExecutionStatus;
+  execution_time_ms?: number;
   output?: Record<string, unknown>;
   error?: { code: number; message: string; data?: string };
   timestamp: string;
@@ -52,12 +53,20 @@ export interface AssistantEvent {
   delta: string;
 }
 
+export interface ReasoningEvent {
+  chat_id?: string;
+  message_id?: string;
+  delta: string;
+  done?: boolean;
+}
+
 export interface ToolCallEvent {
   chat_id: string;
   message_id: string;
   tool_name: string;
   params: Record<string, unknown>;
   is_read_only: boolean;
+  server?: string;
 }
 
 export interface ToolResultEvent {
@@ -67,6 +76,7 @@ export interface ToolResultEvent {
   execution_status: "SUCCEEDED" | "FAILED";
   output?: Record<string, unknown>;
   error?: { code: number; message: string };
+  execution_time_ms?: number;
 }
 
 export interface ToolApprovalRequiredEvent {
@@ -88,6 +98,7 @@ export interface DoneEvent {
 
 export type SSEEventType =
   | "assistant"
+  | "reasoning"
   | "tool_call"
   | "tool_result"
   | "tool_approval_required"
@@ -96,6 +107,7 @@ export type SSEEventType =
 
 export interface SSECallbacks {
   onAssistant?: (data: AssistantEvent) => void;
+  onReasoning?: (data: ReasoningEvent) => void;
   onToolCall?: (data: ToolCallEvent) => void;
   onToolResult?: (data: ToolResultEvent) => void;
   onToolApprovalRequired?: (data: ToolApprovalRequiredEvent) => void;

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from src.agent.nodes import _event_queue as reasoning_queue
 from src.agent.query import Query
 from src.models.message import Message, MessageType
 from src.services.container import (
@@ -42,7 +44,6 @@ async def chat_turn_alt(
     graph=Depends(graph),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
-    from uuid import uuid4 as _uuid4
 
     chat_id_str = body.chat_id
     if not chat_id_str:
@@ -108,13 +109,35 @@ async def _handle_chat_turn(
     messages = history + [{"role": "user", "content": body.message}]
 
     async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        token = reasoning_queue.set(queue)
         collected_text: list[str] = []
+        buffered: list[dict] = []
+
+        async def drain_queue():
+            while True:
+                item = await queue.get()
+                if item.get("event") == "thinking_done":
+                    break
+                buffered.append(item)
+
+        drain_task = asyncio.create_task(drain_queue())
+        agent_iter = agent.run(messages, available_tools, system=system_prompt).__aiter__()
+
         try:
-            async for event in agent.run(
-                messages, available_tools, system=system_prompt
-            ):
+            while True:
+                # Flush buffered reasoning events before each agent event
+                while buffered:
+                    yield buffered.pop(0)
+
                 if await request.is_disconnected():
                     break
+
+                try:
+                    event = await agent_iter.__anext__()
+                except StopAsyncIteration:
+                    break
+
                 if event.get("event") == "assistant":
                     try:
                         data = json.loads(event["data"])
@@ -122,7 +145,19 @@ async def _handle_chat_turn(
                     except (json.JSONDecodeError, KeyError):
                         pass
                 yield event
+
+            # Drain remaining buffered events
+            while buffered:
+                yield buffered.pop(0)
+
         finally:
+            reasoning_queue.reset(token)
+            drain_task.cancel()
+            try:
+                await drain_task
+            except asyncio.CancelledError:
+                pass
+
             full_text = "".join(collected_text)
             if full_text:
                 assistant_msg = Message(

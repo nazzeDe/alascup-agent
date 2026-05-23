@@ -215,6 +215,18 @@ class TestActNode:
 
         assert result["tool_results"][0]["tool_name"] == "get_cpu"
 
+    async def test_execution_time_recorded_in_result(self):
+        """act_node records execution_time_ms in each tool result."""
+        executor = MockExecutor()
+        state = _state_with_tools([
+            {"function": {"name": "get_cpu", "arguments": "{}"}},
+        ])
+        result = await act_node(state, executor=executor)
+
+        et = result["tool_results"][0]["result"].get("execution_time_ms")
+        assert et is not None
+        assert et >= 0
+
 
 class TestStreamingThink:
     """AG-007: think_node stream-dispatch based on tool metadata (three pools)."""
@@ -515,3 +527,62 @@ class TestMergeToolBlock:
         _merge_tool_block(blocks, chunk)
         assert len(blocks) == 1
         assert blocks[0]["function"]["arguments"] == '{"unit":"percent"}'
+
+
+class TestReasoningStreaming:
+    """B2a: think_node streams reasoning tokens via contextvar side-channel."""
+
+    async def test_streams_reasoning_to_queue(self):
+        """reasoning_content in assistant events → pushed to queue as reasoning events."""
+        import asyncio
+        from src.agent.nodes import _event_queue
+
+        llm = MockLLM([
+            {"event": "assistant", "data": json.dumps({"delta": "Let me", "reasoning_content": "Let me"})},
+            {"event": "assistant", "data": json.dumps({"delta": " check", "reasoning_content": " check"})},
+            {"event": "done", "data": "{}"},
+        ])
+        queue = asyncio.Queue()
+        token = _event_queue.set(queue)
+
+        result = await think_node(_state(), llm=llm)
+        _event_queue.reset(token)
+
+        assert result["messages"][0]["reasoning_content"] == "Let me check"
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        assert len(items) >= 3
+        assert items[0]["event"] == "reasoning"
+        assert items[-1]["event"] == "thinking_done"
+
+    async def test_no_queue_no_crash(self):
+        """When queue is None (contextvar not set), reasoning still works without side-channel."""
+        llm = MockLLM([
+            {"event": "assistant", "data": json.dumps({"delta": "OK", "reasoning_content": "think"})},
+            {"event": "done", "data": "{}"},
+        ])
+        result = await think_node(_state(), llm=llm)
+        assert result["messages"][0]["reasoning_content"] == "think"
+        assert result["transition"] == Transition.DONE
+
+    async def test_no_reasoning_no_queue_events(self):
+        """When there's no reasoning_content, no reasoning events pushed to queue."""
+        import asyncio
+        from src.agent.nodes import _event_queue
+
+        llm = MockLLM([
+            {"event": "assistant", "data": json.dumps({"delta": "CPU normal."})},
+            {"event": "done", "data": "{}"},
+        ])
+        queue = asyncio.Queue()
+        token = _event_queue.set(queue)
+
+        await think_node(_state(), llm=llm)
+        _event_queue.reset(token)
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        assert len(items) == 1
+        assert items[0]["event"] == "thinking_done"

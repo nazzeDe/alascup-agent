@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, withDefaults } from 'vue'
 import type { Message, ToolCallInfo } from '@/types'
+import type { ReasoningEntry } from '@/composables/useChat'
 import MessageItem from './MessageItem.vue'
 import ToolCallCard from './ToolCallCard.vue'
+import ReasoningBubble from './ReasoningBubble.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   messages: Message[]
   toolCalls: Map<string, ToolCallInfo>
+  reasonings?: ReasoningEntry[]
   isStreaming: boolean
   isLoadingHistory?: boolean
-}>()
+  phaseLabel?: string
+}>(), {
+  reasonings: () => [],
+  phaseLabel: '',
+  isLoadingHistory: false,
+})
 
 const emit = defineEmits<{
   'send-message': [text: string]
@@ -20,12 +28,12 @@ const inputText = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
 const userScrolledUp = ref(false)
 
-// FE-013: timeline merges messages and tool cards by timestamp
-const timeline = computed(() => {
-  type TimelineItem =
-    | { type: 'message'; data: Message; ts: number }
-    | { type: 'tool_card'; data: ToolCallInfo; ts: number }
+type TimelineItem =
+  | { type: 'message'; data: Message; ts: number }
+  | { type: 'tool_card'; data: ToolCallInfo; ts: number }
+  | { type: 'reasoning'; data: ReasoningEntry; ts: number }
 
+const timeline = computed(() => {
   const items: TimelineItem[] = []
 
   for (const m of props.messages) {
@@ -34,12 +42,14 @@ const timeline = computed(() => {
   props.toolCalls.forEach((tc) => {
     items.push({ type: 'tool_card', data: tc, ts: new Date(tc.timestamp).getTime() })
   })
+  for (const r of props.reasonings) {
+    items.push({ type: 'reasoning', data: r, ts: new Date(r.timestamp).getTime() })
+  }
 
   items.sort((a, b) => a.ts - b.ts)
   return items
 })
 
-// Auto-scroll on content changes, unless user has scrolled up
 function checkAutoScroll() {
   if (userScrolledUp.value) return
   nextTick(() => {
@@ -49,13 +59,11 @@ function checkAutoScroll() {
   })
 }
 
-// Watch for new messages or content changes during streaming
 watch(
-  () => props.messages.map(m => m.content).join('') + '|' + props.messages.length + '|' + props.toolCalls.size,
+  () => props.messages.map(m => m.content).join('') + '|' + props.messages.length + '|' + props.toolCalls.size + '|' + (props.reasonings?.length ?? 0),
   checkAutoScroll,
 )
 
-// Track user scroll position
 function onScroll() {
   if (!messagesContainer.value) return
   const { scrollTop, clientHeight, scrollHeight } = messagesContainer.value
@@ -84,10 +92,10 @@ function onKeydown(e: KeyboardEvent) {
       class="chat-messages flex-grow-1 overflow-auto p-3"
       @scroll="onScroll"
     >
-      <!-- FE-013: timeline renders messages and tool cards in chronological order -->
-      <template v-for="item in timeline" :key="item.type === 'message' ? item.data.message_id : item.data.message_id">
-        <MessageItem v-if="item.type === 'message'" :message="item.data" />
-        <ToolCallCard v-else :tool-call="item.data" />
+      <template v-for="item in timeline" :key="item.type + '-' + (item.type === 'message' ? item.data.message_id : item.type === 'reasoning' ? (item.data as ReasoningEntry).message_id : (item.data as ToolCallInfo).message_id)">
+        <ReasoningBubble v-if="item.type === 'reasoning'" :reasoning="item.data as ReasoningEntry" />
+        <MessageItem v-else-if="item.type === 'message'" :message="item.data as Message" />
+        <ToolCallCard v-else :tool-call="item.data as ToolCallInfo" />
       </template>
 
       <div v-if="timeline.length === 0 && !isLoadingHistory" class="text-center text-muted mt-5">
@@ -96,12 +104,12 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </div>
 
-    <!-- Streaming status bar -->
+    <!-- Streaming status bar with phase -->
     <div v-if="isStreaming" class="streaming-status d-flex align-items-center px-3 py-1 border-top bg-light">
       <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
         <span class="visually-hidden">Loading...</span>
       </div>
-      <span class="small text-muted flex-grow-1">AI is responding...</span>
+      <span class="small text-muted flex-grow-1">{{ phaseLabel || 'AI is responding…' }}</span>
       <button class="btn btn-outline-danger btn-sm btn-stop" @click="emit('abort')">Stop</button>
     </div>
 
@@ -111,7 +119,7 @@ function onKeydown(e: KeyboardEvent) {
           v-model="inputText"
           class="form-control"
           rows="2"
-          placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
+          placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
           :disabled="isStreaming"
           @keydown="onKeydown"
         ></textarea>

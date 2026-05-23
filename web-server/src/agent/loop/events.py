@@ -20,6 +20,12 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
         else:
             msg_id = str(getattr(m, "id", uuid4()))
         delta = _msg_content(m)
+        rc = _msg_reasoning(m)
+        if rc:
+            events.append({
+                "event": "reasoning",
+                "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": rc, "done": True}),
+            })
         if not delta:
             continue
         events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": delta})})
@@ -40,6 +46,7 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
                 "tool_name": fn.get("name", ""),
                 "params": params,
                 "is_read_only": tc.get("is_read_only", False),
+                "server": tc.get("server_name", ""),
             }),
         })
 
@@ -57,6 +64,9 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
         error = res.get("error")
         if error is not None:
             evt["error"] = error
+        et = res.get("execution_time_ms")
+        if et is not None:
+            evt["execution_time_ms"] = et
         events.append({"event": "tool_result", "data": _json_dumps(evt)})
 
     # _emitted_results (preserved across observe clears) or streaming_tool_results
@@ -85,9 +95,18 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
         error = res.get("error")
         if error is not None:
             evt["error"] = error
+        et = res.get("execution_time_ms")
+        if et is not None:
+            evt["execution_time_ms"] = et
         events.append({"event": "tool_result", "data": _json_dumps(evt)})
 
     return events
+
+
+def _msg_reasoning(m) -> str:
+    if isinstance(m, dict):
+        return str(m.get("reasoning_content", ""))
+    return str(getattr(m, "additional_kwargs", {}).get("reasoning_content", ""))
 
 
 def _json_dumps(obj) -> str:

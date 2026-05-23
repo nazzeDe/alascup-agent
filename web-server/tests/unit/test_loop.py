@@ -166,6 +166,82 @@ class TestEmitEvents:
         assert len(events) == 1
         assert events[0]["event"] == "tool_result"
 
+    def test_assistant_with_reasoning_emits_reasoning_event(self):
+        """Assistant message with reasoning_content → reasoning event emitted before assistant."""
+        state = {
+            "messages": [
+                {"role": "assistant", "content": "CPU normal.", "reasoning_content": "Let me check the CPU usage first."},
+            ]
+        }
+        events = emit_events(state)
+        assert len(events) == 2
+        assert events[0]["event"] == "reasoning"
+        data0 = json.loads(events[0]["data"])
+        assert "Let me check" in data0["delta"]
+        assert data0["done"] is True
+        assert events[1]["event"] == "assistant"
+
+    def test_assistant_without_reasoning_skips_reasoning_event(self):
+        """No reasoning_content → no reasoning event."""
+        state = {
+            "messages": [
+                {"role": "assistant", "content": "CPU normal."},
+            ]
+        }
+        events = emit_events(state)
+        assert len(events) == 1
+        assert events[0]["event"] == "assistant"
+
+    def test_tool_call_includes_server_field(self):
+        state = {
+            "tool_calls": [
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}, "server_name": "tool-server", "is_read_only": True},
+            ]
+        }
+        events = emit_events(state, chat_id="c1")
+        data = json.loads(events[0]["data"])
+        assert data["server"] == "tool-server"
+
+    def test_tool_call_without_server_emits_empty_string(self):
+        state = {
+            "tool_calls": [
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}, "is_read_only": True},
+            ]
+        }
+        events = emit_events(state)
+        data = json.loads(events[0]["data"])
+        assert data["server"] == ""
+
+    def test_tool_result_includes_execution_time_ms(self):
+        state = {
+            "tool_results": [
+                {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED", "execution_time_ms": 230}},
+            ]
+        }
+        events = emit_events(state)
+        data = json.loads(events[0]["data"])
+        assert data["execution_time_ms"] == 230
+
+    def test_tool_result_without_execution_time_omits_field(self):
+        state = {
+            "tool_results": [
+                {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+            ]
+        }
+        events = emit_events(state)
+        data = json.loads(events[0]["data"])
+        assert "execution_time_ms" not in data
+
+    def test_streaming_tool_result_includes_execution_time_ms(self):
+        state = {
+            "streaming_tool_results": [
+                {"tool_call_id": "st-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED", "execution_time_ms": 45}},
+            ]
+        }
+        events = emit_events(state)
+        data = json.loads(events[1]["data"])
+        assert data["execution_time_ms"] == 45
+
 
 # ── clear_transient_fields ─────────────────────────────────────────────
 

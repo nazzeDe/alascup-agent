@@ -1,8 +1,9 @@
-import { ref, type Ref } from 'vue'
+import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import type {
   Message,
   ToolCallInfo,
   AssistantEvent,
+  ReasoningEvent,
   ToolCallEvent,
   ToolResultEvent,
   ToolApprovalRequiredEvent,
@@ -14,9 +15,19 @@ import { useSSE } from './useSSE'
 import { useSessions } from './useSessions'
 import { useToast } from './useToast'
 
+export type AgentPhase = 'idle' | 'thinking' | 'calling_tool' | 'responding' | 'done'
+
 interface QueuedEvent {
-  type: 'assistant' | 'tool_call' | 'tool_result' | 'error' | 'done'
+  type: 'assistant' | 'reasoning' | 'tool_call' | 'tool_result' | 'error' | 'done'
   data: unknown
+}
+
+export interface ReasoningEntry {
+  message_id: string
+  chat_id: string
+  content: string
+  done: boolean
+  timestamp: string
 }
 
 export function useChat() {
@@ -26,7 +37,9 @@ export function useChat() {
 
   const messages: Ref<Message[]> = ref([])
   const toolCalls: Ref<Map<string, ToolCallInfo>> = ref(new Map())
+  const reasonings: Ref<ReasoningEntry[]> = ref([])
   const isLoadingHistory: Ref<boolean> = ref(false)
+  const agentPhase: Ref<AgentPhase> = ref('idle')
 
   const approvalPending: Ref<{
     request_id: string
@@ -50,18 +63,71 @@ export function useChat() {
       content: text,
     }
     messages.value = [...messages.value, userMsg]
+    reasonings.value = []
+    agentPhase.value = 'thinking'
 
     let currentAssistantMsgId = ''
     let assistantBuffer = ''
+    let currentReasoningId = ''
+    let reasoningBuffer = ''
 
     connect(
       { chatId, message: text, model: options?.model, maxTurns: options?.maxTurns },
       {
+        onReasoning(data: ReasoningEvent) {
+          if (isApprovalPaused) {
+            queuedEvents.push({ type: 'reasoning', data })
+            return
+          }
+          agentPhase.value = 'thinking'
+          if (data.done) {
+            // Batch reasoning from emit_events (non-streaming path)
+            const e: ReasoningEntry = {
+              message_id: data.message_id ?? crypto.randomUUID(),
+              chat_id: data.chat_id ?? chatId ?? '',
+              content: data.delta,
+              done: true,
+              timestamp: new Date().toISOString(),
+            }
+            reasonings.value = [...reasonings.value, e]
+            return
+          }
+          // Streaming reasoning
+          if (!currentReasoningId) {
+            currentReasoningId = crypto.randomUUID()
+            reasoningBuffer = ''
+          }
+          reasoningBuffer += data.delta
+          const existingIdx = reasonings.value.findIndex(r => r.message_id === currentReasoningId)
+          if (existingIdx !== -1) {
+            const updated = [...reasonings.value]
+            updated[existingIdx] = { ...updated[existingIdx]!, content: reasoningBuffer }
+            reasonings.value = updated
+          } else {
+            reasonings.value = [...reasonings.value, {
+              message_id: currentReasoningId,
+              chat_id: data.chat_id ?? chatId ?? '',
+              content: reasoningBuffer,
+              done: false,
+              timestamp: new Date().toISOString(),
+            }]
+          }
+        },
+
         onAssistant(data: AssistantEvent) {
           if (isApprovalPaused) {
             queuedEvents.push({ type: 'assistant', data })
             return
           }
+          // Finalize current reasoning entry when assistant text starts
+          if (currentReasoningId) {
+            reasonings.value = reasonings.value.map(r =>
+              r.message_id === currentReasoningId ? { ...r, done: true } : r
+            )
+            currentReasoningId = ''
+            reasoningBuffer = ''
+          }
+          agentPhase.value = 'responding'
           // New message_id → start a new assistant message (e.g. after tool results)
           if (data.message_id !== currentAssistantMsgId) {
             currentAssistantMsgId = data.message_id
@@ -89,10 +155,12 @@ export function useChat() {
             queuedEvents.push({ type: 'tool_call', data })
             return
           }
+          agentPhase.value = 'calling_tool'
           const tc: ToolCallInfo = {
             message_id: data.message_id,
             chat_id: data.chat_id,
             tool_name: data.tool_name,
+            server: data.server,
             is_read_only: data.is_read_only,
             params: data.params,
             execution_status: 'RUNNING',
@@ -115,6 +183,7 @@ export function useChat() {
               ...existing,
               execution_status: data.execution_status,
               output: data.output,
+              execution_time_ms: data.execution_time_ms,
               ...(data.error ? { error: data.error } : {}),
             })
             toolCalls.value = updated
@@ -124,6 +193,7 @@ export function useChat() {
         onToolApprovalRequired(data: ToolApprovalRequiredEvent) {
           approvalPending.value = { ...data }
           isApprovalPaused = true
+          agentPhase.value = 'idle'
 
           const tc: ToolCallInfo = {
             message_id: crypto.randomUUID(),
@@ -155,6 +225,7 @@ export function useChat() {
             queuedEvents.push({ type: 'done', data: _data })
             return
           }
+          agentPhase.value = 'done'
           if (!activeChatId.value && _data.chat_id) {
             activeChatId.value = _data.chat_id
             loadSessions()
@@ -173,6 +244,13 @@ export function useChat() {
     for (const evt of events) {
       // Re-inject through the public callbacks by simulating inline dispatch
       switch (evt.type) {
+        case 'reasoning': {
+          const d = evt.data as ReasoningEvent
+          reasonings.value = reasonings.value.map(r =>
+            r.message_id === d.message_id ? { ...r, done: true } : r
+          )
+          break
+        }
         case 'assistant': {
           const d = evt.data as AssistantEvent
           // Find or create assistant message
@@ -291,10 +369,24 @@ export function useChat() {
     }
   }
 
+  const phaseLabel = computed(() => {
+    switch (agentPhase.value) {
+      case 'thinking': return 'Thinking…'
+      case 'calling_tool': return 'Calling tool…'
+      case 'responding': return 'Responding…'
+      case 'done': return ''
+      case 'idle': return ''
+      default: return ''
+    }
+  })
+
   return {
     messages,
     toolCalls,
+    reasonings,
     isStreaming,
+    agentPhase,
+    phaseLabel,
     approvalPending,
     isLoadingHistory,
     sendMessage,
