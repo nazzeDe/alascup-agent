@@ -4,9 +4,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.config import ToolServerConfig
-
-
 @dataclass(frozen=True)
 class ToolMeta:
     name: str

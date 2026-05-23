@@ -15,7 +15,7 @@ def run_bash(config: ToolServerConfig, command: str = "", timeout: int | None = 
             capture_output=True,
             text=True,
             timeout=effective_timeout,
-            cwd=None if "nsenter" in cmd else config.sandbox_root,
+            cwd=None if cmd[0] == "nsenter" else config.sandbox_root,
         )
         status = "SUCCEEDED" if result.returncode == 0 else "FAILED"
         return {

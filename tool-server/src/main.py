@@ -123,53 +123,38 @@ def _register_classify_companions(server: FastMCP) -> None:
     MCP companion tools named {tool_name}_classify. These are called by
     the web-server review layer to dynamically determine safe/dangerous.
     """
+
+    # Map tool name → wrapper factory that produces an explicit-param callable
+    # (fastmcp rejects **kwargs, so we must expose named parameters).
+    # Values: (Callable) -> Callable — factories producing explicit-param wrappers
+    _COMPANION_FACTORY: dict[str, Any] = {
+        "run_bash": lambda fn: lambda command="": fn(command),
+        "manage_service": lambda fn: lambda name="", action="": fn(name=name, action=action),
+    }
+
     for tool in list_tools():
         if tool.classify_fn is None:
+            continue
+        factory = _COMPANION_FACTORY.get(tool.name)
+        if factory is None:
             continue
 
         companion_name = f"{tool.name}_classify"
         classify_fn = tool.classify_fn
+        companion_fn = factory(classify_fn)
 
-        # Build a wrapper that matches classify_fn's signature.
-        # The wrapper is registered both as an MCP tool (on the server) and
-        # in the tool registry for discoverability.
-        import inspect
-
-        sig = inspect.signature(classify_fn)
-        params = list(sig.parameters.values())
-
-        # Build an explicit-parameter wrapper so fastmcp can inspect it
-        param_defs = []
-        call_args = []
-        for p in params:
-            if p.default is inspect.Parameter.empty:
-                param_defs.append(f"{p.name}")
-            else:
-                param_defs.append(f"{p.name}={p.default!r}")
-            call_args.append(f"{p.name}={p.name}")
-
-        wrapper_src = (
-            f"def _companion({', '.join(param_defs)}):\n"
-            f"    return classify_fn({', '.join(call_args)})\n"
-        )
-        local_ns: dict[str, Any] = {"classify_fn": classify_fn}
-        exec(wrapper_src, local_ns)
-        companion_fn = local_ns["_companion"]
-
-        # Register as MCP tool (hidden from LLM)
         server.tool(
             name=companion_name,
             description=f"Security classification companion for {tool.name}",
             meta={"hidden": True, "is_read_only": True, "mutable": False},
         )(companion_fn)
 
-        # Also register in the tool registry so web-server can discover it
         register(ToolMeta(
             name=companion_name,
             description=f"Security classification companion for {tool.name}",
             is_read_only=True,
             input_schema={},
-            fn=lambda c=None, **kw: classify_fn(**kw),
+            fn=lambda c=None, f=classify_fn, **kw: f(**kw),
             classify_fn=None,
             hidden=True,
             meta={"hidden": True, "is_read_only": True, "mutable": False},
@@ -285,13 +270,12 @@ def main() -> int:
         return 1
 
 
-# Module-level FastMCP server for CLI (fastmcp run src/main.py)
-def _get_server() -> FastMCP:
-    config = load_config()
-    return create_server(config)
-
-
-mcp = _get_server()
+# Lazy module-level server for CLI (fastmcp run src/main.py).
+# Created on access so that plain imports don't trigger full server init.
+def __getattr__(name: str):
+    if name == "mcp":
+        return create_server(load_config())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 if __name__ == "__main__":
     raise SystemExit(main())

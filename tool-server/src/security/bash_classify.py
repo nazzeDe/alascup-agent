@@ -7,6 +7,11 @@ or import failure results in {"safe": False}.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tree_sitter import Parser
+
 # ── Safe read-only command names ──────────────────────────────────────────
 
 _SAFE_COMMANDS: set[str] = {
@@ -83,13 +88,29 @@ _ALLOWED: set[str] = _STRUCTURAL | _ARGUMENT_TYPES | _SEPARATORS | _DANGEROUS
 
 
 def _tree_sitter_available() -> bool:
-    """Check if tree-sitter and tree-sitter-bash can be imported."""
     try:
         import tree_sitter  # noqa: F401
         import tree_sitter_bash  # noqa: F401
         return True
     except ImportError:
         return False
+
+
+# Module-level cached parser — tree-sitter Language loading is expensive.
+_parser_cache: Parser | None = None
+
+
+def _get_parser():
+    global _parser_cache
+    if _parser_cache is not None:
+        return _parser_cache
+    from tree_sitter import Language, Parser
+    from tree_sitter_bash import language as get_language_ptr
+
+    parser = Parser()
+    parser.language = Language(get_language_ptr())
+    _parser_cache = parser
+    return parser
 
 
 def _walk(node, unsafe_commands: set[str]) -> bool:
@@ -149,11 +170,7 @@ def classify_bash(command: str) -> dict:
         return {"safe": False}
 
     try:
-        from tree_sitter import Language, Parser
-        from tree_sitter_bash import language as get_language_ptr
-
-        parser = Parser()
-        parser.language = Language(get_language_ptr())
+        parser = _get_parser()
 
         tree = parser.parse(command.encode("utf-8"))
         root = tree.root_node

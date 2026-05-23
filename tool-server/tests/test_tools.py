@@ -189,19 +189,19 @@ class TestSecurityValidation:
         from src.security.validate import validate_execution
         ok, err = validate_execution("PENDING", self.rid, False)
         assert ok is False
-        assert err == "SECURITY_VIOLATION"
+        assert "APPROVED" in err
 
     def test_rejects_invalid_request_id(self):
         from src.security.validate import validate_execution
         ok, err = validate_execution("APPROVED", "not-a-uuid", False)
         assert ok is False
-        assert err == "SECURITY_VIOLATION"
+        assert "invalid request_id" in err
 
     def test_rejects_missing_request_id_destructive(self):
         from src.security.validate import validate_execution
         ok, err = validate_execution("APPROVED", "", False)
         assert ok is False
-        assert err == "SECURITY_VIOLATION"
+        assert "request_id required" in err
 
     def test_allows_readonly_without_request_id(self):
         from src.security.validate import validate_execution

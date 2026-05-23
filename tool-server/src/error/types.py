@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 # JSON-RPC error codes
@@ -9,9 +9,6 @@ ERROR_CODE_EXECUTION_FAILED = 500
 ERROR_CODE_TIMEOUT = 504
 ERROR_CODE_TOOL_NOT_FOUND = 404
 ERROR_CODE_INVALID_PARAMS = 400
-ERROR_CODE_CLASSIFY_FAILED = 501
-
-
 @dataclass(frozen=True)
 class ServerError:
     code: int
