@@ -135,7 +135,11 @@ async def act_node(state: AgentState, *, executor, audit_logger=None):
 
     print(f"ACT_NODE: executing {len(calls)} tools: {[c['tool_name'] for c in calls]}", flush=True)
     start = time_mod.monotonic()
-    results = await executor.execute_parallel(calls)
+    try:
+        results = await executor.execute_parallel(calls)
+    except Exception as exc:
+        logger.opt(exception=True).warning("act_node execution failed: {err}", err=exc)
+        results = [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(calls)
     elapsed_ms = int((time_mod.monotonic() - start) * 1000)
 
     formatted = []
@@ -530,7 +534,11 @@ async def _dispatch_tool_calls(
 
     pre_executed: list[dict] = []
     if dispatch:
-        disp_results = await executor.execute_parallel(dispatch)
+        try:
+            disp_results = await executor.execute_parallel(dispatch)
+        except Exception as exc:
+            logger.opt(exception=True).warning("_dispatch_tool_calls failed: {err}", err=exc)
+            disp_results = [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(dispatch)
         for i, dr in enumerate(disp_results):
             pre_executed.append({
                 "tool_name": dispatch[i]["tool_name"],

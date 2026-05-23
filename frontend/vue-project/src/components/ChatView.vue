@@ -98,7 +98,12 @@ function onKeydown(e: KeyboardEvent) {
         <ToolCallCard v-else :tool-call="item.data as ToolCallInfo" />
       </template>
 
-      <div v-if="timeline.length === 0 && !isLoadingHistory" class="text-center text-muted mt-5">
+      <div v-if="isLoadingHistory" class="chat-loading-overlay text-center p-3">
+        <div class="spinner-border text-muted" role="status">
+          <span class="visually-hidden">Loading history...</span>
+        </div>
+      </div>
+      <div v-else-if="timeline.length === 0" class="text-center text-muted mt-5">
         <p class="fs-4">Alascup Agent</p>
         <p>Start a conversation — ask about system status, diagnostics, or operations.</p>
       </div>

@@ -17,8 +17,8 @@ describe('useSessions', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => [
-        { chatID: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' },
-        { chatID: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '2026-01-02T00:00:00Z' },
+        { id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' },
+        { id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '2026-01-02T00:00:00Z' },
       ],
     })
 
@@ -47,7 +47,7 @@ describe('useSessions', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        chatID: 'new-c1',
+        id: 'new-c1',
         title: undefined,
         messages: [],
         executed_tool_list: [],
@@ -74,7 +74,7 @@ describe('useSessions', () => {
 
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => [{ chatID: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' }],
+      json: async () => [{ id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' }],
     })
 
     await a.loadSessions()
@@ -117,7 +117,7 @@ describe('useSessions', () => {
 
     resolveCreate!({
       ok: true,
-      json: async () => ({ chatID: 'new-c1', messages: [], executed_tool_list: [], timestamp: '' }),
+      json: async () => ({ id: 'new-c1', messages: [], executed_tool_list: [], timestamp: '' }),
     })
     await promise
     expect(isCreatingSession.value).toBe(false)

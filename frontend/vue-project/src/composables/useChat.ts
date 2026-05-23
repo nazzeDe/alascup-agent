@@ -291,7 +291,6 @@ export function useChat() {
 
   async function submitApproval(requestId: string, status: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
     const pending = approvalPending.value
-    approvalPending.value = null
 
     if (status === 'APPROVED') {
       // Show processing placeholder while approval finishes and agent responds
@@ -311,7 +310,7 @@ export function useChat() {
           body: JSON.stringify({ approval_status: status, reason }),
         })
         if (res.ok) {
-          // drain queued events after approval
+          approvalPending.value = null
           if (pending) drainQueue()
 
           // Reload session history — replaces processing placeholder
@@ -320,7 +319,6 @@ export function useChat() {
             await loadHistory(chatId)
           }
         } else {
-          // Remove processing placeholder on error
           messages.value = messages.value.filter(m => m.message_id !== processingId)
           showToast('error', `Approval failed: server returned ${res.status}`)
         }
@@ -337,6 +335,7 @@ export function useChat() {
           body: JSON.stringify({ approval_status: status, reason }),
         })
         if (res.ok) {
+          approvalPending.value = null
           if (pending) drainQueue()
           messages.value = [...messages.value, {
             message_id: crypto.randomUUID(),

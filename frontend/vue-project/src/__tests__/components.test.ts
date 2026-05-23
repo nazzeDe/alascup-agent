@@ -16,7 +16,7 @@ describe('MessageItem', () => {
       props: {
         message: {
           messageID: 'm1',
-          chatID: 'c1',
+          id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'user',
           content: 'Hello',
@@ -33,7 +33,7 @@ describe('MessageItem', () => {
       props: {
         message: {
           messageID: 'm2',
-          chatID: 'c1',
+          id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'assistant',
           content: '**bold** text',
@@ -49,7 +49,7 @@ describe('MessageItem', () => {
       props: {
         message: {
           messageID: 'm3',
-          chatID: 'c1',
+          id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'system',
           content: 'Connection lost',
@@ -68,7 +68,7 @@ describe('ToolCallCard', () => {
       props: {
         toolCall: {
           messageID: 'tc1',
-          chatID: 'c1',
+          id: 'c1',
           tool_name: 'get_cpu_info',
           isReadOnly: true,
           execution_status: 'RUNNING',
@@ -77,7 +77,7 @@ describe('ToolCallCard', () => {
       },
     })
     expect(wrapper.text()).toContain('get_cpu_info')
-    expect(wrapper.text()).toContain('Executing...')
+    expect(wrapper.text()).toContain('Executing…')
   })
 
   it('shows output when expanded', async () => {
@@ -86,7 +86,7 @@ describe('ToolCallCard', () => {
       props: {
         toolCall: {
           messageID: 'tc1',
-          chatID: 'c1',
+          id: 'c1',
           tool_name: 'get_cpu',
           isReadOnly: true,
           execution_status: 'SUCCEEDED',
@@ -177,8 +177,8 @@ describe('SessionList', () => {
     const wrapper = mount(SessionList, {
       props: {
         sessions: [
-          { chatID: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
-          { chatID: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
+          { id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
+          { id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
         ],
         activeChatId: 'c1',
       },
@@ -191,7 +191,7 @@ describe('SessionList', () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')
     const wrapper = mount(SessionList, {
       props: {
-        sessions: [{ chatID: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
+        sessions: [{ id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
         activeChatId: undefined,
       },
     })
@@ -261,11 +261,11 @@ describe('MessageItem isMeta', () => {
       props: {
         message: {
           messageID: 'm-meta',
-          chatID: 'c1',
+          id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'system',
           content: 'Tool execution approved',
-          isMeta: true,
+          is_meta: true,
         },
       },
     })
@@ -281,11 +281,11 @@ describe('MessageItem isMeta', () => {
       props: {
         message: {
           messageID: 'm-meta2',
-          chatID: 'c1',
+          id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'assistant',
           content: 'Operation completed',
-          isMeta: true,
+          is_meta: true,
         },
       },
     })
@@ -301,7 +301,7 @@ describe('ChatView timeline', () => {
     const toolCalls = new Map()
     toolCalls.set('tc1', {
       messageID: 'tc1',
-      chatID: 'c1',
+      id: 'c1',
       tool_name: 'get_cpu',
       isReadOnly: true,
       execution_status: 'RUNNING' as const,
@@ -311,8 +311,8 @@ describe('ChatView timeline', () => {
     const wrapper = mount(ChatView, {
       props: {
         messages: [
-          { messageID: 'm1', chatID: 'c1', timestamp: new Date(Date.now() - 3000).toISOString(), type: 'user' as const, content: 'hi' },
-          { messageID: 'm2', chatID: 'c1', timestamp: new Date(Date.now() - 1000).toISOString(), type: 'assistant' as const, content: 'Hello' },
+          { messageID: 'm1', id: 'c1', timestamp: new Date(Date.now() - 3000).toISOString(), type: 'user' as const, content: 'hi' },
+          { messageID: 'm2', id: 'c1', timestamp: new Date(Date.now() - 1000).toISOString(), type: 'assistant' as const, content: 'Hello' },
         ],
         toolCalls,
         isStreaming: false,

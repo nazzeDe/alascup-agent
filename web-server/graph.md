@@ -748,3 +748,318 @@ classDiagram
     WebServerConfig --> AuditLogger : injects
     WebServerConfig --> Tracer : injects
 ```
+
+---
+
+## 数据流图
+
+### 全系统数据流：用户输入到 SSE 响应
+
+```mermaid
+flowchart TD
+    %% ============================================================
+    %% Layer 1: Frontend (Browser)
+    %% ============================================================
+    subgraph frontend["前端 (Vue 3)"]
+        direction TB
+        chat_view["ChatView.vue<br/>时间线渲染"]
+        msg_item["MessageItem.vue<br/>Markdown 消息"]
+        tc_card["ToolCallCard.vue<br/>工具卡片<br/>key-value 参数 / server / 耗时"]
+        reason_bubble["ReasoningBubble.vue<br/>折叠 / 展开<br/>灰色小号文本"]
+        status_bar["状态栏<br/>Thinking… / Calling tool… / Responding…"]
+        approval_modal["ApprovalModal.vue<br/>审批弹框"]
+        use_chat["useChat<br/>状态管理<br/>messages / toolCalls / reasonings"]
+        use_sse["useSSE<br/>ReadableStream 解析器<br/>SSE 行缓冲"]
+    end
+
+    subgraph web_server["Web-server (FastAPI :11450)"]
+        direction TB
+        api_chat["POST /api/chat-turn<br/>SSE 入口"]
+        api_approval["POST /api/tool-requests/{id}/approval<br/>审批回调"]
+
+        subgraph agent_loop["Agent 循环 (LangGraph StateGraph)"]
+            direction TB
+            think["think_node<br/>LLM 流式推理<br/>accumulate text / reasoning / tool_calls"]
+            dispatch["_dispatch_tool_calls<br/>三池分配"]
+            pre_exec["安全池预执行<br/>execute_parallel()"]
+            review["review_node<br/>classify_companion<br/>→ rule_engine.evaluate"]
+            interrupt["interrupt()<br/>审批挂起"]
+            act["act_node<br/>execute_parallel()"]
+            observe["observe_node<br/>合并 tool_results<br/>→ tool 消息"]
+        end
+
+        subgraph events["SSE 事件发射"]
+            emit["emit_events()"]
+        end
+
+        subgraph reasoning_channel["推理侧通道 (B2a)"]
+            ctx_var["contextvar _event_queue"]
+            reasoning_q["asyncio.Queue(maxsize=64)<br/>背压控制"]
+            drain_task["后台 drain_task<br/>持续读出 → buffered"]
+        end
+    end
+
+    subgraph external["外部依赖"]
+        llm["LLM (DeepSeek V4)<br/>流式 SSE"]
+        tool_server["tool-server (:11451)<br/>fastmcp MCP"]
+    end
+
+    user_input["用户输入"] --> chat_view
+    chat_view --> use_chat
+    use_chat --> use_sse
+    use_sse -- "POST /api/chat-turn" --> api_chat
+
+    api_chat --> svc["Session Manager /<br/>Prompt Manager"]
+    svc --> think
+
+    think <--> llm
+    llm -- "reasoning_content" --> ctx_var
+    ctx_var --> reasoning_q
+    reasoning_q --> drain_task
+    drain_task -- "buffered[]" --> emit
+    emit -- "event: reasoning" --> use_sse
+    use_sse --> use_chat
+    use_chat --> reason_bubble
+    reason_bubble --> chat_view
+
+    llm -- "assistant content" --> think
+    think -- "accumulated text" --> emit
+    emit -- "event: assistant" --> use_sse
+    use_sse --> use_chat
+    use_chat --> msg_item
+    msg_item --> chat_view
+
+    llm -- "tool_use blocks" --> think
+    think -- "tool_call_blocks" --> dispatch
+
+    dispatch -- "安全池 (readonly)" --> pre_exec
+    dispatch -- "审批池 (non-mutable write)" --> review
+    dispatch -- "动态池 (mutable)" --> review
+
+    pre_exec --> tool_server
+    pre_exec -- "streaming_tool_results" --> emit
+    emit -- "event: tool_call + tool_result" --> use_sse
+
+    review --> tool_server
+    review -- "高风险" --> interrupt
+    interrupt -- "event: tool_approval_required" --> emit
+    emit --> use_sse
+    use_sse --> approval_modal
+    approval_modal --> api_approval
+    api_approval --> act
+
+    review -- "自动批准" --> act
+    act --> tool_server
+    act -- "tool_results" --> observe
+    observe -- "tool 消息" --> emit
+    emit -- "event: tool_result" --> use_sse
+    use_sse --> use_chat
+    use_chat --> tc_card
+
+    observe --> think
+
+    emit -- "event: done" --> use_sse
+    use_sse --> use_chat
+
+    use_chat -- "agentPhase / phaseLabel" --> status_bar
+```
+
+### 用户消息 → SSE 事件序列图
+
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant CV as ChatView.vue
+    participant UC as useChat
+    participant SSE as useSSE (Reader)
+    participant WS as web-server /api/chat-turn
+    participant Q as asyncio.Queue
+    participant DT as drain_task
+    participant TH as think_node
+    participant LLM as DeepSeek V4
+    participant EM as emit_events
+
+    U->>CV: 输入文字 / 点击发送
+    CV->>UC: sendMessage(text)
+    UC->>WS: POST /api/chat-turn (SSE)
+
+    Note over WS: 创建 Queue, set contextvar
+    Note over WS: 启动 drain_task (后台)
+
+    WS->>TH: graph.ainvoke()
+
+    Note over TH,LLM: ====== LLM 流式阶段 ======
+
+    TH->>LLM: generate_stream(messages, tools)
+    LLM-->>TH: delta {content, reasoning_content}
+    Note over TH: 提取 reasoning
+    TH->>Q: put({event: "reasoning", data: '{"delta":"..."}'})
+    Q->>DT: get()
+    DT->>DT: append to buffered[]
+
+    LLM-->>TH: tool_call block
+    TH->>TH: accumulate tool_call_blocks
+
+    TH->>Q: put({event: "thinking_done"})
+    Q->>DT: get() → break loop
+    Note over TH: LLM 流式结束 → dispatch tools
+
+    TH->>EM: 返回 messages, tool_calls
+
+    Note over WS,EM: ====== 事件发射 ======
+
+    loop 每个 buffered reasoning
+        DT->>EM: buffered reasoning events
+        EM-->>WS: reasoning event
+        WS-->>SSE: event: reasoning\ndata: {"delta":"..."}
+        SSE->>UC: onReasoning()
+        UC->>UC: accumulate reasoningBuffer
+        UC->>CV: reasoning bubble live update
+    end
+
+    EM-->>WS: assistant event
+    WS-->>SSE: event: assistant\ndata: {"delta":"...","message_id":"..."}
+    SSE->>UC: onAssistant()
+    UC->>UC: mark streaming reasoning done
+    UC->>CV: update messages[]
+
+    EM-->>WS: reasoning event (batch done=true)
+    WS-->>SSE: event: reasoning\ndata: {"delta":"...","done":true}
+    SSE->>UC: onReasoning(done=true)
+    UC->>UC: dedup → mark existing done
+    UC->>CV: reasoning bubble → "Thought (Nc)"
+
+    EM-->>WS: tool_call event
+    WS-->>SSE: event: tool_call\ndata: {"tool_name":"get_cpu","server":"tool-server",...}
+    SSE->>UC: onToolCall()
+    UC->>UC: create ToolCallInfo
+
+    EM-->>WS: tool_result event
+    WS-->>SSE: event: tool_result\ndata: {"tool_name":"get_cpu","execution_time_ms":45}
+    SSE->>UC: onToolResult()
+    UC->>UC: update ToolCallInfo.execution_time_ms
+
+    EM-->>WS: done event
+    WS-->>SSE: event: done\ndata: {}
+    SSE->>UC: onDone()
+    UC->>UC: agentPhase = 'done'
+    CV->>CV: status bar disappears
+```
+
+### 前端状态管理 & 时间线合并
+
+```mermaid
+flowchart LR
+    subgraph sse_in["SSE Event Stream"]
+        R["event: reasoning<br/>delta / done"]
+        A["event: assistant<br/>delta"]
+        TC["event: tool_call<br/>tool_name / params / server"]
+        TR["event: tool_result<br/>status / execution_time_ms"]
+        AP["event: tool_approval_required<br/>request_id / tool_name"]
+        D["event: done"]
+    end
+
+    subgraph handlers["useChat 回调处理"]
+        onR["onReasoning"]
+        onA["onAssistant"]
+        onTC["onToolCall"]
+        onTR["onToolResult"]
+        onAP["onToolApprovalRequired"]
+        onDone["onDone"]
+    end
+
+    subgraph state["useChat 响应式状态"]
+        MSG["messages: Ref&lt;Message[]&gt;"]
+        TC_STATE["toolCalls: Ref&lt;Map&gt;"]
+        REASON["reasonings: Ref&lt;ReasoningEntry[]&gt;"]
+        PHASE["agentPhase: AgentPhase<br/>idle / thinking / calling_tool<br/>/ responding / done"]
+        LABEL["phaseLabel: ComputedRef<br/>Thinking… / Calling tool…<br/>/ Responding…"]
+        APPROVAL["approvalPending"]
+    end
+
+    subgraph timeline["ChatView timeline 合并"]
+        items["TimelineItem[]<br/>按 ts 排序"]
+        msg_t["type: message<br/>MessageItem.vue"]
+        tc_t["type: tool_card<br/>ToolCallCard.vue"]
+        reason_t["type: reasoning<br/>ReasoningBubble.vue"]
+    end
+
+    R --> onR
+    A --> onA
+    TC --> onTC
+    TR --> onTR
+    AP --> onAP
+    D --> onDone
+
+    onR --> REASON
+    onA --> MSG
+    onR --> PHASE
+    onA --> PHASE
+    onTC --> TC_STATE
+    onTC --> PHASE
+    onTR --> TC_STATE
+    onAP --> APPROVAL
+    onDone --> PHASE
+
+    MSG --> items
+    TC_STATE --> items
+    REASON --> items
+    PHASE --> LABEL
+
+    msg_t --> items
+    tc_t --> items
+    reason_t --> items
+```
+
+### 三池工具分配
+
+```mermaid
+flowchart TD
+    llm_out["LLM 单次响应<br/>N 个 tool_use block"]
+    dispatch["_dispatch_tool_calls"]
+
+    subgraph meta_check["元数据分类"]
+        mutable{"meta.mutable?"}
+        readonly{"meta.is_read_only?"}
+    end
+
+    subgraph safe_pool["安全池"]
+        pre_exec["execute_parallel()<br/>全部并行"]
+        pre_result["streaming_tool_results[]<br/>含 execution_time_ms"]
+    end
+
+    subgraph approval_pool["审批池"]
+        classify["classify_companion()"]
+        rule_eval["rule_engine.evaluate()"]
+        rule_auto["AUTO_APPROVE"]
+        rule_pending["NEEDS_APPROVAL"]
+        interrupt_wait["interrupt() / 审批"]
+    end
+
+    subgraph act_exec["执行 (act_node)"]
+        act_exec_par["execute_parallel()<br/>记录耗时"]
+        act_result["tool_results[]<br/>含 execution_time_ms"]
+    end
+
+    llm_out --> dispatch
+    dispatch --> meta_check
+
+    meta_check --> mutable
+    mutable -- "True" --> classify
+    mutable -- "False" --> readonly
+
+    readonly -- "True" --> pre_exec
+    readonly -- "False" --> classify
+
+    pre_exec --> pre_result
+
+    classify --> rule_eval
+    rule_eval --> rule_auto
+    rule_eval --> rule_pending
+
+    rule_auto --> act_exec_par
+    rule_pending --> interrupt_wait
+    interrupt_wait --> act_exec_par
+
+    act_exec_par --> act_result
+```
