@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "bootstrap": "^5.3.6",
+    "dompurify": "^3.4.5",
     "highlight.js": "^11.11.1",
     "marked": "^17.0.1",
     "vue": "^3.5.32"
@@ -25,6 +26,7 @@
     "@playwright/mcp": "^0.0.75",
     "@playwright/test": "^1.60.0",
     "@tsconfig/node24": "^24.0.4",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^24.12.2",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/test-utils": "^2.4.6",

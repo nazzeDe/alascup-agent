@@ -32,6 +32,13 @@ export interface ReasoningEntry {
 
 export function useChat() {
   const { connect, abort: sseAbort, isStreaming } = useSSE()
+
+  function abort(): void {
+    sseAbort()
+    isApprovalPaused = false
+    queuedEvents = []
+    approvalPending.value = null
+  }
   const { activeChatId, loadSessions } = useSessions()
   const { showToast } = useToast()
 
@@ -53,6 +60,11 @@ export function useChat() {
   let queuedEvents: QueuedEvent[] = []
 
   function sendMessage(text: string, options?: { model?: string; maxTurns?: number }): void {
+    // Reset stale approval state from prior aborted sessions
+    isApprovalPaused = false
+    queuedEvents = []
+    approvalPending.value = null
+
     const chatId = activeChatId.value
 
     const userMsg: Message = {
@@ -277,6 +289,44 @@ export function useChat() {
           }
           break
         }
+        case 'tool_call': {
+          const d = evt.data as ToolCallEvent
+          const tc: ToolCallInfo = {
+            message_id: d.message_id,
+            chat_id: d.chat_id,
+            tool_name: d.tool_name,
+            server: d.server,
+            is_read_only: d.is_read_only,
+            params: d.params,
+            execution_status: 'RUNNING',
+            timestamp: new Date().toISOString(),
+          }
+          const updated = new Map(toolCalls.value)
+          updated.set(d.message_id, tc)
+          toolCalls.value = updated
+          break
+        }
+        case 'tool_result': {
+          const d = evt.data as ToolResultEvent
+          const existing = toolCalls.value.get(d.message_id)
+          if (existing) {
+            const updated = new Map(toolCalls.value)
+            updated.set(d.message_id, {
+              ...existing,
+              execution_status: d.execution_status,
+              output: d.output,
+              execution_time_ms: d.execution_time_ms,
+              ...(d.error ? { error: d.error } : {}),
+            })
+            toolCalls.value = updated
+          }
+          break
+        }
+        case 'error': {
+          const d = evt.data as ErrorEvent
+          showToast('error', `${d.code}: ${d.message}`, d.code)
+          break
+        }
         case 'done': {
           const d = evt.data as DoneEvent
           if (!activeChatId.value && d.chat_id) {
@@ -398,6 +448,6 @@ export function useChat() {
     sendMessage,
     submitApproval,
     loadHistory,
-    abort: sseAbort,
+    abort,
   }
 }

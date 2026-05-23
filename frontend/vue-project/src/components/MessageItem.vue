@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import type { Message } from '@/types'
 
 const props = defineProps<{ message: Message }>()
@@ -9,7 +10,7 @@ const contentRef = ref<HTMLElement | null>(null)
 
 const renderedHtml = computed(() => {
   if (props.message.type === 'assistant' && !props.message.is_meta) {
-    return marked.parse(props.message.content) as string
+    return DOMPurify.sanitize(marked.parse(props.message.content) as string)
   }
   return ''
 })
