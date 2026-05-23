@@ -201,11 +201,11 @@ def create_server(config: ToolServerConfig) -> FastMCP:
 
     @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=TOOL_SCHEMAS["get_process_list"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_process_list() -> dict:
-        return get_process_list(config)
+        return {"processes": get_process_list(config)}
 
     @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=TOOL_SCHEMAS["read_logs"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _read_logs(path: str = "", lines: int = 50) -> dict:
-        return read_logs(config, path=path, lines=lines)
+        return {"lines": read_logs(config, path=path, lines=lines)}
 
     # ── operation tools ──
     @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=TOOL_SCHEMAS["run_bash"], meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
