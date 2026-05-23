@@ -7,11 +7,13 @@ const props = defineProps<{ reasoning: ReasoningEntry }>()
 const expanded = ref(false)
 const isStreaming = computed(() => !props.reasoning.done)
 
+const charCount = computed(() => props.reasoning.content.length)
+
 const label = computed(() => {
   if (isStreaming.value) return 'Thinking…'
-  const len = props.reasoning.content.length
+  const len = charCount.value
   if (len < 50) return `Thought (${len}c)`
-  return `Thought (${len}c) — "${props.reasoning.content.slice(0, 40)}…"`
+  return `Thought (${len}c) — "${props.reasoning.content.slice(0, 50)}…"`
 })
 </script>
 
@@ -24,11 +26,11 @@ const label = computed(() => {
       style="cursor: pointer; user-select: none"
     >
       <span class="me-1">{{ expanded ? '▼' : '▶' }}</span>
-      <span v-if="isStreaming" class="spinner-border spinner-border-sm me-1" style="width: 10px; height: 10px"></span>
-      <span>{{ label }}</span>
+      <span v-if="isStreaming" class="pulse-dot me-1" style="width:6px;height:6px"></span>
+      <span :class="{ shimmer: isStreaming }">{{ label }}</span>
     </div>
     <div v-if="expanded" class="reasoning-content small text-secondary mt-1 ps-3 border-start">
-      {{ reasoning.content }}
+      <span :class="{ shimmer: isStreaming }">{{ reasoning.content }}</span>
       <span v-if="isStreaming" class="cursor-blink">|</span>
     </div>
   </div>

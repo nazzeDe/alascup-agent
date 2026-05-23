@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -150,6 +151,8 @@ async def chat_turn(
             complete_feature(feature)
             summarize_feature_durations()
 
+            logger.debug("COLLECTED_TEXT: events={n} text_len={l}",
+                         n=len(collected_text), l=sum(len(t) for t in collected_text))
             full_text = "".join(collected_text)
             if full_text:
                 assistant_msg = Message(
@@ -160,6 +163,7 @@ async def chat_turn(
                     content=full_text,
                 )
                 await session_mgr.add_message(chat_id, assistant_msg)
+                logger.debug("SAVED_ASSISTANT_MSG: chat_id={c} text_len={l}", c=chat_id, l=len(full_text))
 
     return EventSourceResponse(
         event_generator(), headers={"X-Session-ID": str(chat_id)}

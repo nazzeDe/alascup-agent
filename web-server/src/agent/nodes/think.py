@@ -7,6 +7,7 @@ from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.nodes._message_format import _format_tools, _messages
 from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
 from src.agent.state import Transition
+from src.observability.debug_log import log as debug_log
 from src.tools import start_feature, complete_feature
 
 
@@ -34,13 +35,25 @@ async def think_node(state, *, llm, executor=None):
     chat_id = _chat_id_ctx.get()
     feature = f"llm_call:{chat_id}"
     start_feature(feature)
+    debug_log("DEBUG", "LLM call start", chat_id=str(chat_id), tools=len(tools))
 
     async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
         result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
         if result is True:
             complete_feature(feature)
+            tc_count = len(tool_call_blocks)
+            if tc_count:
+                names = [b.get("function", {}).get("name", "?") for b in tool_call_blocks]
+                debug_log("DEBUG", "LLM generated tool calls", chat_id=str(chat_id),
+                          count=tc_count, tools=",".join(names))
+            else:
+                text_len = len("".join(accumulated_text))
+                debug_log("DEBUG", "LLM call complete (text only)", chat_id=str(chat_id),
+                          text_len=text_len)
             break
         if result is not None:
+            debug_log("WARN", "LLM call error", chat_id=str(chat_id),
+                      code=result.get("code", "?"))
             logger.debug("think_node LLM error: code={code} msg={msg}",
                          code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
             complete_feature(feature, status="error")

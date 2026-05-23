@@ -14,8 +14,16 @@ from src.agent.loop.transitions import (
     get_transition,
     has_interrupt,
 )
-from src.agent.state import Transition
+from src.agent.state import ROLE_MAP, Transition
+from src.observability.debug_log import log as debug_log
+from src.observability.profiler import Profiler, write_profile
 from src.tools import start_feature, complete_feature
+
+
+def _log_profile(profiler: Profiler) -> None:
+    report = profiler.report()
+    if report:
+        write_profile(report)
 
 
 class LoopOrchestrator:
@@ -50,7 +58,15 @@ class LoopOrchestrator:
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute the ReAct loop until interrupt or DONE."""
         state = dict(initial_state)
-        emitted_assistant_count = 0
+        def _is_assistant(m):
+            r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))
+            return ROLE_MAP.get(r, r) == "assistant"
+
+        emitted_assistant_count = sum(1 for m in state.get("messages", []) if _is_assistant(m))
+        debug_log("INFO", "Loop start", chat_id=str(self._chat_id),
+                  msg_count=len(state.get("messages", [])), assistant_skip=emitted_assistant_count)
+
+        profiler = Profiler()
         it = 0
 
         while True:
@@ -59,13 +75,22 @@ class LoopOrchestrator:
             start_feature(loop_feature)
 
             # 1. Context compression
+            prev_msg_count = len(state.get("messages", []))
             await self._compress_context(state)
+            profiler.checkpoint("compress_context")
+            after_count = len(state.get("messages", []))
+            if after_count < prev_msg_count:
+                debug_log("INFO", "Context compressed",
+                          before=prev_msg_count, after=after_count, chat_id=str(self._chat_id))
 
             # 2. Invoke graph (think → review → act → observe)
             result = await self._graph.ainvoke(state, self._config)
+            profiler.checkpoint("graph_ainvoke")
 
             # 3. Interrupt → yield approval event, stop
             if has_interrupt(result):
+                debug_log("INFO", "Approval required — pausing loop",
+                          chat_id=str(self._chat_id))
                 async for event in handle_interrupt(
                     result,
                     bridge=self._bridge,
@@ -73,6 +98,8 @@ class LoopOrchestrator:
                     chat_id=self._chat_id,
                 ):
                     yield event
+                profiler.checkpoint("interrupt_handled")
+                _log_profile(profiler)
                 complete_feature(loop_feature)
                 return
 
@@ -80,12 +107,19 @@ class LoopOrchestrator:
 
             # 4. LLM error recovery
             action, error_event = await self._recover_from_error(state)
+            profiler.checkpoint("error_recovery")
             if action == "return":
+                debug_log("WARN", "Error recovery exhausted — exiting",
+                          chat_id=str(self._chat_id))
                 if error_event:
                     yield error_event
+                _log_profile(profiler)
                 complete_feature(loop_feature)
                 return
             if action == "continue":
+                debug_log("DEBUG", "Error recovered — retrying loop",
+                          chat_id=str(self._chat_id))
+                _log_profile(profiler)
                 complete_feature(loop_feature)
                 continue
 
@@ -95,22 +129,31 @@ class LoopOrchestrator:
                 if ev.get("event") == "assistant":
                     emitted_assistant_count += 1
                 yield ev
+            profiler.checkpoint("emit_events")
 
             # 6. Clear per-iteration transient fields
             clear_transient_fields(state)
 
             # 7. Route based on transition
             action = await self._handle_transition(state)
+            profiler.checkpoint("handle_transition")
             if action == "return":
+                debug_log("DEBUG", "Transition → DONE", chat_id=str(self._chat_id))
                 yield {"event": "done", "data": "{}"}
+                _log_profile(profiler)
                 complete_feature(loop_feature)
                 return
             if action == "continue":
+                debug_log("DEBUG", "Transition → CONTINUE (tool results, re-invoke)",
+                          chat_id=str(self._chat_id))
+                _log_profile(profiler)
                 complete_feature(loop_feature)
                 continue
 
             # Unknown transition — exit safely
+            debug_log("WARN", "Unknown transition — exiting", chat_id=str(self._chat_id))
             yield {"event": "done", "data": "{}"}
+            _log_profile(profiler)
             complete_feature(loop_feature)
             return
 
@@ -122,6 +165,8 @@ class LoopOrchestrator:
         """
         feature = f"resume:{self._chat_id}"
         start_feature(feature)
+        debug_log("INFO", "Resume after approval", chat_id=str(self._chat_id),
+                  decisions=",".join(decisions))
         await log_transition(self._audit, Transition.APPROVAL_GRANTED)
 
         result = await self._graph.ainvoke(
@@ -156,17 +201,25 @@ class LoopOrchestrator:
 
     async def _compress_context(self, state: dict) -> None:
         """Compress message context if over token threshold."""
-        tokens = self._context_manager.count_tokens(state.get("messages", []))
+        messages = state.get("messages", [])
+        tokens = self._context_manager.count_tokens(messages)
+        ws = getattr(self._context_manager, "window_size", 128000)
+        th = getattr(self._context_manager, "threshold", 0.7)
+        limit = int(ws * th)
         if self._context_manager.needs_compression(tokens):
-            state["messages"] = await self._context_manager.compress(
-                state.get("messages", [])
-            )
+            debug_log("INFO", "Context compression triggered",
+                      tokens=tokens, limit=limit, msg_count=len(messages),
+                      chat_id=str(self._chat_id))
+            state["messages"] = await self._context_manager.compress(messages)
             await log_transition(self._audit, Transition.CONTEXT_COMPACTED)
 
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
         """Attempt error recovery. Returns (action, optional_error_event)."""
-        if not state.get("llm_error") or not self._error_recovery:
+        llm_error = state.get("llm_error")
+        if not llm_error or not self._error_recovery:
             return None, None
+        debug_log("WARN", "LLM error detected — attempting recovery",
+                  code=llm_error.get("code", "?"), chat_id=str(self._chat_id))
         handled = await handle_llm_error(
             state,
             error_recovery=self._error_recovery,
@@ -175,7 +228,8 @@ class LoopOrchestrator:
             audit_logger=self._audit,
         )
         if not handled:
-            llm_error = state["llm_error"]
+            debug_log("ERROR", "Recovery exhausted — exiting loop",
+                      code=llm_error.get("code", "?"), chat_id=str(self._chat_id))
             await log_transition(self._audit, Transition.ERROR_EXIT)
             return "return", {
                 "event": "error",
@@ -192,6 +246,8 @@ class LoopOrchestrator:
         Returns "return" to stop, "continue" to loop, or None to fall through.
         """
         transition = get_transition(state)
+        debug_log("DEBUG", "Routing transition", transition=str(transition),
+                  chat_id=str(self._chat_id))
         if transition == Transition.DONE:
             await log_transition(self._audit, Transition.DONE)
             return "return"

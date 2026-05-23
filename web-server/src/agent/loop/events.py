@@ -3,6 +3,8 @@
 import json
 from uuid import uuid4
 
+from loguru import logger
+
 from src.agent.state import ROLE_MAP
 
 
@@ -15,7 +17,22 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
     """
     events: list[dict] = []
 
-    assistant_msgs = [m for m in state.get("messages", []) if _msg_role(m) == "assistant"]
+    # Collect assistant messages, deduplicated by ID (LangGraph keeps dicts
+    # alongside converted objects, causing double-counting).
+    seen: set[str] = set()
+    deduped: list = []
+    for m in state.get("messages", []):
+        if _msg_role(m) != "assistant":
+            continue
+        mid = _msg_id(m)
+        if mid in seen:
+            continue
+        seen.add(mid)
+        deduped.append(m)
+
+    assistant_msgs = deduped
+    logger.debug("EMIT_EVENTS: total_msgs={t} assistant_msgs={a} skip={s}",
+                 t=len(state.get("messages", [])), a=len(assistant_msgs), s=skip_assistant_count)
     for i, m in enumerate(assistant_msgs[skip_assistant_count:]):
         if isinstance(m, dict):
             msg_id = m.get("id") or str(uuid4())
@@ -108,6 +125,15 @@ def _msg_reasoning(m) -> str:
 
 def _json_dumps(obj) -> str:
     return json.dumps(obj, default=str)
+
+
+def _msg_id(m) -> str:
+    if isinstance(m, dict):
+        return m.get("id") or _msg_content(m)[:80]
+    mid = str(getattr(m, "id", ""))
+    if mid:
+        return mid
+    return _msg_content(m)[:80]
 
 
 def _msg_role(m) -> str:

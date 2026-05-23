@@ -6,3 +6,4 @@ llm.json
 .coverage
 __pycache__
 reports
+logs

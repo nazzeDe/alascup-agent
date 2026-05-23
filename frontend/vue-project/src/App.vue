@@ -57,8 +57,8 @@ async function handleReject(requestId: string, reason?: string) {
       <span class="text-light small">AI Ops Platform</span>
     </nav>
 
-    <div class="row flex-grow-1 m-0 overflow-hidden">
-      <div class="col-md-3 col-lg-2 p-0 border-end bg-light">
+    <div class="row flex-grow-1 m-0 overflow-hidden flex-nowrap">
+      <div class="col-md-3 col-lg-2 p-0 border-end bg-light d-flex flex-column overflow-hidden">
         <SessionList
           :sessions="sessions"
           :active-chat-id="activeChatId"
@@ -69,7 +69,7 @@ async function handleReject(requestId: string, reason?: string) {
         />
       </div>
 
-      <div class="col-md-9 col-lg-10 p-0">
+      <div class="col-md-9 col-lg-10 p-0 d-flex flex-column overflow-hidden">
         <ChatView
           :messages="messages"
           :tool-calls="toolCalls"

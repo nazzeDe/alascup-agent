@@ -7,12 +7,14 @@ from loguru import logger
 from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import Transition
 from src.models.audit import AuditEvent, AuditLevel
+from src.observability.debug_log import log as debug_log
 
 
 async def review_node(state, *, executor, rule_engine, audit_logger):
     """Review all tool_calls: classify mutable tools → rule match → decide."""
     tool_calls = state.get("tool_calls", []) or []
     logger.debug("review_node: tc_count={count}", count=len(tool_calls))
+    debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))
     approved: list[dict] = []
     rejected: list[dict] = []
     pending: list[dict] = []
@@ -22,8 +24,15 @@ async def review_node(state, *, executor, rule_engine, audit_logger):
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
         await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending)
 
+    tool_names = [t.get("function", {}).get("name", "?") for t in tool_calls]
+    debug_log("DEBUG", "Review done",
+              total=len(tool_calls), approved=len(approved), rejected=len(rejected), pending=len(pending),
+              tools=",".join(tool_names))
+
     if pending:
         request_id = str(uuid4())
+        debug_log("WARN", "Tools require approval — pausing",
+                  tools=",".join([t.get("function", {}).get("name", "?") for t in pending]))
         approval_result = interrupt({
             "event": "approval_required",
             "request_id": request_id,

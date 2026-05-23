@@ -86,7 +86,7 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="chat-view d-flex flex-column h-100">
+  <div class="chat-view d-flex flex-column flex-grow-1 overflow-hidden">
     <div
       ref="messagesContainer"
       class="chat-messages flex-grow-1 overflow-auto p-3"
@@ -109,11 +109,14 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </div>
 
-    <!-- Streaming status bar with phase -->
-    <div v-if="isStreaming" class="streaming-status d-flex align-items-center px-3 py-1 border-top bg-light">
-      <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
+    <!-- Scroll-to-bottom floating button -->
+    <div v-if="userScrolledUp && isStreaming" class="scroll-bottom-btn" @click="userScrolledUp = false; checkAutoScroll()">
+      ↓
+    </div>
+
+    <!-- Streaming status bar -->
+    <div v-if="isStreaming" class="streaming-status d-flex align-items-center px-3 py-2 border-top">
+      <div class="pulse-dot me-2"></div>
       <span class="small text-muted flex-grow-1">{{ phaseLabel || 'AI is responding…' }}</span>
       <button class="btn btn-outline-danger btn-sm btn-stop" @click="emit('abort')">Stop</button>
     </div>
