@@ -43,6 +43,10 @@ class InMemorySessionManager:
             raise KeyError(f"session not found: {chat_id}")
         self._sessions[chat_id].executed_tool_list.append(call)
 
+    async def set_title(self, chat_id: uuid.UUID, title: str) -> None:
+        if chat_id in self._sessions and not self._sessions[chat_id].title:
+            self._sessions[chat_id].title = title
+
 
 class PostgresSessionManager:
     def __init__(self, db) -> None:
@@ -74,6 +78,7 @@ class PostgresSessionManager:
         )
         return ChatSession(
             id=row["id"],
+            title=row.get("title"),
             messages=[_message_from_row(m) for m in msgs],
             executed_tool_list=[_tool_call_from_row(t) for t in calls],
             timestamp=row["updated_at"].isoformat(),
@@ -81,11 +86,12 @@ class PostgresSessionManager:
 
     async def list_sessions(self) -> list[ChatSession]:
         rows = await self._db.fetch(
-            "SELECT id, updated_at FROM chat_sessions ORDER BY updated_at DESC"
+            "SELECT id, title, updated_at FROM chat_sessions ORDER BY updated_at DESC"
         )
         return [
             ChatSession(
                 id=r["id"],
+                title=r.get("title"),
                 messages=[],
                 executed_tool_list=[],
                 timestamp=r["updated_at"].isoformat(),
@@ -134,6 +140,13 @@ class PostgresSessionManager:
         await self._db.execute(
             "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
             now,
+            chat_id,
+        )
+
+    async def set_title(self, chat_id: uuid.UUID, title: str) -> None:
+        await self._db.execute(
+            "UPDATE chat_sessions SET title = $1 WHERE id = $2 AND title IS NULL",
+            title,
             chat_id,
         )
 

@@ -89,6 +89,11 @@ async def _handle_chat_turn(
     )
     await session_mgr.add_message(chat_id, user_msg)
 
+    # Set session title from first user message (only if title is empty)
+    if not session.title and body.message:
+        title = body.message.split("\n")[0][:20]
+        await session_mgr.set_title(chat_id, title)
+
     system_prompt = prompt_mgr.build_system_prompt()
     agent = Query(
         llm=llm,

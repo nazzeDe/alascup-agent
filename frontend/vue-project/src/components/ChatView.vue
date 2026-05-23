@@ -84,13 +84,6 @@ function onKeydown(e: KeyboardEvent) {
       class="chat-messages flex-grow-1 overflow-auto p-3"
       @scroll="onScroll"
     >
-      <!-- Loading overlay -->
-      <div v-if="isLoadingHistory" class="chat-loading-overlay d-flex justify-content-center align-items-center position-absolute top-0 start-0 w-100 h-100" style="z-index: 10; background: rgba(255,255,255,0.7)">
-        <div class="spinner-border text-primary" role="status">
-          <span class="visually-hidden">Loading...</span>
-        </div>
-      </div>
-
       <!-- FE-013: timeline renders messages and tool cards in chronological order -->
       <template v-for="item in timeline" :key="item.type === 'message' ? item.data.message_id : item.data.message_id">
         <MessageItem v-if="item.type === 'message'" :message="item.data" />
