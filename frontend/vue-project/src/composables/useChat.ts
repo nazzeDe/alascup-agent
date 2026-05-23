@@ -81,15 +81,22 @@ export function useChat() {
           }
           agentPhase.value = 'thinking'
           if (data.done) {
-            // Batch reasoning from emit_events (non-streaming path)
-            const e: ReasoningEntry = {
-              message_id: data.message_id ?? crypto.randomUUID(),
-              chat_id: data.chat_id ?? chatId ?? '',
-              content: data.delta,
-              done: true,
-              timestamp: new Date().toISOString(),
+            // Batch reasoning from emit_events — deduplicate against streaming entries
+            const existing = reasonings.value.find(r => r.content === data.delta)
+            if (existing) {
+              reasonings.value = reasonings.value.map(r =>
+                r.message_id === existing.message_id ? { ...r, done: true } : r
+              )
+            } else {
+              const e: ReasoningEntry = {
+                message_id: data.message_id ?? crypto.randomUUID(),
+                chat_id: data.chat_id ?? chatId ?? '',
+                content: data.delta,
+                done: true,
+                timestamp: new Date().toISOString(),
+              }
+              reasonings.value = [...reasonings.value, e]
             }
-            reasonings.value = [...reasonings.value, e]
             return
           }
           // Streaming reasoning
