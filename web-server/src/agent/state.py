@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from langgraph.graph import MessagesState
 
+ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool"}
+
 
 class Transition(StrEnum):
     """循环状态变更原因。每个节点返回时附带，写入 audit_events。"""

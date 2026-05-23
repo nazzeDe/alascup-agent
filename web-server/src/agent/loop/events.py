@@ -3,6 +3,8 @@
 import json
 from uuid import uuid4
 
+from src.agent.state import ROLE_MAP
+
 
 def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -> list[dict]:
     """Convert agent state into SSE events for streaming to client.
@@ -113,7 +115,7 @@ def _msg_role(m) -> str:
         r = m.get("role", m.get("type", ""))
     else:
         r = getattr(m, "type", getattr(m, "role", ""))
-    return {"ai": "assistant", "human": "user", "tool": "tool"}.get(r, r)
+    return ROLE_MAP.get(r, r)
 
 
 def _msg_content(m) -> str:

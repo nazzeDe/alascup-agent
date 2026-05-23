@@ -35,7 +35,7 @@ async def approve_tool_request(
     llm=Depends(llm_adapter),
     context_mgr=Depends(context_manager),
     audit_logger=Depends(audit_logger),
-    graph=Depends(graph),
+    graph_dep=Depends(graph),
     error_rec=Depends(error_recovery),
 ):
     try:
@@ -55,7 +55,7 @@ async def approve_tool_request(
     chat_id = UUID(chat_id_str)
     agent = Query(
         llm=llm,
-        graph=graph,
+        graph=graph_dep,
         context_manager=context_mgr,
         audit_logger=audit_logger,
         error_recovery=error_rec,

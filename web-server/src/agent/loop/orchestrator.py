@@ -15,6 +15,7 @@ from src.agent.loop.transitions import (
     has_interrupt,
 )
 from src.agent.state import Transition
+from src.tools import start_feature, complete_feature
 
 
 class LoopOrchestrator:
@@ -50,8 +51,13 @@ class LoopOrchestrator:
         """Execute the ReAct loop until interrupt or DONE."""
         state = dict(initial_state)
         emitted_assistant_count = 0
+        it = 0
 
         while True:
+            it += 1
+            loop_feature = f"loop:{self._chat_id}#{it}"
+            start_feature(loop_feature)
+
             # 1. Context compression
             await self._compress_context(state)
 
@@ -67,6 +73,7 @@ class LoopOrchestrator:
                     chat_id=self._chat_id,
                 ):
                     yield event
+                complete_feature(loop_feature)
                 return
 
             state = result
@@ -76,8 +83,10 @@ class LoopOrchestrator:
             if action == "return":
                 if error_event:
                     yield error_event
+                complete_feature(loop_feature)
                 return
             if action == "continue":
+                complete_feature(loop_feature)
                 continue
 
             # 5. Emit SSE events
@@ -94,12 +103,15 @@ class LoopOrchestrator:
             action = await self._handle_transition(state)
             if action == "return":
                 yield {"event": "done", "data": "{}"}
+                complete_feature(loop_feature)
                 return
             if action == "continue":
+                complete_feature(loop_feature)
                 continue
 
             # Unknown transition — exit safely
             yield {"event": "done", "data": "{}"}
+            complete_feature(loop_feature)
             return
 
     async def resume(self, decisions: list[str]) -> AsyncIterator[dict]:
@@ -108,6 +120,8 @@ class LoopOrchestrator:
         A single ainvoke(Command(resume=...)) runs from the interrupt point
         to END (or another interrupt).
         """
+        feature = f"resume:{self._chat_id}"
+        start_feature(feature)
         await log_transition(self._audit, Transition.APPROVAL_GRANTED)
 
         result = await self._graph.ainvoke(
@@ -120,7 +134,7 @@ class LoopOrchestrator:
                      str=len(result.get("streaming_tool_results", [])),
                      em=len(result.get("_emitted_results", [])),
                      t=result.get("transition"),
-                     intr="__interrupt__" in result)
+                     intr=has_interrupt(result))
 
         if has_interrupt(result):
             async for event in handle_interrupt(
@@ -130,6 +144,7 @@ class LoopOrchestrator:
                 chat_id=self._chat_id,
             ):
                 yield event
+            complete_feature(feature)
             return
 
         evs = emit_events(result, chat_id=self._chat_id)
@@ -137,6 +152,7 @@ class LoopOrchestrator:
         for ev in evs:
             yield ev
         yield {"event": "done", "data": "{}"}
+        complete_feature(feature)
 
     async def _compress_context(self, state: dict) -> None:
         """Compress message context if over token threshold."""

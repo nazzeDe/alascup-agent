@@ -215,8 +215,8 @@ class TestActNode:
 
         assert result["tool_results"][0]["tool_name"] == "get_cpu"
 
-    async def test_execution_time_recorded_in_result(self):
-        """act_node records execution_time_ms in each tool result."""
+    async def test_no_fake_execution_time_per_tool(self):
+        """act_node does not fabricate per-tool execution_time_ms for parallel batch."""
         executor = MockExecutor()
         state = _state_with_tools([
             {"function": {"name": "get_cpu", "arguments": "{}"}},
@@ -224,8 +224,7 @@ class TestActNode:
         result = await act_node(state, executor=executor)
 
         et = result["tool_results"][0]["result"].get("execution_time_ms")
-        assert et is not None
-        assert et >= 0
+        assert et is None
 
 
 class TestStreamingThink:

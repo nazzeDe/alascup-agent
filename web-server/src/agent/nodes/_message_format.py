@@ -1,6 +1,6 @@
 import json
 
-_ROLE_MAP = {"human": "user", "ai": "assistant"}
+from src.agent.state import ROLE_MAP
 
 
 def _messages(state) -> list[dict]:
@@ -35,7 +35,7 @@ def _normalize_message(m: dict | object) -> tuple[str, str, dict]:
         return m.get(key, default) if is_dict else str(getattr(m, attr, default))
 
     role = _get("role", "type", "unknown")
-    role = _ROLE_MAP.get(role, role)
+    role = ROLE_MAP.get(role, role)
     content = _get("content", "content", "")
 
     meta: dict = {}

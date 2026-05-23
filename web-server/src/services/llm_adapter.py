@@ -1,5 +1,5 @@
 import json
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from httpx import AsyncClient
 
@@ -158,9 +158,8 @@ class LLMAdapter:
             for tc in tool_calls:
                 idx = tc.get("index", 0)
                 if idx not in accumulated:
-                    from uuid import uuid4 as _uuid4
                     accumulated[idx] = {
-                        "id": tc.get("id") or str(_uuid4()),
+                        "id": tc.get("id") or str(uuid4()),
                         "function": {"name": "", "arguments": ""},
                     }
                 else:

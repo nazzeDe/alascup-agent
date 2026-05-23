@@ -21,6 +21,7 @@ from src.services.container import (
     session_manager,
     tool_executor,
 )
+from src.tools import start_feature, complete_feature, summarize_feature_durations
 
 router = APIRouter()
 
@@ -95,6 +96,8 @@ async def chat_turn(
     messages = history + [{"role": "user", "content": body.message}]
 
     async def event_generator():
+        feature = f"chat_turn:{str(chat_id)}"
+        start_feature(feature)
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
         token = reasoning_queue.set(queue)
         chat_id_token = _chat_id_ctx.set(str(chat_id))
@@ -143,6 +146,9 @@ async def chat_turn(
                 await drain_task
             except asyncio.CancelledError:
                 pass
+
+            complete_feature(feature)
+            summarize_feature_durations()
 
             full_text = "".join(collected_text)
             if full_text:

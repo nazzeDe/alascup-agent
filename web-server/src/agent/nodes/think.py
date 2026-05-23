@@ -7,6 +7,7 @@ from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.nodes._message_format import _format_tools, _messages
 from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
 from src.agent.state import Transition
+from src.tools import start_feature, complete_feature
 
 
 async def think_node(state, *, llm, executor=None):
@@ -31,14 +32,18 @@ async def think_node(state, *, llm, executor=None):
     tool_call_blocks: list[dict] = []
     queue = _event_queue.get()
     chat_id = _chat_id_ctx.get()
+    feature = f"llm_call:{chat_id}"
+    start_feature(feature)
 
     async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
         result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
         if result is True:
+            complete_feature(feature)
             break
         if result is not None:
             logger.debug("think_node LLM error: code={code} msg={msg}",
                          code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
+            complete_feature(feature, status="error")
             return {
                 "messages": [],
                 "tool_calls": [],

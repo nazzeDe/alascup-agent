@@ -1,11 +1,12 @@
-import time as time_mod
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from loguru import logger
 
+from src.agent.nodes import _chat_id_ctx
 from src.agent.nodes._tool_dispatch import _parse_args, _execute_with_error_handling
 from src.models.audit import AuditEvent, AuditLevel
+from src.tools import start_feature, complete_feature
 
 
 async def act_node(state, *, executor, audit_logger=None):
@@ -25,15 +26,15 @@ async def act_node(state, *, executor, audit_logger=None):
             "request_id": tc.get("request_id", str(uuid4())),
         })
 
+    chat_id = _chat_id_ctx.get()
+    feature = f"tool_exec:{chat_id}"
+    start_feature(feature)
     logger.debug("act_node: executing {count} tools: {names}", count=len(calls), names=[c["tool_name"] for c in calls])
-    start = time_mod.monotonic()
     results = await _execute_with_error_handling(executor, calls)
-    elapsed_ms = int((time_mod.monotonic() - start) * 1000)
-
+    complete_feature(feature)
     formatted = []
     for i, r in enumerate(results):
         tc_id = tool_calls[i].get("id", str(uuid4()))
-        r["execution_time_ms"] = elapsed_ms
         formatted.append({
             "tool_name": calls[i]["tool_name"],
             "result": r,

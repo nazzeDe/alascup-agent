@@ -1,3 +1,4 @@
+import json
 import pickle
 from typing import Any, AsyncIterator, Sequence
 
@@ -48,7 +49,6 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         parent_checkpoint_id = get_checkpoint_id(config)
 
         pickled = pickle.dumps(dict(checkpoint))
-        import json
         meta_json = json.dumps(metadata, default=str)
 
         async with self._pool.acquire() as conn:
@@ -124,7 +124,6 @@ class PostgresCheckpointer(BaseCheckpointSaver):
                 return None
 
             checkpoint: Checkpoint = pickle.loads(row["checkpoint"])  # noqa: S301
-            import json
             metadata: CheckpointMetadata = json.loads(row["metadata"])
             parent_checkpoint_id: str | None = row["parent_checkpoint_id"]
 
@@ -198,7 +197,6 @@ class PostgresCheckpointer(BaseCheckpointSaver):
             rows = await conn.fetch(query, *params)
             for row in rows:
                 checkpoint: Checkpoint = pickle.loads(row["checkpoint"])  # noqa: S301
-                import json
                 metadata: CheckpointMetadata = json.loads(row["metadata"])
                 resolved_config = {
                     "configurable": {
