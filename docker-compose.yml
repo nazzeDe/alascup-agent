@@ -82,6 +82,8 @@ services:
       context: ./tool-server
     container_name: tool-server
     restart: unless-stopped
+    environment:
+      - TOOLSERVER_HOST_EXEC=nsenter
     volumes:
       - /var/log:/host/var/log:ro,Z
       - /proc:/host/proc:ro,Z

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 
 from src.config import ToolServerConfig
+from src.tools.operation._host_exec import _host_cmd
 
 _READONLY_ACTIONS = {"status", "is-active", "is-enabled", "list", "show", "list-units", "list-timers"}
 
@@ -17,9 +18,9 @@ def manage_service(config: ToolServerConfig, name: str = "", action: str = "") -
         }
 
     if action in ("list", "list-units", "list-timers"):
-        cmd = ["systemctl", action]
+        cmd = _host_cmd(["systemctl", action], config)
     else:
-        cmd = ["systemctl", action, name]
+        cmd = _host_cmd(["systemctl", action, name], config)
 
     try:
         result = subprocess.run(

@@ -3,17 +3,19 @@ from __future__ import annotations
 import subprocess
 
 from src.config import ToolServerConfig
+from src.tools.operation._host_exec import _host_cmd
 
 
 def run_bash(config: ToolServerConfig, command: str = "", timeout: int | None = None) -> dict:
     effective_timeout = timeout if timeout is not None else config.bash_timeout
+    cmd = _host_cmd(["bash", "-c", command], config)
     try:
         result = subprocess.run(
-            ["bash", "-c", command],
+            cmd,
             capture_output=True,
             text=True,
             timeout=effective_timeout,
-            cwd=config.sandbox_root,
+            cwd=None if "nsenter" in cmd else config.sandbox_root,
         )
         status = "SUCCEEDED" if result.returncode == 0 else "FAILED"
         return {

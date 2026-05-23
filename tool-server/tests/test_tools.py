@@ -377,6 +377,83 @@ class TestOperationTools:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Host Execution (nsenter)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestHostCmd:
+    def test_direct_mode_returns_original(self, config):
+        from src.tools.operation._host_exec import _host_cmd
+        assert _host_cmd(["bash", "-c", "ls"], config) == ["bash", "-c", "ls"]
+
+    def test_nsenter_mode_prefixes(self):
+        from src.tools.operation._host_exec import _host_cmd
+        from src.config import ToolServerConfig
+        ns_config = ToolServerConfig(host_exec="nsenter")
+        result = _host_cmd(["bash", "-c", "ls"], ns_config)
+        assert result == ["nsenter", "-t", "1", "-a", "--", "bash", "-c", "ls"]
+
+    def test_unknown_host_exec_falls_through(self):
+        from src.tools.operation._host_exec import _host_cmd
+        from src.config import ToolServerConfig
+        cfg = ToolServerConfig(host_exec="")
+        assert _host_cmd(["echo", "hi"], cfg) == ["echo", "hi"]
+
+    def test_direct_overrides_auto_detect(self, monkeypatch):
+        from src.tools.operation._host_exec import _host_cmd
+        from src.config import ToolServerConfig
+        monkeypatch.setattr("os.path.exists", lambda p: True)  # pretend dockerenv exists
+        cfg = ToolServerConfig(host_exec="direct")
+        assert _host_cmd(["echo", "hi"], cfg) == ["echo", "hi"]
+
+    def test_nsenter_systemctl_list(self):
+        from src.tools.operation._host_exec import _host_cmd
+        from src.config import ToolServerConfig
+        ns_config = ToolServerConfig(host_exec="nsenter")
+        result = _host_cmd(["systemctl", "list-units"], ns_config)
+        assert result == ["nsenter", "-t", "1", "-a", "--", "systemctl", "list-units"]
+
+
+class TestBashWithNsenter:
+    def test_run_bash_uses_nsenter(self):
+        from unittest.mock import patch
+        from src.tools.operation.bash import run_bash
+        from src.config import ToolServerConfig
+        ns_config = ToolServerConfig(host_exec="nsenter")
+        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "hello"
+            result = run_bash(ns_config, command="echo hello", timeout=5)
+            assert result["execution_status"] == "SUCCEEDED"
+            cmd = mock_run.call_args[0][0]
+            assert cmd[:6] == ["nsenter", "-t", "1", "-a", "--", "bash"]
+
+    def test_run_bash_nsenter_no_cwd(self):
+        from unittest.mock import patch
+        from src.tools.operation.bash import run_bash
+        from src.config import ToolServerConfig
+        ns_config = ToolServerConfig(host_exec="nsenter")
+        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = ""
+            run_bash(ns_config, command="whoami", timeout=5)
+            assert mock_run.call_args[1].get("cwd") is None
+
+    def test_manage_service_uses_nsenter(self):
+        from unittest.mock import patch
+        from src.tools.operation.systemd import manage_service
+        from src.config import ToolServerConfig
+        ns_config = ToolServerConfig(host_exec="nsenter")
+        with patch("src.tools.operation.systemd.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "active"
+            result = manage_service(ns_config, name="nginx", action="status")
+            assert result["execution_status"] == "SUCCEEDED"
+            cmd = mock_run.call_args[0][0]
+            assert cmd[:6] == ["nsenter", "-t", "1", "-a", "--", "systemctl"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Tool Registry
 # ═══════════════════════════════════════════════════════════════════════════════
 

@@ -12,6 +12,7 @@ class ToolServerConfig:
     sandbox_root: str = field(default_factory=lambda: os.environ.get("TOOLSERVER_SANDBOX_ROOT", "/tmp/tool-server-sandbox"))
     cache_ttl: int = field(default_factory=lambda: int(os.environ.get("TOOLSERVER_CACHE_TTL", "600")))
     bash_timeout: int = field(default_factory=lambda: int(os.environ.get("TOOLSERVER_BASH_TIMEOUT", "30")))
+    host_exec: str = field(default_factory=lambda: os.environ.get("TOOLSERVER_HOST_EXEC", "direct"))
 
 
 def load_config() -> ToolServerConfig:
