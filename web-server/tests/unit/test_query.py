@@ -16,7 +16,7 @@ class MockLLM:
         self.escalated = False
         self.fallback_switched = False
 
-    async def generate_stream(self, messages, tools=None, system=None):
+    async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         resp = self.responses[min(self._idx, len(self.responses) - 1)]
         self._idx += 1
 

@@ -12,9 +12,15 @@ from uuid import UUID
 
 from fastapi import Request
 
+from src.mcp_client.executor import ToolExecutor
 from src.models.message import Message
 from src.models.session import ChatSession
 from src.models.tool import ToolCall
+from src.security.pending import ApprovalBridge
+from src.security.rule_engine import RuleEngine
+from src.services.context_manager import ContextManager
+from src.services.llm_adapter import LLMAdapter
+from src.services.prompt_manager import PromptManager
 
 
 class SessionManager(Protocol):
@@ -35,16 +41,17 @@ class AuditLogger(Protocol):
 
 @dataclass
 class Services:
-    llm_adapter: Any
+    llm_adapter: LLMAdapter
     session_manager: SessionManager
-    prompt_manager: Any
-    context_manager: Any
-    rule_engine: Any
-    tool_executor: Any
+    prompt_manager: PromptManager
+    context_manager: ContextManager
+    rule_engine: RuleEngine
+    tool_executor: ToolExecutor
     audit_logger: AuditLogger
-    approval_bridge: Any
+    approval_bridge: ApprovalBridge
     checkpointer: Any
     graph: Any
+    error_recovery: Any | None = None
     db: Any | None = None
 
 
@@ -89,6 +96,10 @@ def approval_bridge(request: Request):
 
 def checkpointer(request: Request):
     return _services(request).checkpointer
+
+
+def error_recovery(request: Request):
+    return _services(request).error_recovery
 
 
 def graph(request: Request):

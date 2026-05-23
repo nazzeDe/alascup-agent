@@ -19,7 +19,7 @@ class MockLLM:
         self._events = events
         self._call_count = 0
 
-    async def generate_stream(self, messages, tools=None, system=None):
+    async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         self._call_count += 1
         for e in self._events:
             yield e

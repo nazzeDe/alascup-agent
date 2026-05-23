@@ -43,22 +43,6 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     executed_at TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS tool_requests (
-    id UUID PRIMARY KEY,
-    chat_id UUID NOT NULL REFERENCES chat_sessions(id),
-    message_id UUID NOT NULL REFERENCES messages(id),
-    tool_name VARCHAR(128) NOT NULL,
-    server_name VARCHAR(32) NOT NULL,
-    is_read_only BOOLEAN NOT NULL,
-    is_rollbackable BOOLEAN NOT NULL,
-    params JSONB NOT NULL DEFAULT '{}',
-    approval_status approval_status NOT NULL DEFAULT 'PENDING',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    approved_at TIMESTAMPTZ,
-    expired_at TIMESTAMPTZ,
-    rejected_reason TEXT
-);
-
 CREATE TABLE IF NOT EXISTS audit_events (
     id BIGSERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL,

@@ -125,7 +125,7 @@ class TestReviewNode:
 
         mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
 
-        with patch("src.agent.nodes.interrupt", mock_interrupt):
+        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
                 _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
@@ -151,7 +151,7 @@ class TestReviewNode:
 
         mock_interrupt = MagicMock(return_value={"decisions": ["REJECTED"]})
 
-        with patch("src.agent.nodes.interrupt", mock_interrupt):
+        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
                 _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
@@ -176,7 +176,7 @@ class TestReviewNode:
 
         mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
 
-        with patch("src.agent.nodes.interrupt", mock_interrupt):
+        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
             from src.agent.nodes import review_node
             result = await review_node(
                 _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
@@ -264,7 +264,7 @@ class TestReviewNode:
         audit = MockAuditLogger()
 
         mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
-        with patch("src.agent.nodes.interrupt", mock_interrupt):
+        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
             result = await review_node(
                 _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
             )

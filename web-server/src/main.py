@@ -42,6 +42,8 @@ def _build_services():
     tracer = PostgresTracer(db)
     checkpointer = PostgresCheckpointer(db)
 
+    from src.services.error_recovery import ErrorRecovery
+
     llm_adapter = LLMAdapter(llm_config, tracer=tracer)
 
     registry = ServerRegistry(servers)
@@ -68,6 +70,7 @@ def _build_services():
         approval_bridge=ApprovalBridge(),
         checkpointer=checkpointer,
         graph=graph,
+        error_recovery=ErrorRecovery(),
     )
 
 

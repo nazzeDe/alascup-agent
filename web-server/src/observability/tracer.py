@@ -52,6 +52,16 @@ class PostgresTracer(Tracer):
         )
 
 
+import tiktoken
+
+_encoder = tiktoken.get_encoding("o200k_base")
+
+
 def _estimate_tokens(messages: list[dict]) -> int:
-    total = sum(len(str(m.get("content", ""))) for m in messages)
-    return max(1, total // 4)
+    total = 0
+    for m in messages:
+        try:
+            total += len(_encoder.encode(str(m.get("content", ""))))
+        except Exception:
+            total += max(1, len(str(m.get("content", ""))) // 4)
+    return max(1, total)

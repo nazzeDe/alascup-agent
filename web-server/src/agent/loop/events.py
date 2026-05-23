@@ -51,25 +51,8 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
         })
 
     for r in state.get("tool_results") or []:
-        res = r.get("result", {})
-        evt = {
-            "chat_id": chat_id,
-            "message_id": r.get("tool_call_id") or str(uuid4()),
-            "tool_name": r.get("tool_name", ""),
-            "execution_status": res.get("execution_status", "SUCCEEDED"),
-        }
-        output = res.get("output")
-        if output is not None:
-            evt["output"] = output
-        error = res.get("error")
-        if error is not None:
-            evt["error"] = error
-        et = res.get("execution_time_ms")
-        if et is not None:
-            evt["execution_time_ms"] = et
-        events.append({"event": "tool_result", "data": _json_dumps(evt)})
+        events.append(_build_tool_result_event(r, chat_id))
 
-    # _emitted_results (preserved across observe clears) or streaming_tool_results
     emitted = state.get("_emitted_results") or state.get("streaming_tool_results") or []
     for sr in emitted:
         events.append({
@@ -82,25 +65,37 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
                 "is_read_only": True,
             }),
         })
-        res = sr.get("result", {})
-        evt = {
-            "chat_id": chat_id,
-            "message_id": sr.get("tool_call_id") or str(uuid4()),
-            "tool_name": sr.get("tool_name", ""),
-            "execution_status": res.get("execution_status", "SUCCEEDED"),
-        }
-        output = res.get("output")
-        if output is not None:
-            evt["output"] = output
-        error = res.get("error")
-        if error is not None:
-            evt["error"] = error
-        et = res.get("execution_time_ms")
-        if et is not None:
-            evt["execution_time_ms"] = et
-        events.append({"event": "tool_result", "data": _json_dumps(evt)})
+        events.append(_build_tool_result_event(sr, chat_id))
 
     return events
+
+
+def _build_tool_result_event(r: dict, chat_id: str) -> dict:
+    res = r.get("result", {})
+    evt = {
+        "event": "tool_result",
+        "data": _json_dumps(_tool_result_data(r, res, chat_id)),
+    }
+    return evt
+
+
+def _tool_result_data(r: dict, res: dict, chat_id: str) -> dict:
+    evt = {
+        "chat_id": chat_id,
+        "message_id": r.get("tool_call_id") or str(uuid4()),
+        "tool_name": r.get("tool_name", ""),
+        "execution_status": res.get("execution_status", "SUCCEEDED"),
+    }
+    output = res.get("output")
+    if output is not None:
+        evt["output"] = output
+    error = res.get("error")
+    if error is not None:
+        evt["error"] = error
+    et = res.get("execution_time_ms")
+    if et is not None:
+        evt["execution_time_ms"] = et
+    return evt
 
 
 def _msg_reasoning(m) -> str:

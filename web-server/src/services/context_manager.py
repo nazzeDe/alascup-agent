@@ -1,3 +1,8 @@
+import tiktoken
+
+_encoder = tiktoken.get_encoding("o200k_base")
+
+
 class ContextManager:
     def __init__(self, window_size: int = 128000, threshold: float = 0.7,
                  summarizer=None, compact_llm=None,
@@ -10,13 +15,18 @@ class ContextManager:
         self.max_result_chars = max_result_chars
 
     def count_tokens(self, messages: list) -> int:
-        total_chars = 0
+        total = 0
         for m in messages:
+            content = ""
             if isinstance(m, dict):
-                total_chars += len(str(m.get("content", "")))
+                content = str(m.get("content", ""))
             else:
-                total_chars += len(str(getattr(m, "content", "")))
-        return max(1, total_chars // 4)
+                content = str(getattr(m, "content", ""))
+            try:
+                total += len(_encoder.encode(content))
+            except Exception:
+                total += max(1, len(content) // 4)
+        return max(1, total)
 
     def needs_compression(self, current_tokens: int) -> bool:
         return current_tokens >= self.window_size * self.threshold

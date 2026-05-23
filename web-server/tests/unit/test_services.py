@@ -290,7 +290,7 @@ class TestContextManagerCompression:
             return "summarized conversation"
 
         cm = ContextManager(
-            window_size=500,
+            window_size=300,
             threshold=0.7,
             max_result_chars=50,
             compact_llm=mock_compact_llm,

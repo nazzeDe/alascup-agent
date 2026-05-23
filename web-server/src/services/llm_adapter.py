@@ -1,4 +1,5 @@
 import json
+from uuid import UUID
 
 from httpx import AsyncClient
 
@@ -77,9 +78,10 @@ class LLMAdapter:
         messages: list[dict],
         tools: list[dict] | None = None,
         system: str | None = None,
+        chat_id: UUID | None = None,
     ) -> dict:
         import time
-        import uuid
+        import uuid as _uuid
 
         start = time.monotonic()
         payload = self._build_payload(messages, tools, system, stream=False)
@@ -96,7 +98,7 @@ class LLMAdapter:
         }
         if self._tracer:
             await self._tracer.trace_llm_call(
-                chat_id=uuid.uuid4(),
+                chat_id=chat_id if chat_id else _uuid.uuid4(),
                 model=self._config.model,
                 messages=messages,
                 response=result,
@@ -109,6 +111,7 @@ class LLMAdapter:
         messages: list[dict],
         tools: list[dict] | None = None,
         system: str | None = None,
+        chat_id: UUID | None = None,
     ):
         payload = self._build_payload(messages, tools, system, stream=True)
         accumulated: dict[int, dict] = {}

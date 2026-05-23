@@ -7,13 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from src.agent.nodes import _event_queue as reasoning_queue
+from src.agent.nodes import _event_queue as reasoning_queue, _chat_id_ctx
 from src.agent.query import Query
 from src.models.message import Message, MessageType
 from src.services.container import (
     approval_bridge,
     audit_logger,
     context_manager,
+    error_recovery,
     graph,
     llm_adapter,
     prompt_manager,
@@ -31,7 +32,7 @@ class ChatTurnRequest(BaseModel):
 
 
 @router.post("/chat-turn")
-async def chat_turn_alt(
+async def chat_turn(
     body: ChatTurnRequest,
     request: Request,
     session_mgr=Depends(session_manager),
@@ -41,34 +42,19 @@ async def chat_turn_alt(
     executor=Depends(tool_executor),
     audit_logger=Depends(audit_logger),
     bridge=Depends(approval_bridge),
-    graph=Depends(graph),
+    graph_dep=Depends(graph),
+    error_rec=Depends(error_recovery),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
-
     chat_id_str = body.chat_id
     if not chat_id_str:
-        session = await session_mgr.create_session()
-        chat_id_str = str(session.id)
+        new_session = await session_mgr.create_session()
+        chat_id_str = str(new_session.id)
     try:
         chat_id = UUID(chat_id_str)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid chat_id")
-    return await _handle_chat_turn(chat_id, body, request, session_mgr, prompt_mgr, llm, context_mgr, executor, audit_logger, bridge, graph)
 
-
-async def _handle_chat_turn(
-    chat_id: UUID,
-    body: ChatTurnRequest,
-    request: Request,
-    session_mgr,
-    prompt_mgr,
-    llm,
-    context_mgr,
-    executor,
-    audit_logger,
-    bridge,
-    graph,
-):
     try:
         session = await session_mgr.get_session(chat_id)
     except KeyError:
@@ -90,7 +76,6 @@ async def _handle_chat_turn(
     )
     await session_mgr.add_message(chat_id, user_msg)
 
-    # Set session title from first user message (only if title is empty)
     if not session.title and body.message:
         title = body.message.split("\n")[0][:20]
         await session_mgr.set_title(chat_id, title)
@@ -98,10 +83,11 @@ async def _handle_chat_turn(
     system_prompt = prompt_mgr.build_system_prompt()
     agent = Query(
         llm=llm,
-        graph=graph,
+        graph=graph_dep,
         context_manager=context_mgr,
         pending_approvals=bridge,
         audit_logger=audit_logger,
+        error_recovery=error_rec,
         chat_id=chat_id,
     )
 
@@ -111,6 +97,7 @@ async def _handle_chat_turn(
     async def event_generator():
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
         token = reasoning_queue.set(queue)
+        chat_id_token = _chat_id_ctx.set(str(chat_id))
         collected_text: list[str] = []
         buffered: list[dict] = []
 
@@ -126,7 +113,6 @@ async def _handle_chat_turn(
 
         try:
             while True:
-                # Flush buffered reasoning events before each agent event
                 while buffered:
                     yield buffered.pop(0)
 
@@ -146,12 +132,12 @@ async def _handle_chat_turn(
                         pass
                 yield event
 
-            # Drain remaining buffered events
             while buffered:
                 yield buffered.pop(0)
 
         finally:
             reasoning_queue.reset(token)
+            _chat_id_ctx.reset(chat_id_token)
             drain_task.cancel()
             try:
                 await drain_task
@@ -171,23 +157,4 @@ async def _handle_chat_turn(
 
     return EventSourceResponse(
         event_generator(), headers={"X-Session-ID": str(chat_id)}
-    )
-
-
-@router.post("/sessions/{chat_id}/messages")
-async def chat_turn(
-    chat_id: UUID,
-    body: ChatTurnRequest,
-    request: Request,
-    session_mgr=Depends(session_manager),
-    prompt_mgr=Depends(prompt_manager),
-    llm=Depends(llm_adapter),
-    context_mgr=Depends(context_manager),
-    executor=Depends(tool_executor),
-    audit_logger=Depends(audit_logger),
-    bridge=Depends(approval_bridge),
-    graph=Depends(graph),
-):
-    return await _handle_chat_turn(
-        chat_id, body, request, session_mgr, prompt_mgr, llm, context_mgr, executor, audit_logger, bridge, graph
     )

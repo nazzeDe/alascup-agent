@@ -12,6 +12,7 @@ from src.services.container import (
     approval_bridge,
     audit_logger,
     context_manager,
+    error_recovery,
     graph,
     llm_adapter,
     session_manager,
@@ -35,6 +36,7 @@ async def approve_tool_request(
     context_mgr=Depends(context_manager),
     audit_logger=Depends(audit_logger),
     graph=Depends(graph),
+    error_rec=Depends(error_recovery),
 ):
     try:
         status = ApprovalStatus(body.approval_status)
@@ -56,6 +58,7 @@ async def approve_tool_request(
         graph=graph,
         context_manager=context_mgr,
         audit_logger=audit_logger,
+        error_recovery=error_rec,
         chat_id=chat_id,
     )
 

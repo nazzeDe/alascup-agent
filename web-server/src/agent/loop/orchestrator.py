@@ -3,6 +3,9 @@
 import json
 from typing import AsyncIterator
 
+from langgraph.types import Command
+from loguru import logger
+
 from src.agent.loop.audit import log_transition
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers import handle_interrupt, handle_llm_error
@@ -98,6 +101,42 @@ class LoopOrchestrator:
             # Unknown transition — exit safely
             yield {"event": "done", "data": "{}"}
             return
+
+    async def resume(self, decisions: list[str]) -> AsyncIterator[dict]:
+        """Resume from checkpoint after human approval.
+
+        A single ainvoke(Command(resume=...)) runs from the interrupt point
+        to END (or another interrupt).
+        """
+        await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+
+        result = await self._graph.ainvoke(
+            Command(resume={"decisions": decisions}),
+            {"configurable": {"thread_id": self._chat_id}},
+        )
+        msgs = result.get("messages", [])
+        logger.debug("RESUME_GRAPH: msgs={msgs} tool_results={tr} streaming={str} emitted={em} transition={t} interrupt={intr}",
+                     msgs=len(msgs), tr=len(result.get("tool_results", [])),
+                     str=len(result.get("streaming_tool_results", [])),
+                     em=len(result.get("_emitted_results", [])),
+                     t=result.get("transition"),
+                     intr="__interrupt__" in result)
+
+        if has_interrupt(result):
+            async for event in handle_interrupt(
+                result,
+                bridge=self._bridge,
+                audit_logger=self._audit,
+                chat_id=self._chat_id,
+            ):
+                yield event
+            return
+
+        evs = emit_events(result, chat_id=self._chat_id)
+        logger.debug("RESUME_EVENTS: {events}", events=[e.get("event", "") for e in evs])
+        for ev in evs:
+            yield ev
+        yield {"event": "done", "data": "{}"}
 
     async def _compress_context(self, state: dict) -> None:
         """Compress message context if over token threshold."""

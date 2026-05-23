@@ -21,10 +21,10 @@ def app_with_bridge():
     from src.services.session_manager import InMemorySessionManager
 
     class _MockLLM:
-        async def generate(self, messages, tools=None, system=None):
+        async def generate(self, messages, tools=None, system=None, chat_id=None):
             return {"content": "approved and done", "tool_calls": None}
 
-        async def generate_stream(self, messages, tools=None, system=None):
+        async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
             yield {"event": "assistant", "data": '{"delta":"resumed reply"}'}
             yield {"event": "done", "data": "{}"}
 

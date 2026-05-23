@@ -5,10 +5,10 @@ pytestmark = pytest.mark.integration
 
 
 class _MockLLMAdapter:
-    async def generate(self, messages, tools=None, system=None):
+    async def generate(self, messages, tools=None, system=None, chat_id=None):
         return {"content": "mock response", "tool_calls": None}
 
-    async def generate_stream(self, messages, tools=None, system=None):
+    async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         yield {"event": "assistant", "data": '{"delta":"mock reply"}'}
         yield {"event": "done", "data": "{}"}
 
@@ -77,6 +77,7 @@ def _build_test_services():
         approval_bridge=ApprovalBridge(),
         checkpointer=checkpointer,
         graph=graph,
+        error_recovery=None,
     )
 
 
@@ -125,8 +126,8 @@ class TestChatTurnSSE:
         r = await client.post("/api/sessions")
         chat_id = r.json()["id"]
 
-        url = f"/api/sessions/{chat_id}/messages"
-        async with client.stream("POST", url, json={"message": "hello"}) as response:
+        url = "/api/chat-turn"
+        async with client.stream("POST", url, json={"message": "hello", "chat_id": chat_id}) as response:
             assert response.status_code == 200
             assert "text/event-stream" in response.headers.get("content-type", "")
 
@@ -144,7 +145,7 @@ class TestChatTurnSSE:
     async def test_chat_turn_missing_message(self, client):
         r = await client.post("/api/sessions")
         chat_id = r.json()["id"]
-        response = await client.post(f"/api/sessions/{chat_id}/messages", json={})
+        response = await client.post("/api/chat-turn", json={"chat_id": chat_id})
         assert response.status_code == 422
 
 
@@ -162,9 +163,10 @@ class TestSessionLifecycle:
         # 2. 发送消息
         async with client.stream(
             "POST",
-            f"/api/sessions/{chat_id}/messages",
+            "/api/chat-turn",
             json={
                 "message": "hello",
+                "chat_id": chat_id,
             },
         ) as response:
             assert response.status_code == 200
@@ -186,9 +188,10 @@ class TestSessionLifecycle:
 
         async with client.stream(
             "POST",
-            f"/api/sessions/{chat_id}/messages",
+            "/api/chat-turn",
             json={
                 "message": "hello",
+                "chat_id": chat_id,
             },
         ) as response:
             assert response.status_code == 200
@@ -211,9 +214,10 @@ class TestSessionLifecycle:
 
         async with client.stream(
             "POST",
-            f"/api/sessions/{chat_id}/messages",
+            "/api/chat-turn",
             json={
                 "message": "first message",
+                "chat_id": chat_id,
             },
         ) as response:
             async for line in response.aiter_lines():
@@ -223,9 +227,10 @@ class TestSessionLifecycle:
         # 第二轮——同 chat_id
         async with client.stream(
             "POST",
-            f"/api/sessions/{chat_id}/messages",
+            "/api/chat-turn",
             json={
                 "message": "second message",
+                "chat_id": chat_id,
             },
         ) as response:
             async for line in response.aiter_lines():
