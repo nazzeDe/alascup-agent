@@ -134,7 +134,7 @@ def main() -> int:
         _init_chroma(config)
         _init_embedder(config)
         server = create_server(config)
-        server.run(transport="streamable-http", host="0.0.0.0", port=8002)
+        server.run(transport="streamable-http", host="0.0.0.0", port=11452)
         return 0
     except KeyboardInterrupt:
         return 0

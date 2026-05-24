@@ -50,8 +50,8 @@ flowchart TD
 
     %% ── MCP 工具执行层 ──
     mcp_client["MCP Client (fastmcp)<br/>懒连接 JSON-RPC"]
-    mcp_tool_server["调用 tool-server<br/>port 8001"]
-    mcp_rag_server["调用 rag-server<br/>port 8002"]
+    mcp_tool_server["调用 tool-server"]
+    mcp_rag_server["调用 rag-server<br/>"]
     mcp_conn_retry{"连接成功？"}
     mcp_retry["重试 2 次<br/>间隔 1s / 2s"]
     mcp_result{"ToolResult<br/>execution_status？"}

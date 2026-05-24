@@ -239,7 +239,7 @@ flowchart LR
 
     subgraph external["外部依赖"]
         nginx["Nginx<br/>静态文件 serve<br/>+ /api/* 反代"]
-        webapi["web-server :8000<br/>OpenAPI 端点"]
+        webapi["web-server<br/>OpenAPI 端点"]
     end
 
     %% 连线

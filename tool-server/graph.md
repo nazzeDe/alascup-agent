@@ -9,7 +9,7 @@ flowchart TD
     %% ============================================================
 
     %% ── 入口 ──
-    mcp_entry["MCP JSON-RPC 请求<br/>web-server → tool-server:8001"]
+    mcp_entry["MCP JSON-RPC 请求<br/>web-server → tool-server:11451"]
 
     %% ── 安全校验 ──
     sec_approval{"二次安全校验<br/>approval_status == APPROVED<br/>且 request_id 有效？"}
