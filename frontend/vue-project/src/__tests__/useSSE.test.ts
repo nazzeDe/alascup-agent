@@ -44,14 +44,14 @@ describe('SSE Parser', () => {
   })
 
   // FE-002: SSE tool_call event parse
-  it('parses tool_call event with tool_name and isReadOnly', () => {
-    const input = 'event: tool_call\ndata: {"chat_id":"c1","message_id":"m2","tool_name":"get_cpu_info","params":{},"isReadOnly":true}\n\n'
+  it('parses tool_call event with tool_name and is_read_only', () => {
+    const input = 'event: tool_call\ndata: {"chat_id":"c1","message_id":"m2","tool_name":"get_cpu_info","params":{},"is_read_only":true}\n\n'
     const results = parseSSEStream([input])
     expect(results).toHaveLength(1)
     expect(results[0]!.event).toBe('tool_call')
     const data = results[0]!.data as Record<string, unknown>
     expect(data.tool_name).toBe('get_cpu_info')
-    expect(data.isReadOnly).toBe(true)
+    expect(data.is_read_only).toBe(true)
   })
 
   // FE-003: SSE tool_result event parse
@@ -91,7 +91,7 @@ describe('SSE Parser', () => {
   it('parses multiple events in a single stream', () => {
     const input = [
       'event: assistant\ndata: {"chat_id":"c1","message_id":"m1","delta":"Hello"}\n\n',
-      'event: tool_call\ndata: {"chat_id":"c1","message_id":"m2","tool_name":"get_cpu","params":{},"isReadOnly":true}\n\n',
+      'event: tool_call\ndata: {"chat_id":"c1","message_id":"m2","tool_name":"get_cpu","params":{},"is_read_only":true}\n\n',
       'event: done\ndata: {"chat_id":"c1"}\n\n',
     ]
     const results = parseSSEStream(input)
@@ -112,7 +112,7 @@ describe('SSE Parser', () => {
     // Second event: tool_call frame split so 'data:' arrives in a separate chunk from 'event:'
     const results2 = parseSSEStream([
       'event: tool_call\n',
-      'data: {"tool_name":"get_cpu","isReadOnly":true}\n\n',
+      'data: {"tool_name":"get_cpu","is_read_only":true}\n\n',
     ])
     expect(results2).toHaveLength(1)
     expect(results2[0]!.event).toBe('tool_call')

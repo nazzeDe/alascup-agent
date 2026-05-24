@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, withDefaults } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import type { Message, ToolCallInfo } from '@/types'
 import type { ReasoningEntry } from '@/composables/useChat'
 import MessageItem from './MessageItem.vue'
@@ -60,7 +60,7 @@ function checkAutoScroll() {
 }
 
 watch(
-  () => props.messages.map(m => m.content).join('') + '|' + props.messages.length + '|' + props.toolCalls.size + '|' + (props.reasonings?.length ?? 0),
+  () => timeline.value.length,
   checkAutoScroll,
 )
 

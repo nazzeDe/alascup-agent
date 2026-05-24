@@ -8,8 +8,13 @@ import ChatView from '@/components/ChatView.vue'
 import ApprovalModal from '@/components/ApprovalModal.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 
-const { messages, toolCalls, reasonings, isStreaming, phaseLabel, approvalPending, isLoadingHistory, sendMessage, submitApproval, loadHistory, abort } = useChat()
-const { sessions, activeChatId, isLoadingSessions, isCreatingSession, loadSessions, createSession, switchSession } = useSessions()
+const { messages, toolCalls, reasonings, isStreaming, phaseLabel, approvalPending, isLoadingHistory, sendMessage, submitApproval, loadHistory, resetChat, abort } = useChat({
+  onChatCreated(chatId: string) {
+    activeChatId.value = chatId
+    loadSessions()
+  },
+})
+const { sessions, activeChatId, isLoadingSessions, isCreatingSession, loadError, loadSessions, createSession, switchSession } = useSessions()
 
 const isProcessingApproval = ref(false)
 
@@ -18,19 +23,17 @@ onMounted(() => {
 })
 
 async function handleSelectSession(chatId: string) {
-  await switchSession(chatId)
-  await loadHistory(chatId)
+  const ok = await loadHistory(chatId)
+  if (ok) switchSession(chatId)
 }
 
 async function handleCreateSession() {
-  await createSession()
-  messages.value = []
-  toolCalls.value = new Map()
-  reasonings.value = []
+  const chatId = await createSession()
+  if (chatId) resetChat()
 }
 
 function handleSendMessage(text: string) {
-  sendMessage(text)
+  sendMessage(text, activeChatId.value)
 }
 
 function handleAbort() {
@@ -64,6 +67,7 @@ async function handleReject(requestId: string, reason?: string) {
           :active-chat-id="activeChatId"
           :is-creating="isCreatingSession"
           :is-loading="isLoadingSessions"
+          :error="loadError"
           @select="handleSelectSession"
           @create="handleCreateSession"
         />

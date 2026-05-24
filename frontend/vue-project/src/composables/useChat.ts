@@ -12,7 +12,6 @@ import type {
   ChatSession,
 } from '@/types'
 import { useSSE } from './useSSE'
-import { useSessions } from './useSessions'
 import { useToast } from './useToast'
 
 export type AgentPhase =
@@ -31,18 +30,17 @@ export interface ReasoningEntry {
   timestamp: string
 }
 
-export function useChat() {
+export function useChat(options?: { onChatCreated?: (chatId: string) => void }) {
   const { connect, abort: sseAbort, isStreaming } = useSSE()
+  const { showToast } = useToast()
 
   function abort(): void {
     sseAbort()
     approvalPending.value = null
     currentActivity.value = ''
     agentPhase.value = 'idle'
+    reasonings.value = reasonings.value.map(r => ({ ...r, done: true }))
   }
-
-  const { activeChatId, loadSessions } = useSessions()
-  const { showToast } = useToast()
 
   const messages: Ref<Message[]> = ref([])
   const toolCalls: Ref<Map<string, ToolCallInfo>> = ref(new Map())
@@ -59,11 +57,11 @@ export function useChat() {
     chat_id: string
   } | null> = ref(null)
 
-  function sendMessage(text: string, options?: { model?: string; maxTurns?: number }): void {
+  function sendMessage(text: string, chatId: string | undefined, options?: { model?: string; maxTurns?: number }): void {
     approvalPending.value = null
     currentActivity.value = ''
 
-    const chatId = activeChatId.value
+    const isNewChat = !chatId
 
     const userMsg: Message = {
       message_id: crypto.randomUUID(),
@@ -91,11 +89,12 @@ export function useChat() {
             currentActivity.value = text.length > 50 ? '…' + text.slice(-50) : text
           }
           if (data.done) {
-            // Batch reasoning from emit_events — dedup
-            const existing = reasonings.value.find(r => r.content === data.delta)
+            // Batch reasoning from emit_events — dedup by message_id
+            const msgId = data.message_id
+            const existing = msgId ? reasonings.value.find(r => r.message_id === msgId) : undefined
             if (existing) {
               reasonings.value = reasonings.value.map(r =>
-                r.message_id === existing.message_id ? { ...r, done: true } : r
+                r.message_id === msgId ? { ...r, done: true } : r
               )
             } else {
               reasonings.value = [...reasonings.value, {
@@ -200,21 +199,6 @@ export function useChat() {
           approvalPending.value = { ...data }
           agentPhase.value = 'awaiting_approval'
           currentActivity.value = data.tool_name
-
-          const tc: ToolCallInfo = {
-            message_id: crypto.randomUUID(),
-            chat_id: data.chat_id,
-            tool_name: data.tool_name,
-            is_read_only: false,
-            params: data.params,
-            request_id: data.request_id,
-            approval_status: 'PENDING',
-            execution_status: 'PENDING_APPROVAL',
-            timestamp: new Date().toISOString(),
-          }
-          const updated = new Map(toolCalls.value)
-          updated.set(tc.message_id, tc)
-          toolCalls.value = updated
         },
 
         onError(data: ErrorEvent) {
@@ -224,9 +208,8 @@ export function useChat() {
         onDone(_data: DoneEvent) {
           agentPhase.value = 'done'
           currentActivity.value = ''
-          if (!activeChatId.value && _data.chat_id) {
-            activeChatId.value = _data.chat_id
-            loadSessions()
+          if (isNewChat && _data.chat_id) {
+            options?.onChatCreated?.(_data.chat_id)
           }
         },
       },
@@ -251,20 +234,15 @@ export function useChat() {
         if (status === 'REJECTED') {
           messages.value = [...messages.value, {
             message_id: crypto.randomUUID(),
-            chat_id: pending?.chat_id ?? activeChatId.value ?? '',
+            chat_id: pending?.chat_id ?? '',
             timestamp: new Date().toISOString(),
             type: 'system',
             content: 'Tool execution rejected',
             is_meta: true,
           }]
-        } else {
-          // Backend processed the approval and saved messages to DB.
-          // Load the updated session to get the new messages.
-          const chatId = pending?.chat_id ?? activeChatId.value
-          if (chatId) {
-            await loadHistory(chatId)
-          }
         }
+        agentPhase.value = 'thinking'
+        currentActivity.value = 'Processing…'
       } else {
         showToast('error', `Approval failed: server returned ${res.status}`)
       }
@@ -273,11 +251,17 @@ export function useChat() {
     }
   }
 
-  async function loadHistory(chatId: string): Promise<void> {
+  async function loadHistory(chatId: string): Promise<boolean> {
     isLoadingHistory.value = true
+    approvalPending.value = null
+    agentPhase.value = 'idle'
+    currentActivity.value = ''
     try {
       const res = await fetch(`/api/sessions/${chatId}`)
-      if (!res.ok) return
+      if (!res.ok) {
+        showToast('error', `Failed to load history (${res.status})`)
+        return false
+      }
       const session: ChatSession = await res.json()
       messages.value = session.messages ?? []
       const map = new Map<string, ToolCallInfo>()
@@ -288,8 +272,10 @@ export function useChat() {
       }
       toolCalls.value = map
       reasonings.value = []
+      return true
     } catch {
-      // silently fail
+      showToast('error', 'Failed to load conversation history')
+      return false
     } finally {
       isLoadingHistory.value = false
     }
@@ -314,6 +300,14 @@ export function useChat() {
     }
   })
 
+  function resetChat(): void {
+    messages.value = []
+    toolCalls.value = new Map()
+    reasonings.value = []
+    agentPhase.value = 'idle'
+    currentActivity.value = ''
+  }
+
   return {
     messages,
     toolCalls,
@@ -327,6 +321,7 @@ export function useChat() {
     sendMessage,
     submitApproval,
     loadHistory,
+    resetChat,
     abort,
   }
 }

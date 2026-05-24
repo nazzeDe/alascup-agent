@@ -362,7 +362,7 @@ components:
 
     ToolApprovalRequiredEventData:
       type: object
-      required: [chat_id, request_id, tool_name, description, params, reason]
+      required: [chat_id, request_id, tool_name, params, reason]
       properties:
         chat_id:
           type: string
@@ -372,9 +372,6 @@ components:
           format: uuid
         tool_name:
           type: string
-        description:
-          type: string
-          description: 工具功能描述
         params:
           type: object
           description: 调用参数；可变工具（bash）包含完整 command 字段
@@ -382,19 +379,22 @@ components:
           type: string
           description: 需要审批的原因说明
 
-    TurnLimitReachedEventData:
+    ReasoningEventData:
       type: object
-      required: [chat_id, turn_count, message]
+      required: [delta]
       properties:
         chat_id:
           type: string
           format: uuid
-        turn_count:
-          type: integer
-          description: 当前已达轮次
-        message:
+        message_id:
           type: string
-          description: 提示用户确认是否继续推理
+          format: uuid
+        delta:
+          type: string
+          description: 推理文本增量
+        done:
+          type: boolean
+          description: 是否完成推理
 
     ErrorEventData:
       type: object
@@ -419,13 +419,13 @@ components:
       properties:
         event:
           type: string
-          enum: [assistant, tool_call, tool_result, tool_approval_required, turn_limit_reached, error, done]
+          enum: [assistant, reasoning, tool_call, tool_result, tool_approval_required, error, done]
         data:
           oneOf:
             - $ref: '#/components/schemas/AssistantEventData'
+            - $ref: '#/components/schemas/ReasoningEventData'
             - $ref: '#/components/schemas/ToolCallEventData'
             - $ref: '#/components/schemas/ToolResultEventData'
             - $ref: '#/components/schemas/ToolApprovalRequiredEventData'
-            - $ref: '#/components/schemas/TurnLimitReachedEventData'
             - $ref: '#/components/schemas/ErrorEventData'
             - $ref: '#/components/schemas/DoneEventData'

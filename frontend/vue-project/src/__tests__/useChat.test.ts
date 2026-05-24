@@ -22,7 +22,7 @@ describe('useChat message management', () => {
     const { messages, sendMessage } = useChat()
 
     expect(messages.value).toHaveLength(0)
-    sendMessage('Hello World')
+    sendMessage('Hello World', 'c1')
     expect(messages.value).toHaveLength(1)
     expect(messages.value[0]!.type).toBe('user')
     expect(messages.value[0]!.content).toBe('Hello World')
@@ -45,7 +45,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { messages, sendMessage } = useChat()
 
-    sendMessage('Hi')
+    sendMessage('Hi', 'c1')
     await vi.waitFor(() => {
       const assistantMsg = messages.value.find(m => m.type === 'assistant')
       expect(assistantMsg).toBeDefined()
@@ -58,7 +58,7 @@ describe('useChat message management', () => {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(
-          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"isReadOnly":true}\n\n' +
+          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"is_read_only":true}\n\n' +
           'event: done\ndata: {"chat_id":"c1"}\n\n'
         ))
         controller.close()
@@ -69,7 +69,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { toolCalls, sendMessage } = useChat()
 
-    sendMessage('check cpu')
+    sendMessage('check cpu', 'c1')
     await vi.waitFor(() => {
       expect(toolCalls.value.has('tc1')).toBe(true)
       expect(toolCalls.value.get('tc1')!.execution_status).toBe('RUNNING')
@@ -81,7 +81,7 @@ describe('useChat message management', () => {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(
-          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"isReadOnly":true}\n\n' +
+          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"is_read_only":true}\n\n' +
           'event: tool_result\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","execution_status":"SUCCEEDED","output":{"cpu":85}}\n\n' +
           'event: done\ndata: {"chat_id":"c1"}\n\n'
         ))
@@ -93,7 +93,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { toolCalls, sendMessage } = useChat()
 
-    sendMessage('check cpu')
+    sendMessage('check cpu', 'c1')
     await vi.waitFor(() => {
       const tc = toolCalls.value.get('tc1')
       expect(tc?.execution_status).toBe('SUCCEEDED')
@@ -116,7 +116,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { approvalPending, sendMessage } = useChat()
 
-    sendMessage('remove tmp')
+    sendMessage('remove tmp', 'c1')
     await vi.waitFor(() => {
       expect(approvalPending.value).not.toBeNull()
       expect(approvalPending.value!.request_id).toBe('r1')
@@ -128,7 +128,7 @@ describe('useChat message management', () => {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(
-          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"isReadOnly":true}\n\n' +
+          'event: tool_call\ndata: {"chat_id":"c1","message_id":"tc1","tool_name":"get_cpu","params":{},"is_read_only":true}\n\n' +
           'event: done\ndata: {"chat_id":"c1"}\n\n'
         ))
         controller.close()
@@ -139,7 +139,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { messages, toolCalls, sendMessage } = useChat()
 
-    sendMessage('check cpu')
+    sendMessage('check cpu', 'c1')
     await vi.waitFor(() => {
       expect(toolCalls.value.has('tc1')).toBe(true)
     }, { timeout: 1000 })
@@ -223,7 +223,7 @@ describe('useChat message management', () => {
     const { useChat } = await import('@/composables/useChat')
     const { messages, sendMessage } = useChat()
 
-    sendMessage('test')
+    sendMessage('test', 'c1')
     await vi.waitFor(() => {
       // FE-014: transient errors go to toast, not messages[]
       const systemMessages = messages.value.filter(m => m.type === 'system')
@@ -248,7 +248,7 @@ describe('useChat message management', () => {
     const { isStreaming, sendMessage, abort } = useChat()
 
     // Start sending but don't await — we want to abort mid-stream
-    sendMessage('test')
+    sendMessage('test', 'c1')
 
     await vi.waitFor(() => {
       expect(isStreaming.value).toBe(true)
@@ -272,11 +272,11 @@ describe('useChat loadHistory', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        chatID: 'c1',
+        chat_id: 'c1',
         title: 'Test Session',
         messages: [
-          { messageID: 'm1', chatID: 'c1', timestamp: '2026-01-01T00:00:00Z', type: 'user', content: 'hello' },
-          { messageID: 'm2', chatID: 'c1', timestamp: '2026-01-01T00:00:01Z', type: 'assistant', content: 'hi' },
+          { message_id: 'm1', chat_id: 'c1', timestamp: '2026-01-01T00:00:00Z', type: 'user', content: 'hello' },
+          { message_id: 'm2', chat_id: 'c1', timestamp: '2026-01-01T00:00:01Z', type: 'assistant', content: 'hi' },
         ],
         executed_tool_list: [],
         timestamp: '2026-01-01T00:00:01Z',

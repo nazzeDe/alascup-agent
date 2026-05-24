@@ -17,8 +17,8 @@ describe('useSessions', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => [
-        { id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' },
-        { id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '2026-01-02T00:00:00Z' },
+        { chat_id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' },
+        { chat_id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '2026-01-02T00:00:00Z' },
       ],
     })
 
@@ -47,7 +47,7 @@ describe('useSessions', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        id: 'new-c1',
+        chat_id: 'new-c1',
         title: undefined,
         messages: [],
         executed_tool_list: [],
@@ -74,7 +74,7 @@ describe('useSessions', () => {
 
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => [{ id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' }],
+      json: async () => [{ chat_id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '2026-01-01T00:00:00Z' }],
     })
 
     await a.loadSessions()
@@ -103,6 +103,34 @@ describe('useSessions', () => {
     expect(isLoadingSessions.value).toBe(false)
   })
 
+  it('sets loadError on non-ok response', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 })
+    const { useSessions } = await import('@/composables/useSessions')
+    const { loadError, loadSessions } = useSessions()
+    await loadSessions()
+    expect(loadError.value).toBe('Server error (500)')
+  })
+
+  it('sets loadError on network failure', async () => {
+    mockFetch.mockRejectedValue(new Error('Network error'))
+    const { useSessions } = await import('@/composables/useSessions')
+    const { loadError, loadSessions } = useSessions()
+    await loadSessions()
+    expect(loadError.value).toBe('Cannot connect to server')
+  })
+
+  it('clears loadError on successful load', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [],
+    })
+    const { useSessions } = await import('@/composables/useSessions')
+    const { loadError, loadSessions } = useSessions()
+    loadError.value = 'old error'
+    await loadSessions()
+    expect(loadError.value).toBe('')
+  })
+
   it('sets isCreatingSession during createSession', async () => {
     let resolveCreate: (value: unknown) => void
     const createPromise = new Promise((resolve) => { resolveCreate = resolve })
@@ -117,7 +145,7 @@ describe('useSessions', () => {
 
     resolveCreate!({
       ok: true,
-      json: async () => ({ id: 'new-c1', messages: [], executed_tool_list: [], timestamp: '' }),
+      json: async () => ({ chat_id: 'new-c1', messages: [], executed_tool_list: [], timestamp: '' }),
     })
     await promise
     expect(isCreatingSession.value).toBe(false)

@@ -7,6 +7,7 @@ const props = defineProps<{
   activeChatId?: string
   isCreating?: boolean
   isLoading?: boolean
+  error?: string
 }>()
 
 const emit = defineEmits<{
@@ -77,19 +78,22 @@ const groups = computed<Group[]>(() => {
           <div class="session-group-header">{{ group.label }}</div>
           <div
             v-for="session in group.sessions"
-            :key="session.id"
-            :class="['session-item p-2 border-bottom', { active: session.id === activeChatId }]"
-            @click="emit('select', session.id)"
+            :key="session.chat_id"
+            :class="['session-item p-2 border-bottom', { active: session.chat_id === activeChatId }]"
+            @click="emit('select', session.chat_id)"
           >
             <div class="fw-semibold small text-truncate">
-              {{ session.title || session.id?.slice(0, 8) || 'New Session' }}
+              {{ session.title || session.chat_id?.slice(0, 8) || 'New Session' }}
             </div>
             <div class="text-muted small">
               {{ new Date(session.timestamp).toLocaleString() }}
             </div>
           </div>
         </template>
-        <div v-if="groups.length === 0" class="p-3 text-muted small text-center">
+        <div v-if="error" class="p-3 text-danger small text-center">
+          {{ error }}
+        </div>
+        <div v-else-if="groups.length === 0" class="p-3 text-muted small text-center">
           No sessions yet
         </div>
       </template>

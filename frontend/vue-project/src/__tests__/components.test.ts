@@ -15,8 +15,8 @@ describe('MessageItem', () => {
     const wrapper = mount(MessageItem, {
       props: {
         message: {
-          messageID: 'm1',
-          id: 'c1',
+          message_id: 'm1',
+          chat_id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'user',
           content: 'Hello',
@@ -32,8 +32,8 @@ describe('MessageItem', () => {
     const wrapper = mount(MessageItem, {
       props: {
         message: {
-          messageID: 'm2',
-          id: 'c1',
+          message_id: 'm2',
+          chat_id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'assistant',
           content: '**bold** text',
@@ -48,8 +48,8 @@ describe('MessageItem', () => {
     const wrapper = mount(MessageItem, {
       props: {
         message: {
-          messageID: 'm3',
-          id: 'c1',
+          message_id: 'm3',
+          chat_id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'system',
           content: 'Connection lost',
@@ -67,10 +67,10 @@ describe('ToolCallCard', () => {
     const wrapper = mount(ToolCallCard, {
       props: {
         toolCall: {
-          messageID: 'tc1',
-          id: 'c1',
+          message_id: 'tc1',
+          chat_id: 'c1',
           tool_name: 'get_cpu_info',
-          isReadOnly: true,
+          is_read_only: true,
           execution_status: 'RUNNING',
           timestamp: new Date().toISOString(),
         },
@@ -85,10 +85,10 @@ describe('ToolCallCard', () => {
     const wrapper = mount(ToolCallCard, {
       props: {
         toolCall: {
-          messageID: 'tc1',
-          id: 'c1',
+          message_id: 'tc1',
+          chat_id: 'c1',
           tool_name: 'get_cpu',
-          isReadOnly: true,
+          is_read_only: true,
           execution_status: 'SUCCEEDED',
           output: { cpu: 85 },
           timestamp: new Date().toISOString(),
@@ -177,8 +177,8 @@ describe('SessionList', () => {
     const wrapper = mount(SessionList, {
       props: {
         sessions: [
-          { id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
-          { id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
+          { chat_id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
+          { chat_id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
         ],
         activeChatId: 'c1',
       },
@@ -191,7 +191,7 @@ describe('SessionList', () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')
     const wrapper = mount(SessionList, {
       props: {
-        sessions: [{ id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
+        sessions: [{ chat_id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
         activeChatId: undefined,
       },
     })
@@ -260,8 +260,8 @@ describe('MessageItem isMeta', () => {
     const wrapper = mount(MessageItem, {
       props: {
         message: {
-          messageID: 'm-meta',
-          id: 'c1',
+          message_id: 'm-meta',
+          chat_id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'system',
           content: 'Tool execution approved',
@@ -280,8 +280,8 @@ describe('MessageItem isMeta', () => {
     const wrapper = mount(MessageItem, {
       props: {
         message: {
-          messageID: 'm-meta2',
-          id: 'c1',
+          message_id: 'm-meta2',
+          chat_id: 'c1',
           timestamp: new Date().toISOString(),
           type: 'assistant',
           content: 'Operation completed',
@@ -300,10 +300,10 @@ describe('ChatView timeline', () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const toolCalls = new Map()
     toolCalls.set('tc1', {
-      messageID: 'tc1',
-      id: 'c1',
+      message_id: 'tc1',
+      chat_id: 'c1',
       tool_name: 'get_cpu',
-      isReadOnly: true,
+      is_read_only: true,
       execution_status: 'RUNNING' as const,
       timestamp: new Date().toISOString(),
     })
@@ -311,8 +311,8 @@ describe('ChatView timeline', () => {
     const wrapper = mount(ChatView, {
       props: {
         messages: [
-          { messageID: 'm1', id: 'c1', timestamp: new Date(Date.now() - 3000).toISOString(), type: 'user' as const, content: 'hi' },
-          { messageID: 'm2', id: 'c1', timestamp: new Date(Date.now() - 1000).toISOString(), type: 'assistant' as const, content: 'Hello' },
+          { message_id: 'm1', chat_id: 'c1', timestamp: new Date(Date.now() - 3000).toISOString(), type: 'user' as const, content: 'hi' },
+          { message_id: 'm2', chat_id: 'c1', timestamp: new Date(Date.now() - 1000).toISOString(), type: 'assistant' as const, content: 'Hello' },
         ],
         toolCalls,
         isStreaming: false,

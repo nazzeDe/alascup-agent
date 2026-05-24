@@ -58,13 +58,13 @@ export function useSSE() {
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim() as SSEEventType
           } else if (line.startsWith('data: ')) {
-            currentData = line.slice(6)
+            currentData += (currentData ? '\n' : '') + line.slice(6)
           } else if (line === '') {
             if (currentEvent && currentData) {
               try {
                 const parsed = JSON.parse(currentData)
                 dispatchEvent(currentEvent, parsed, callbacks)
-              } catch { /* skip malformed */ }
+              } catch { console.warn('SSE: malformed event data', currentData) }
             }
             currentEvent = ''
             currentData = ''
@@ -77,13 +77,14 @@ export function useSSE() {
       // treated as trailing data for the last event.
       const remainder = buffer.trim()
       if (remainder) {
-        currentData += remainder
+        const stripped = remainder.startsWith('data: ') ? remainder.slice(6) : remainder
+        currentData += (currentData ? '\n' : '') + stripped
       }
       if (currentEvent && currentData) {
         try {
           const parsed = JSON.parse(currentData)
           dispatchEvent(currentEvent, parsed, callbacks)
-        } catch { /* skip malformed */ }
+        } catch { console.warn('SSE: malformed final event data', currentData) }
       }
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return

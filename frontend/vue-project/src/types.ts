@@ -39,7 +39,7 @@ export interface ToolCallInfo {
 }
 
 export interface ChatSession {
-  id: string;
+  chat_id: string;
   title?: string;
   messages: Message[];
   executed_tool_list: ToolCallInfo[];

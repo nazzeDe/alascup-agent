@@ -8,38 +8,52 @@ const props = defineProps<{ message: Message }>()
 
 const contentRef = ref<HTMLElement | null>(null)
 
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node instanceof HTMLAnchorElement) {
+    const href = node.getAttribute('href')
+    if (href && !/^(https?:|\/|mailto:|#)/.test(href)) {
+      node.removeAttribute('href')
+    }
+  }
+})
+
 const renderedHtml = computed(() => {
   if (props.message.type === 'assistant' && !props.message.is_meta) {
-    return DOMPurify.sanitize(marked.parse(props.message.content) as string)
+    const raw = marked.parse(props.message.content, { async: false }) as string
+    return DOMPurify.sanitize(raw)
   }
   return ''
 })
 
-// Apply syntax highlighting after DOM update
-watch(renderedHtml, async () => {
+let hljsLoaded = false
+
+async function highlightCodeBlocks() {
   await nextTick()
-  if (contentRef.value) {
-    const codeBlocks = contentRef.value.querySelectorAll('pre code')
-    if (codeBlocks.length > 0) {
-      try {
-        const hljs = (await import('highlight.js/lib/core')).default
-        const bash = (await import('highlight.js/lib/languages/bash')).default
-        const json = (await import('highlight.js/lib/languages/json')).default
-        const python = (await import('highlight.js/lib/languages/python')).default
-        hljs.registerLanguage('bash', bash)
-        hljs.registerLanguage('json', json)
-        hljs.registerLanguage('python', python)
-        codeBlocks.forEach(block => hljs.highlightElement(block as HTMLElement))
-      } catch {
-        // highlight.js not available — gracefully degrade
-      }
+  if (!contentRef.value) return
+  const codeBlocks = contentRef.value.querySelectorAll('pre code')
+  if (codeBlocks.length === 0) return
+  try {
+    if (!hljsLoaded) {
+      const hljs = (await import('highlight.js/lib/core')).default
+      const bash = (await import('highlight.js/lib/languages/bash')).default
+      const json = (await import('highlight.js/lib/languages/json')).default
+      const python = (await import('highlight.js/lib/languages/python')).default
+      hljs.registerLanguage('bash', bash)
+      hljs.registerLanguage('json', json)
+      hljs.registerLanguage('python', python)
+      hljsLoaded = true
     }
+    const hljs = (await import('highlight.js/lib/core')).default
+    codeBlocks.forEach(block => hljs.highlightElement(block as HTMLElement))
+  } catch {
+    console.warn('highlight.js not available, code blocks will not be syntax-highlighted')
   }
-})
+}
+
+watch(renderedHtml, highlightCodeBlocks)
 </script>
 
 <template>
-  <!-- FE-012: is_meta takes precedence over type -->
   <div v-if="message.is_meta" class="d-flex justify-content-center mb-2">
     <div class="chat-meta text-muted small">
       {{ message.content }}
