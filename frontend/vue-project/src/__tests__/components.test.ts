@@ -66,7 +66,7 @@ describe('ToolCallCard', () => {
     const { default: ToolCallCard } = await import('@/components/ToolCallCard.vue')
     const wrapper = mount(ToolCallCard, {
       props: {
-        toolCall: {
+        tool_call: {
           message_id: 'tc1',
           chat_id: 'c1',
           tool_name: 'get_cpu_info',
@@ -84,7 +84,7 @@ describe('ToolCallCard', () => {
     const { default: ToolCallCard } = await import('@/components/ToolCallCard.vue')
     const wrapper = mount(ToolCallCard, {
       props: {
-        toolCall: {
+        tool_call: {
           message_id: 'tc1',
           chat_id: 'c1',
           tool_name: 'get_cpu',
@@ -109,10 +109,10 @@ describe('ApprovalModal', () => {
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: true,
-        toolName: 'delete_temp_files',
+        tool_name: 'delete_temp_files',
         params: { path: '/tmp' },
         reason: 'High risk operation',
-        requestId: 'r1',
+        request_id: 'r1',
       },
     })
     expect(wrapper.text()).toContain('delete_temp_files')
@@ -124,10 +124,10 @@ describe('ApprovalModal', () => {
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: true,
-        toolName: 'rm',
+        tool_name: 'rm',
         params: {},
         reason: 'Destructive',
-        requestId: 'r1',
+        request_id: 'r1',
       },
     })
     const approveBtn = wrapper.find('.btn-approve')
@@ -143,10 +143,10 @@ describe('ApprovalModal', () => {
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: true,
-        toolName: 'rm',
+        tool_name: 'rm',
         params: {},
         reason: 'Destructive',
-        requestId: 'r1',
+        request_id: 'r1',
       },
     })
     const rejectBtn = wrapper.find('.btn-reject')
@@ -161,10 +161,10 @@ describe('ApprovalModal', () => {
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: false,
-        toolName: 'rm',
+        tool_name: 'rm',
         params: {},
         reason: '',
-        requestId: 'r1',
+        request_id: 'r1',
       },
     })
     expect(wrapper.find('.modal').exists()).toBe(false)
@@ -180,7 +180,7 @@ describe('SessionList', () => {
           { chat_id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
           { chat_id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
         ],
-        activeChatId: 'c1',
+        active_chat_id: 'c1',
       },
     })
     expect(wrapper.text()).toContain('Session 1')
@@ -192,7 +192,7 @@ describe('SessionList', () => {
     const wrapper = mount(SessionList, {
       props: {
         sessions: [{ chat_id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
-        activeChatId: undefined,
+        active_chat_id: undefined,
       },
     })
     const item = wrapper.find('.session-item')
@@ -205,7 +205,7 @@ describe('SessionList', () => {
   it('emits create event on new session button click', async () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')
     const wrapper = mount(SessionList, {
-      props: { sessions: [], activeChatId: undefined },
+      props: { sessions: [], active_chat_id: undefined },
     })
     const newBtn = wrapper.find('.btn-new-session')
     if (newBtn.exists()) {
@@ -219,7 +219,7 @@ describe('ChatView', () => {
   it('renders input area with send button', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: false },
+      props: { messages: [], tool_calls: new Map(), is_streaming: false },
     })
     expect(wrapper.find('textarea').exists()).toBe(true)
     expect(wrapper.find('.btn-send').exists()).toBe(true)
@@ -228,21 +228,21 @@ describe('ChatView', () => {
   it('disables send button when streaming', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: true },
+      props: { messages: [], tool_calls: new Map(), is_streaming: true },
     })
     const btn = wrapper.find('.btn-send')
     expect(btn.attributes('disabled')).toBeDefined()
   })
 
-  it('emits send-message with text on send click', async () => {
+  it('emits send_message with text on send click', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: false },
+      props: { messages: [], tool_calls: new Map(), is_streaming: false },
     })
     const textarea = wrapper.find('textarea')
     await textarea.setValue('Hello')
     await wrapper.find('.btn-send').trigger('click')
-    expect(wrapper.emitted('send-message')?.[0]?.[0]).toBe('Hello')
+    expect(wrapper.emitted('send_message')?.[0]?.[0]).toBe('Hello')
   })
 })
 
@@ -314,8 +314,8 @@ describe('ChatView timeline', () => {
           { message_id: 'm1', chat_id: 'c1', timestamp: new Date(Date.now() - 3000).toISOString(), type: 'user' as const, content: 'hi' },
           { message_id: 'm2', chat_id: 'c1', timestamp: new Date(Date.now() - 1000).toISOString(), type: 'assistant' as const, content: 'Hello' },
         ],
-        toolCalls,
-        isStreaming: false,
+        tool_calls: toolCalls,
+        is_streaming: false,
       },
     })
     // Both messages and tool cards should be present
@@ -328,7 +328,7 @@ describe('ChatView streaming controls', () => {
   it('shows stop button when streaming', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: true },
+      props: { messages: [], tool_calls: new Map(), is_streaming: true },
     })
     // FE-017: stop button visible during streaming
     expect(wrapper.find('.btn-stop').exists()).toBe(true)
@@ -337,7 +337,7 @@ describe('ChatView streaming controls', () => {
   it('emits abort on stop button click', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: true },
+      props: { messages: [], tool_calls: new Map(), is_streaming: true },
     })
     const stopBtn = wrapper.find('.btn-stop')
     if (stopBtn.exists()) {
@@ -349,33 +349,33 @@ describe('ChatView streaming controls', () => {
   it('hides stop button when not streaming', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: false },
+      props: { messages: [], tool_calls: new Map(), is_streaming: false },
     })
     expect(wrapper.find('.btn-stop').exists()).toBe(false)
   })
 })
 
 describe('ChatView loading state', () => {
-  it('shows spinner when isLoadingHistory is true', async () => {
+  it('shows spinner when is_loading_history is true', async () => {
     const { default: ChatView } = await import('@/components/ChatView.vue')
     const wrapper = mount(ChatView, {
-      props: { messages: [], toolCalls: new Map(), isStreaming: false, isLoadingHistory: true },
+      props: { messages: [], tool_calls: new Map(), is_streaming: false, is_loading_history: true },
     })
     expect(wrapper.find('.chat-loading-overlay').exists()).toBe(true)
   })
 })
 
 describe('ApprovalModal processing state', () => {
-  it('shows spinner and disables buttons when isProcessing', async () => {
+  it('shows spinner and disables buttons when is_processing', async () => {
     const { default: ApprovalModal } = await import('@/components/ApprovalModal.vue')
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: true,
-        toolName: 'delete_temp_files',
+        tool_name: 'delete_temp_files',
         params: { path: '/tmp' },
         reason: 'High risk',
-        requestId: 'r1',
-        isProcessing: true,
+        request_id: 'r1',
+        is_processing: true,
       },
     })
     // FE-015: buttons disabled during submission
@@ -390,11 +390,11 @@ describe('ApprovalModal processing state', () => {
     const wrapper = mount(ApprovalModal, {
       props: {
         visible: true,
-        toolName: 'rm',
+        tool_name: 'rm',
         params: {},
         reason: 'Destructive',
-        requestId: 'r1',
-        isProcessing: false,
+        request_id: 'r1',
+        is_processing: false,
       },
     })
     const approveBtn = wrapper.find('.btn-approve')
@@ -408,9 +408,9 @@ describe('SessionList loading states', () => {
     const wrapper = mount(SessionList, {
       props: {
         sessions: [],
-        activeChatId: undefined,
-        isCreating: true,
-        isLoading: false,
+        active_chat_id: undefined,
+        is_creating: true,
+        is_loading: false,
       },
     })
     // FE-018: button shows loading state
@@ -423,9 +423,9 @@ describe('SessionList loading states', () => {
     const wrapper = mount(SessionList, {
       props: {
         sessions: [],
-        activeChatId: undefined,
-        isCreating: false,
-        isLoading: true,
+        active_chat_id: undefined,
+        is_creating: false,
+        is_loading: true,
       },
     })
     expect(wrapper.find('.session-list').exists()).toBe(true)

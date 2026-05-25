@@ -10,7 +10,7 @@ paths:
     get:
       summary: 健康检查
       responses:
-        '200':
+        "200":
           description: 服务正常
           content:
             application/json:
@@ -40,7 +40,7 @@ paths:
               properties:
                 chat_id:
                   type: string
-                  description: 已存在会话的 ID；不传则自动创建新会话
+                  description: 已存在会话的 _id；不传则自动创建新会话
                 message:
                   type: string
                   description: 用户输入文本
@@ -51,32 +51,32 @@ paths:
                   type: object
                   description: 传递给 LLMAdapter 的可选运行时参数（max_tokens 等）
       responses:
-        '200':
+        "200":
           description: SSE 事件流（text/event-stream）
-        '400':
+        "400":
           description: 请求参数错误
 
   /sessions:
     get:
       summary: 列出全部会话
       responses:
-        '200':
+        "200":
           description: 会话摘要列表
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/ChatSession'
+                  $ref: "#/components/schemas/ChatSession"
     post:
       summary: 创建新会话
       responses:
-        '201':
+        "201":
           description: 会话已创建
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatSession'
+                $ref: "#/components/schemas/ChatSession"
 
   /sessions/{chat_id}:
     get:
@@ -88,13 +88,13 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: ChatSession
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ChatSession'
-        '404':
+                $ref: "#/components/schemas/ChatSession"
+        "404":
           description: 会话不存在
 
   /tools:
@@ -102,14 +102,14 @@ paths:
       summary: 列出全部可用工具
       description: 返回 tool-server 和 rag-server 注册的全部 MCP 工具元数据
       responses:
-        '200':
+        "200":
           description: 工具列表
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Tool'
+                  $ref: "#/components/schemas/Tool"
 
   /tool-requests/{request_id}:
     get:
@@ -121,13 +121,13 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        "200":
           description: ToolRequest
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ToolRequest'
-        '404':
+                $ref: "#/components/schemas/ToolRequest"
+        "404":
           description: 请求不存在
 
   /tool-requests/{request_id}/approval:
@@ -145,15 +145,15 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ToolApproval'
+              $ref: "#/components/schemas/ToolApproval"
       responses:
-        '200':
+        "200":
           description: 审批已处理
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ToolRequest'
-        '404':
+                $ref: "#/components/schemas/ToolRequest"
+        "404":
           description: 请求不存在或已过期
 
 components:
@@ -207,9 +207,17 @@ components:
 
     ToolCall:
       allOf:
-        - $ref: '#/components/schemas/Tool'
+        - $ref: "#/components/schemas/Tool"
         - type: object
-          required: [chat_id, message_id, params, approval_status, execution_status, timestamp]
+          required:
+            [
+              chat_id,
+              message_id,
+              params,
+              approval_status,
+              execution_status,
+              timestamp,
+            ]
           properties:
             chat_id:
               type: string
@@ -238,9 +246,17 @@ components:
 
     ToolRequest:
       allOf:
-        - $ref: '#/components/schemas/Tool'
+        - $ref: "#/components/schemas/Tool"
         - type: object
-          required: [chat_id, message_id, request_id, params, approval_status, created_at]
+          required:
+            [
+              chat_id,
+              message_id,
+              request_id,
+              params,
+              approval_status,
+              created_at,
+            ]
           properties:
             chat_id:
               type: string
@@ -302,11 +318,11 @@ components:
         messages:
           type: array
           items:
-            $ref: '#/components/schemas/Message'
+            $ref: "#/components/schemas/Message"
         executed_tool_list:
           type: array
           items:
-            $ref: '#/components/schemas/ToolCall'
+            $ref: "#/components/schemas/ToolCall"
         timestamp:
           type: string
           format: date-time
@@ -419,13 +435,22 @@ components:
       properties:
         event:
           type: string
-          enum: [assistant, reasoning, tool_call, tool_result, tool_approval_required, error, done]
+          enum:
+            [
+              assistant,
+              reasoning,
+              tool_call,
+              tool_result,
+              tool_approval_required,
+              error,
+              done,
+            ]
         data:
           oneOf:
-            - $ref: '#/components/schemas/AssistantEventData'
-            - $ref: '#/components/schemas/ReasoningEventData'
-            - $ref: '#/components/schemas/ToolCallEventData'
-            - $ref: '#/components/schemas/ToolResultEventData'
-            - $ref: '#/components/schemas/ToolApprovalRequiredEventData'
-            - $ref: '#/components/schemas/ErrorEventData'
-            - $ref: '#/components/schemas/DoneEventData'
+            - $ref: "#/components/schemas/AssistantEventData"
+            - $ref: "#/components/schemas/ReasoningEventData"
+            - $ref: "#/components/schemas/ToolCallEventData"
+            - $ref: "#/components/schemas/ToolResultEventData"
+            - $ref: "#/components/schemas/ToolApprovalRequiredEventData"
+            - $ref: "#/components/schemas/ErrorEventData"
+            - $ref: "#/components/schemas/DoneEventData"

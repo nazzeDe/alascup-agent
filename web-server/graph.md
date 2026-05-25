@@ -566,7 +566,7 @@ classDiagram
     namespace models {
         class Message {
             +messageID
-            +chatID
+            +chat_id
             +type: user|assistant|tool_call|tool_result|system
             +content
             +isMeta
@@ -580,7 +580,7 @@ classDiagram
             +is_rollbackable
         }
         class ToolCall {
-            +chatID
+            +chat_id
             +messageID
             +params
             +approval_status
@@ -600,7 +600,7 @@ classDiagram
             +error
         }
         class ChatSession {
-            +chatID
+            +chat_id
             +messages[]
             +executed_tool_list[]
         }

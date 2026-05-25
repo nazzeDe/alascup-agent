@@ -8,25 +8,25 @@ import ReasoningBubble from './ReasoningBubble.vue'
 
 const props = withDefaults(defineProps<{
   messages: Message[]
-  toolCalls: Map<string, ToolCallInfo>
+  tool_calls: Map<string, ToolCallInfo>
   reasonings?: ReasoningEntry[]
-  isStreaming: boolean
-  isLoadingHistory?: boolean
-  phaseLabel?: string
+  is_streaming: boolean
+  is_loading_history?: boolean
+  phase_label?: string
 }>(), {
   reasonings: () => [],
-  phaseLabel: '',
-  isLoadingHistory: false,
+  phase_label: '',
+  is_loading_history: false,
 })
 
 const emit = defineEmits<{
-  'send-message': [text: string]
+  send_message: [text: string]
   abort: []
 }>()
 
-const inputText = ref('')
-const messagesContainer = ref<HTMLElement | null>(null)
-const userScrolledUp = ref(false)
+const input_text = ref('')
+const messages_container = ref<HTMLElement | null>(null)
+const user_scrolled_up = ref(false)
 
 type TimelineItem =
   | { type: 'message'; data: Message; ts: number }
@@ -39,7 +39,7 @@ const timeline = computed(() => {
   for (const m of props.messages) {
     items.push({ type: 'message', data: m, ts: new Date(m.timestamp).getTime() })
   }
-  props.toolCalls.forEach((tc) => {
+  props.tool_calls.forEach((tc) => {
     items.push({ type: 'tool_card', data: tc, ts: new Date(tc.timestamp).getTime() })
   })
   for (const r of props.reasonings) {
@@ -50,34 +50,34 @@ const timeline = computed(() => {
   return items
 })
 
-function checkAutoScroll() {
-  if (userScrolledUp.value) return
+function check_auto_scroll() {
+  if (user_scrolled_up.value) return
   nextTick(() => {
-    if (messagesContainer.value) {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    if (messages_container.value) {
+      messages_container.value.scrollTop = messages_container.value.scrollHeight
     }
   })
 }
 
 watch(
   () => timeline.value.length,
-  checkAutoScroll,
+  check_auto_scroll,
 )
 
-function onScroll() {
-  if (!messagesContainer.value) return
-  const { scrollTop, clientHeight, scrollHeight } = messagesContainer.value
-  userScrolledUp.value = scrollTop + clientHeight < scrollHeight - 50
+function on_scroll() {
+  if (!messages_container.value) return
+  const { scrollTop, clientHeight, scrollHeight } = messages_container.value
+  user_scrolled_up.value = scrollTop + clientHeight < scrollHeight - 50
 }
 
 function send() {
-  const text = inputText.value.trim()
-  if (!text || props.isStreaming) return
-  emit('send-message', text)
-  inputText.value = ''
+  const text = input_text.value.trim()
+  if (!text || props.is_streaming) return
+  emit('send_message', text)
+  input_text.value = ''
 }
 
-function onKeydown(e: KeyboardEvent) {
+function on_keydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
@@ -88,17 +88,17 @@ function onKeydown(e: KeyboardEvent) {
 <template>
   <div class="chat-view d-flex flex-column flex-grow-1 overflow-hidden">
     <div
-      ref="messagesContainer"
+      ref="messages_container"
       class="chat-messages flex-grow-1 overflow-auto p-3"
-      @scroll="onScroll"
+      @scroll="on_scroll"
     >
       <template v-for="item in timeline" :key="item.type + '-' + (item.type === 'message' ? item.data.message_id : item.type === 'reasoning' ? (item.data as ReasoningEntry).message_id : (item.data as ToolCallInfo).message_id)">
         <ReasoningBubble v-if="item.type === 'reasoning'" :reasoning="item.data as ReasoningEntry" />
         <MessageItem v-else-if="item.type === 'message'" :message="item.data as Message" />
-        <ToolCallCard v-else :tool-call="item.data as ToolCallInfo" />
+        <ToolCallCard v-else :tool_call="item.data as ToolCallInfo" />
       </template>
 
-      <div v-if="isLoadingHistory" class="chat-loading-overlay text-center p-3">
+      <div v-if="is_loading_history" class="chat-loading-overlay text-center p-3">
         <div class="spinner-border text-muted" role="status">
           <span class="visually-hidden">Loading history...</span>
         </div>
@@ -110,30 +110,30 @@ function onKeydown(e: KeyboardEvent) {
     </div>
 
     <!-- Scroll-to-bottom floating button -->
-    <div v-if="userScrolledUp && isStreaming" class="scroll-bottom-btn" @click="userScrolledUp = false; checkAutoScroll()">
+    <div v-if="user_scrolled_up && is_streaming" class="scroll-bottom-btn" @click="user_scrolled_up = false; check_auto_scroll()">
       ↓
     </div>
 
     <!-- Streaming status bar -->
-    <div v-if="isStreaming" class="streaming-status d-flex align-items-center px-3 py-2 border-top">
+    <div v-if="is_streaming" class="streaming-status d-flex align-items-center px-3 py-2 border-top">
       <div class="pulse-dot me-2"></div>
-      <span class="small text-muted flex-grow-1">{{ phaseLabel || 'AI is responding…' }}</span>
+      <span class="small text-muted flex-grow-1">{{ phase_label || 'AI is responding…' }}</span>
       <button class="btn btn-outline-danger btn-sm btn-stop" @click="emit('abort')">Stop</button>
     </div>
 
     <div class="chat-input border-top p-2">
       <div class="input-group">
         <textarea
-          v-model="inputText"
+          v-model="input_text"
           class="form-control"
           rows="2"
           placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
-          :disabled="isStreaming"
-          @keydown="onKeydown"
+          :disabled="is_streaming"
+          @keydown="on_keydown"
         ></textarea>
         <button
           class="btn btn-primary btn-send"
-          :disabled="isStreaming || !inputText.trim()"
+          :disabled="is_streaming || !input_text.trim()"
           @click="send"
         >
           Send

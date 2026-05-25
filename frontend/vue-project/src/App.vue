@@ -8,13 +8,20 @@ import ChatView from '@/components/ChatView.vue'
 import ApprovalModal from '@/components/ApprovalModal.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 
-const { messages, toolCalls, reasonings, isStreaming, phaseLabel, approvalPending, isLoadingHistory, sendMessage, submitApproval, loadHistory, resetChat, abort } = useChat({
-  onChatCreated(chatId: string) {
+const {
+  messages, toolCalls, reasonings, is_streaming, phaseLabel,
+  approval_pending, isLoadingHistory,
+  sendMessage, submitApproval, loadHistory, resetChat, abort,
+} = useChat({
+  on_chat_created(chatId: string) {
     activeChatId.value = chatId
     loadSessions()
   },
 })
-const { sessions, activeChatId, isLoadingSessions, isCreatingSession, loadError, loadSessions, createSession, switchSession } = useSessions()
+const {
+  sessions, activeChatId, isLoadingSessions, isCreatingSession, loadError,
+  loadSessions, createSession, switchSession,
+} = useSessions()
 
 const isProcessingApproval = ref(false)
 
@@ -64,9 +71,9 @@ async function handleReject(requestId: string, reason?: string) {
       <div class="col-md-3 col-lg-2 p-0 border-end bg-light d-flex flex-column overflow-hidden">
         <SessionList
           :sessions="sessions"
-          :active-chat-id="activeChatId"
-          :is-creating="isCreatingSession"
-          :is-loading="isLoadingSessions"
+          :active_chat_id="activeChatId"
+          :is_creating="isCreatingSession"
+          :is_loading="isLoadingSessions"
           :error="loadError"
           @select="handleSelectSession"
           @create="handleCreateSession"
@@ -76,25 +83,25 @@ async function handleReject(requestId: string, reason?: string) {
       <div class="col-md-9 col-lg-10 p-0 d-flex flex-column overflow-hidden">
         <ChatView
           :messages="messages"
-          :tool-calls="toolCalls"
+          :tool_calls="toolCalls"
           :reasonings="reasonings"
-          :is-streaming="isStreaming"
-          :phase-label="phaseLabel"
-          :is-loading-history="isLoadingHistory"
-          @send-message="handleSendMessage"
+          :is_streaming="is_streaming"
+          :phase_label="phaseLabel"
+          :is_loading_history="isLoadingHistory"
+          @send_message="handleSendMessage"
           @abort="handleAbort"
         />
       </div>
     </div>
 
     <ApprovalModal
-      v-if="approvalPending"
+      v-if="approval_pending"
       :visible="true"
-      :tool-name="approvalPending.tool_name"
-      :params="approvalPending.params"
-      :reason="approvalPending.reason"
-      :request-id="approvalPending.request_id"
-      :is-processing="isProcessingApproval"
+      :tool_name="approval_pending.tool_name"
+      :params="approval_pending.params"
+      :reason="approval_pending.reason"
+      :request_id="approval_pending.request_id"
+      :is_processing="isProcessingApproval"
       @approve="handleApprove"
       @reject="handleReject"
     />

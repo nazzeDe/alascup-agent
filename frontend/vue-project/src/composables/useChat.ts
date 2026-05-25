@@ -30,15 +30,15 @@ export interface ReasoningEntry {
   timestamp: string
 }
 
-export function useChat(options?: { onChatCreated?: (chatId: string) => void }) {
-  const { connect, abort: sseAbort, isStreaming } = useSSE()
+export function useChat(options?: { on_chat_created?: (chat_id: string) => void }) {
+  const { connect, abort: sseAbort, isStreaming: is_streaming } = useSSE()
   const { showToast } = useToast()
 
   function abort(): void {
     sseAbort()
-    approvalPending.value = null
-    currentActivity.value = ''
-    agentPhase.value = 'idle'
+    approval_pending.value = null
+    current_activity.value = ''
+    agent_phase.value = 'idle'
     reasonings.value = reasonings.value.map(r => ({ ...r, done: true }))
   }
 
@@ -46,10 +46,10 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
   const toolCalls: Ref<Map<string, ToolCallInfo>> = ref(new Map())
   const reasonings: Ref<ReasoningEntry[]> = ref([])
   const isLoadingHistory: Ref<boolean> = ref(false)
-  const agentPhase: Ref<AgentPhase> = ref('idle')
-  const currentActivity: Ref<string> = ref('')
+  const agent_phase: Ref<AgentPhase> = ref('idle')
+  const current_activity: Ref<string> = ref('')
 
-  const approvalPending: Ref<{
+  const approval_pending: Ref<{
     request_id: string
     tool_name: string
     params: Record<string, unknown>
@@ -57,40 +57,38 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
     chat_id: string
   } | null> = ref(null)
 
-  function sendMessage(text: string, chatId: string | undefined, options?: { model?: string; maxTurns?: number }): void {
-    approvalPending.value = null
-    currentActivity.value = ''
+  function sendMessage(text: string, chat_id: string | undefined, options?: { model?: string; maxTurns?: number }): void {
+    approval_pending.value = null
+    current_activity.value = ''
 
-    const isNewChat = !chatId
+    const isNewChat = !chat_id
 
     const userMsg: Message = {
       message_id: crypto.randomUUID(),
-      chat_id: chatId ?? '',
+      chat_id: chat_id ?? '',
       timestamp: new Date().toISOString(),
       type: 'user',
       content: text,
     }
     messages.value = [...messages.value, userMsg]
     reasonings.value = []
-    agentPhase.value = 'thinking'
+    agent_phase.value = 'thinking'
 
-    let currentAssistantMsgId = ''
-    let assistantBuffer = ''
-    let currentReasoningId = ''
-    let reasoningBuffer = ''
+    let current_assistant_msg_id = ''
+    let assistant_buffer = ''
+    let current_reasoning_id = ''
+    let reasoning_buffer = ''
 
     connect(
-      { chatId, message: text, model: options?.model, maxTurns: options?.maxTurns },
+      { chat_id, message: text, model: options?.model, max_turns: options?.maxTurns },
       {
-        onReasoning(data: ReasoningEvent) {
-          // Show last 50 chars of reasoning as activity
+        on_reasoning(data: ReasoningEvent) {
           const text = data.delta
           if (text) {
-            currentActivity.value = text.length > 50 ? '…' + text.slice(-50) : text
+            current_activity.value = text.length > 50 ? '…' + text.slice(-50) : text
           }
           if (data.done) {
-            // Batch reasoning from emit_events — dedup by message_id
-            const msgId = data.message_id
+            const msgId = data.message_id ?? ''
             const existing = msgId ? reasonings.value.find(r => r.message_id === msgId) : undefined
             if (existing) {
               reasonings.value = reasonings.value.map(r =>
@@ -99,7 +97,7 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
             } else {
               reasonings.value = [...reasonings.value, {
                 message_id: data.message_id ?? crypto.randomUUID(),
-                chat_id: data.chat_id ?? chatId ?? '',
+                chat_id: data.chat_id ?? chat_id ?? '',
                 content: data.delta,
                 done: true,
                 timestamp: new Date().toISOString(),
@@ -107,43 +105,41 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
             }
             return
           }
-          // Streaming reasoning delta
-          if (!currentReasoningId) {
-            currentReasoningId = crypto.randomUUID()
-            reasoningBuffer = ''
+          if (!current_reasoning_id) {
+            current_reasoning_id = crypto.randomUUID()
+            reasoning_buffer = ''
           }
-          reasoningBuffer += data.delta
-          const existingIdx = reasonings.value.findIndex(r => r.message_id === currentReasoningId)
-          if (existingIdx !== -1) {
+          reasoning_buffer += data.delta
+          const existing_idx = reasonings.value.findIndex(r => r.message_id === current_reasoning_id)
+          if (existing_idx !== -1) {
             const updated = [...reasonings.value]
-            updated[existingIdx] = { ...updated[existingIdx]!, content: reasoningBuffer }
+            updated[existing_idx] = { ...updated[existing_idx]!, content: reasoning_buffer }
             reasonings.value = updated
           } else {
             reasonings.value = [...reasonings.value, {
-              message_id: currentReasoningId,
-              chat_id: data.chat_id ?? chatId ?? '',
-              content: reasoningBuffer,
+              message_id: current_reasoning_id,
+              chat_id: data.chat_id ?? chat_id ?? '',
+              content: reasoning_buffer,
               done: false,
               timestamp: new Date().toISOString(),
             }]
           }
         },
 
-        onAssistant(data: AssistantEvent) {
-          // Finalize any current reasoning entry
-          if (currentReasoningId) {
+        on_assistant(data: AssistantEvent) {
+          if (current_reasoning_id) {
             reasonings.value = reasonings.value.map(r =>
-              r.message_id === currentReasoningId ? { ...r, done: true } : r
+              r.message_id === current_reasoning_id ? { ...r, done: true } : r
             )
-            currentReasoningId = ''
-            reasoningBuffer = ''
+            current_reasoning_id = ''
+            reasoning_buffer = ''
           }
-          agentPhase.value = 'responding'
-          currentActivity.value = ''
+          agent_phase.value = 'responding'
+          current_activity.value = ''
 
-          if (data.message_id !== currentAssistantMsgId) {
-            currentAssistantMsgId = data.message_id
-            assistantBuffer = ''
+          if (data.message_id !== current_assistant_msg_id) {
+            current_assistant_msg_id = data.message_id
+            assistant_buffer = ''
             messages.value = [...messages.value, {
               message_id: data.message_id,
               chat_id: data.chat_id,
@@ -152,18 +148,18 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
               content: '',
             }]
           }
-          assistantBuffer += data.delta
-          const idx = messages.value.findIndex(m => m.message_id === currentAssistantMsgId)
+          assistant_buffer += data.delta
+          const idx = messages.value.findIndex(m => m.message_id === current_assistant_msg_id)
           if (idx !== -1) {
             const updated = [...messages.value]
-            updated[idx] = { ...updated[idx]!, content: assistantBuffer }
+            updated[idx] = { ...updated[idx]!, content: assistant_buffer }
             messages.value = updated
           }
         },
 
-        onToolCall(data: ToolCallEvent) {
-          agentPhase.value = 'calling_tool'
-          currentActivity.value = data.tool_name
+        on_tool_call(data: ToolCallEvent) {
+          agent_phase.value = 'calling_tool'
+          current_activity.value = data.tool_name
 
           const tc: ToolCallInfo = {
             message_id: data.message_id,
@@ -180,7 +176,7 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
           toolCalls.value = updated
         },
 
-        onToolResult(data: ToolResultEvent) {
+        on_tool_result(data: ToolResultEvent) {
           const existing = toolCalls.value.get(data.message_id)
           if (existing) {
             const updated = new Map(toolCalls.value)
@@ -195,21 +191,21 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
           }
         },
 
-        onToolApprovalRequired(data: ToolApprovalRequiredEvent) {
-          approvalPending.value = { ...data }
-          agentPhase.value = 'awaiting_approval'
-          currentActivity.value = data.tool_name
+        on_tool_approval_required(data: ToolApprovalRequiredEvent) {
+          approval_pending.value = { ...data }
+          agent_phase.value = 'awaiting_approval'
+          current_activity.value = data.tool_name
         },
 
-        onError(data: ErrorEvent) {
+        on_error(data: ErrorEvent) {
           showToast('error', `${data.code}: ${data.message}`, data.code)
         },
 
-        onDone(_data: DoneEvent) {
-          agentPhase.value = 'done'
-          currentActivity.value = ''
+        on_done(_data: DoneEvent) {
+          agent_phase.value = 'done'
+          current_activity.value = ''
           if (isNewChat && _data.chat_id) {
-            options?.onChatCreated?.(_data.chat_id)
+            options?.on_chat_created?.(_data.chat_id)
           }
         },
       },
@@ -221,7 +217,7 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
     status: 'APPROVED' | 'REJECTED',
     reason?: string
   ): Promise<void> {
-    const pending = approvalPending.value
+    const pending = approval_pending.value
 
     try {
       const res = await fetch(`/api/tool-requests/${requestId}/approval`, {
@@ -230,7 +226,7 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
         body: JSON.stringify({ approval_status: status, reason }),
       })
       if (res.ok) {
-        approvalPending.value = null
+        approval_pending.value = null
         if (status === 'REJECTED') {
           messages.value = [...messages.value, {
             message_id: crypto.randomUUID(),
@@ -241,8 +237,8 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
             is_meta: true,
           }]
         }
-        agentPhase.value = 'thinking'
-        currentActivity.value = 'Processing…'
+        agent_phase.value = 'thinking'
+        current_activity.value = 'Processing…'
       } else {
         showToast('error', `Approval failed: server returned ${res.status}`)
       }
@@ -253,9 +249,9 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
 
   async function loadHistory(chatId: string): Promise<boolean> {
     isLoadingHistory.value = true
-    approvalPending.value = null
-    agentPhase.value = 'idle'
-    currentActivity.value = ''
+    approval_pending.value = null
+    agent_phase.value = 'idle'
+    current_activity.value = ''
     try {
       const res = await fetch(`/api/sessions/${chatId}`)
       if (!res.ok) {
@@ -282,8 +278,8 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
   }
 
   const phaseLabel = computed(() => {
-    const detail = currentActivity.value
-    switch (agentPhase.value) {
+    const detail = current_activity.value
+    switch (agent_phase.value) {
       case 'thinking':
         return detail ? `Thinking: ${detail}` : 'Thinking…'
       case 'calling_tool':
@@ -304,19 +300,19 @@ export function useChat(options?: { onChatCreated?: (chatId: string) => void }) 
     messages.value = []
     toolCalls.value = new Map()
     reasonings.value = []
-    agentPhase.value = 'idle'
-    currentActivity.value = ''
+    agent_phase.value = 'idle'
+    current_activity.value = ''
   }
 
   return {
     messages,
     toolCalls,
     reasonings,
-    isStreaming,
-    agentPhase,
+    is_streaming,
+    agent_phase,
     phaseLabel,
-    currentActivity,
-    approvalPending,
+    current_activity,
+    approval_pending,
     isLoadingHistory,
     sendMessage,
     submitApproval,

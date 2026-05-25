@@ -16,7 +16,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { messages, sendMessage } = useChat()
@@ -40,7 +40,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { messages, sendMessage } = useChat()
@@ -64,7 +64,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { toolCalls, sendMessage } = useChat()
@@ -88,7 +88,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { toolCalls, sendMessage } = useChat()
@@ -111,15 +111,15 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
-    const { approvalPending, sendMessage } = useChat()
+    const { approval_pending, sendMessage } = useChat()
 
     sendMessage('remove tmp', 'c1')
     await vi.waitFor(() => {
-      expect(approvalPending.value).not.toBeNull()
-      expect(approvalPending.value!.request_id).toBe('r1')
+      expect(approval_pending.value).not.toBeNull()
+      expect(approval_pending.value!.request_id).toBe('r1')
     }, { timeout: 1000 })
   })
 
@@ -134,7 +134,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { messages, toolCalls, sendMessage } = useChat()
@@ -168,10 +168,10 @@ describe('useChat message management', () => {
     mockFetch.mockRejectedValue(new Error('Network failure'))
 
     const { useChat } = await import('@/composables/useChat')
-    const { approvalPending, submitApproval } = useChat()
+    const { approval_pending, submitApproval } = useChat()
 
     // Simulate approval pending
-    approvalPending.value = {
+    approval_pending.value = {
       request_id: 'r1',
       tool_name: 'rm',
       params: {},
@@ -185,16 +185,16 @@ describe('useChat message management', () => {
       // Expected throw from mockRejectedValue
     }
     // FE-015: modal must stay open on error
-    expect(approvalPending.value).not.toBeNull()
+    expect(approval_pending.value).not.toBeNull()
   })
 
   it('submitApproval keeps modal open on non-ok response', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 })
 
     const { useChat } = await import('@/composables/useChat')
-    const { approvalPending, submitApproval } = useChat()
+    const { approval_pending, submitApproval } = useChat()
 
-    approvalPending.value = {
+    approval_pending.value = {
       request_id: 'r1',
       tool_name: 'rm',
       params: {},
@@ -204,7 +204,7 @@ describe('useChat message management', () => {
 
     await submitApproval('r1', 'APPROVED')
     // FE-015: modal must stay open on server error
-    expect(approvalPending.value).not.toBeNull()
+    expect(approval_pending.value).not.toBeNull()
   })
 
   it('onError does not append system message to messages[] for transient errors', async () => {
@@ -218,7 +218,7 @@ describe('useChat message management', () => {
         controller.close()
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
     const { messages, sendMessage } = useChat()
@@ -242,23 +242,23 @@ describe('useChat message management', () => {
         // Don't close — simulate ongoing stream
       },
     })
-    mockFetch.mockResolvedValue({ ok: true, body: stream })
+    mockFetch.mockResolvedValue({ ok: true, status: 200, statusText: 'OK', headers: new Headers({ 'content-type': 'text/event-stream' }), body: stream })
 
     const { useChat } = await import('@/composables/useChat')
-    const { isStreaming, sendMessage, abort } = useChat()
+    const { is_streaming, sendMessage, abort } = useChat()
 
     // Start sending but don't await — we want to abort mid-stream
     sendMessage('test', 'c1')
 
     await vi.waitFor(() => {
-      expect(isStreaming.value).toBe(true)
+      expect(is_streaming.value).toBe(true)
     }, { timeout: 500 })
 
     abort()
 
     await vi.waitFor(() => {
-      // FE-017: isStreaming should become false after abort
-      expect(isStreaming.value).toBe(false)
+      // FE-017: is_streaming should become false after abort
+      expect(is_streaming.value).toBe(false)
     }, { timeout: 500 })
   })
 })

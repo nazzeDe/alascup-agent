@@ -106,11 +106,11 @@ export type SSEEventType =
   | "done";
 
 export interface SSECallbacks {
-  onAssistant?: (data: AssistantEvent) => void;
-  onReasoning?: (data: ReasoningEvent) => void;
-  onToolCall?: (data: ToolCallEvent) => void;
-  onToolResult?: (data: ToolResultEvent) => void;
-  onToolApprovalRequired?: (data: ToolApprovalRequiredEvent) => void;
-  onError?: (data: ErrorEvent) => void;
-  onDone?: (data: DoneEvent) => void;
+  on_assistant?: (data: AssistantEvent) => void;
+  on_reasoning?: (data: ReasoningEvent) => void;
+  on_tool_call?: (data: ToolCallEvent) => void;
+  on_tool_result?: (data: ToolResultEvent) => void;
+  on_tool_approval_required?: (data: ToolApprovalRequiredEvent) => void;
+  on_error?: (data: ErrorEvent) => void;
+  on_done?: (data: DoneEvent) => void;
 }

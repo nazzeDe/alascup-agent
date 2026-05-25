@@ -16,6 +16,7 @@
     "test:e2e:live": "playwright test --config playwright.e2e-live.config.ts"
   },
   "dependencies": {
+    "@microsoft/fetch-event-source": "^2.0.1",
     "bootstrap": "^5.3.6",
     "dompurify": "^3.4.5",
     "highlight.js": "^11.11.1",

@@ -4,9 +4,9 @@ import type { ChatSession } from '@/types'
 
 const props = defineProps<{
   sessions: ChatSession[]
-  activeChatId?: string
-  isCreating?: boolean
-  isLoading?: boolean
+  active_chat_id?: string
+  is_creating?: boolean
+  is_loading?: boolean
   error?: string
 }>()
 
@@ -59,15 +59,15 @@ const groups = computed<Group[]>(() => {
     <div class="p-2 border-bottom">
       <button
         class="btn btn-primary btn-sm w-100 btn-new-session"
-        :disabled="isCreating"
+        :disabled="is_creating"
         @click="emit('create')"
       >
-        <span v-if="isCreating" class="spinner-border spinner-border-sm me-1"></span>
+        <span v-if="is_creating" class="spinner-border spinner-border-sm me-1"></span>
         + New Session
       </button>
     </div>
     <div class="flex-grow-1 overflow-auto">
-      <div v-if="isLoading" class="p-3 text-muted small text-center">
+      <div v-if="is_loading" class="p-3 text-muted small text-center">
         <div class="spinner-border spinner-border-sm" role="status">
           <span class="visually-hidden">Loading...</span>
         </div>
@@ -79,7 +79,7 @@ const groups = computed<Group[]>(() => {
           <div
             v-for="session in group.sessions"
             :key="session.chat_id"
-            :class="['session-item p-2 border-bottom', { active: session.chat_id === activeChatId }]"
+            :class="['session-item p-2 border-bottom', { active: session.chat_id === active_chat_id }]"
             @click="emit('select', session.chat_id)"
           >
             <div class="fw-semibold small text-truncate">

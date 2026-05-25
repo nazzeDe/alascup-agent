@@ -1,11 +1,12 @@
 import { ref, type Ref } from 'vue'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
 import type { SSECallbacks, SSEEventType } from '@/types'
 
 interface SSEOptions {
-  chatId?: string
+  chat_id?: string
   message: string
   model?: string
-  maxTurns?: number
+  max_turns?: number
 }
 
 export function useSSE() {
@@ -17,78 +18,36 @@ export function useSSE() {
     isStreaming.value = true
 
     const body: Record<string, unknown> = { message: options.message }
-    if (options.chatId) body.chat_id = options.chatId
+    if (options.chat_id) body.chat_id = options.chat_id
     if (options.model) body.model = options.model
-    if (options.maxTurns) body.max_turns = options.maxTurns
+    if (options.max_turns) body.max_turns = options.max_turns
 
     try {
-      const response = await fetch('/api/chat-turn', {
+      await fetchEventSource('/api/chat-turn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
         body: JSON.stringify(body),
         signal: abortController.signal,
-      })
-
-      if (!response.ok) {
-        callbacks.onError?.({ code: 'HTTP_ERROR', message: `Server returned ${response.status}` })
-        return
-      }
-
-      const reader = response.body?.getReader() ?? null
-      if (!reader) {
-        callbacks.onError?.({ code: 'STREAM_ERROR', message: 'No response body' })
-        return
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let currentEvent: SSEEventType | '' = ''
-      let currentData = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const rawLine of lines) {
-          const line = rawLine.replace(/\r$/, '')
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim() as SSEEventType
-          } else if (line.startsWith('data: ')) {
-            currentData += (currentData ? '\n' : '') + line.slice(6)
-          } else if (line === '') {
-            if (currentEvent && currentData) {
-              try {
-                const parsed = JSON.parse(currentData)
-                dispatchEvent(currentEvent, parsed, callbacks)
-              } catch { console.warn('SSE: malformed event data', currentData) }
-            }
-            currentEvent = ''
-            currentData = ''
+        openWhenHidden: true,
+        onmessage(msg) {
+          if (!msg.event || !msg.data) return
+          try {
+            const parsed = JSON.parse(msg.data)
+            dispatch_event(msg.event as SSEEventType, parsed, callbacks)
+          } catch {
+            console.warn('SSE: malformed event data', msg.data)
           }
-        }
-      }
-
-      // Flush final event in buffer: the un-popped remainder is a partial
-      // line (empty or data), and any non-empty remaining content should be
-      // treated as trailing data for the last event.
-      const remainder = buffer.trim()
-      if (remainder) {
-        const stripped = remainder.startsWith('data: ') ? remainder.slice(6) : remainder
-        currentData += (currentData ? '\n' : '') + stripped
-      }
-      if (currentEvent && currentData) {
-        try {
-          const parsed = JSON.parse(currentData)
-          dispatchEvent(currentEvent, parsed, callbacks)
-        } catch { console.warn('SSE: malformed final event data', currentData) }
-      }
+        },
+        onerror(err) {
+          isStreaming.value = false
+          abortController = null
+          callbacks.on_error?.({ code: 'NETWORK_ERROR', message: String(err) })
+          throw err
+        },
+      })
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      callbacks.onError?.({
+      callbacks.on_error?.({
         code: 'NETWORK_ERROR',
         message: err instanceof Error ? err.message : 'Unknown error',
       })
@@ -106,14 +65,14 @@ export function useSSE() {
   return { connect, abort, isStreaming }
 }
 
-function dispatchEvent(type: SSEEventType, data: unknown, callbacks: SSECallbacks): void {
+function dispatch_event(type: SSEEventType, data: unknown, callbacks: SSECallbacks): void {
   switch (type) {
-    case 'reasoning': callbacks.onReasoning?.(data as never); break
-    case 'assistant': callbacks.onAssistant?.(data as never); break
-    case 'tool_call': callbacks.onToolCall?.(data as never); break
-    case 'tool_result': callbacks.onToolResult?.(data as never); break
-    case 'tool_approval_required': callbacks.onToolApprovalRequired?.(data as never); break
-    case 'error': callbacks.onError?.(data as never); break
-    case 'done': callbacks.onDone?.(data as never); break
+    case 'reasoning': callbacks.on_reasoning?.(data as never); break
+    case 'assistant': callbacks.on_assistant?.(data as never); break
+    case 'tool_call': callbacks.on_tool_call?.(data as never); break
+    case 'tool_result': callbacks.on_tool_result?.(data as never); break
+    case 'tool_approval_required': callbacks.on_tool_approval_required?.(data as never); break
+    case 'error': callbacks.on_error?.(data as never); break
+    case 'done': callbacks.on_done?.(data as never); break
   }
 }
