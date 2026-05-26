@@ -9,7 +9,7 @@ flowchart TD
     %% ============================================================
 
     %% ── API 入口层 ──
-    api_chat_turn["POST /api/chat-turn<br/>聊天回合（SSE 流式）"]
+    api_chat_turn["POST /api/chat<br/>聊天回合（SSE 流式）"]
     api_sessions_list["GET /api/sessions<br/>会话列表"]
     api_sessions_create["POST /api/sessions<br/>创建会话"]
     api_session_detail["GET /api/sessions/{chat_id}<br/>会话详情"]
@@ -228,11 +228,11 @@ stateDiagram-v2
 
 ## Agent 循环：StateGraph + astream + interrupt
 
-LangGraph StateGraph 管理节点拓扑。`astream()` 在每个节点执行完成后产出状态，web-server 映射为 SSE 事件推送到前端。审批点通过 `interrupt()` 暂停图执行，等待回调后恢复。
+LangGraph StateGraph 管理节点拓扑。`astream()` 在每个节点执行完成后产出状态，web-server 映射为 SSE 事件推送到前端。审批点通过 `interrupt()` 暂停图执行，SSE 连接保持存活，审批决策通过 REST 传入后在同一连接上继续推送事件。
 
 ```mermaid
 stateDiagram-v2
-    [*] --> INIT: POST /api/chat-turn
+    [*] --> INIT: POST /api/chat
 
     state "会话准备" as PREP {
         INIT --> LOAD_SESSION: 加载 / 创建 ChatSession
@@ -295,7 +295,7 @@ flowchart LR
 
 ### 审批如何处理
 
-`interrupt()` 在图执行到审批节点时暂停，返回当前状态给调用方。`astream()` 产出一个特殊事件标记暂停点。web-server 将此映射为 `tool_approval_required` SSE 事件，前端审批回调后，`compiled.ainvoke(Command(resume=...))` 恢复执行。
+Agent 循环中，`interrupt()` 在图执行到审批节点时暂停，返回当前状态给调用方。web-server 将此映射为 `tool_approval_required` SSE 事件推送到前端，SSE 连接保持存活。前端将审批决策通过 `POST /api/tool-requests/{id}/approval` 发送到后端，`compiled.ainvoke(Command(resume=...))` 恢复执行，后续事件通过同一 SSE 连接继续推送。
 
 ### 循环状态
 
@@ -402,10 +402,10 @@ flowchart TD
     parallel_wait["等待全部只读完成"]
     serial_queue["串行排队<br/>高风险依次处理"]
     has_next{"还有待处理<br/>tool_call？"}
-    push_approval["推送 tool_approval_required<br/>SSE 流暂停"]
-    wait_user["等待用户审批回调"]
+    push_approval["推送 tool_approval_required<br/>SSE 连接保持存活"]
+    wait_user["等待用户审批"]
     execute_one["执行单个高风险工具"]
-    merge_done["全部 tool_call 完成<br/>SSE 流恢复"]
+    merge_done["全部 tool_call 完成<br/>继续 SSE 流"]
 
     %% 连线
     llm_multi_response --> classify
@@ -764,17 +764,17 @@ flowchart TD
         direction TB
         chat_view["ChatView.vue<br/>时间线渲染"]
         msg_item["MessageItem.vue<br/>Markdown 消息"]
-        tc_card["ToolCallCard.vue<br/>工具卡片<br/>key-value 参数 / server / 耗时"]
+        tc_inline["ToolCallInline.vue<br/>内联工具调用文本<br/>tool_name / params / 状态 / 耗时"]
         reason_bubble["ReasoningBubble.vue<br/>折叠 / 展开<br/>灰色小号文本"]
         status_bar["状态栏<br/>Thinking… / Calling tool… / Responding…"]
-        approval_modal["ApprovalModal.vue<br/>审批弹框"]
-        use_chat["useChat<br/>状态管理<br/>messages / toolCalls / reasonings"]
-        use_sse["useSSE<br/>ReadableStream 解析器<br/>SSE 行缓冲"]
+        approval_inline["ApprovalInline.vue<br/>审批内联卡片<br/>timeline 内嵌"]
+        error_banner[".connection-error 横幅<br/>错误提示"]
+        session_mgr["useSessionManager<br/>per-session state<br/>messages / toolCalls / reasonings / SSE"]
     end
 
     subgraph web_server["Web-server (FastAPI :11450)"]
         direction TB
-        api_chat["POST /api/chat-turn<br/>SSE 入口"]
+        api_chat["POST /api/chat<br/>SSE 入口"]
         api_approval["POST /api/tool-requests/{id}/approval<br/>审批回调"]
 
         subgraph agent_loop["Agent 循环 (LangGraph StateGraph)"]
@@ -805,9 +805,8 @@ flowchart TD
     end
 
     user_input["用户输入"] --> chat_view
-    chat_view --> use_chat
-    use_chat --> use_sse
-    use_sse -- "POST /api/chat-turn" --> api_chat
+    chat_view --> session_mgr
+    session_mgr -- "POST /api/chat" --> api_chat
 
     api_chat --> svc["Session Manager /<br/>Prompt Manager"]
     svc --> think
@@ -817,16 +816,14 @@ flowchart TD
     ctx_var --> reasoning_q
     reasoning_q --> drain_task
     drain_task -- "buffered[]" --> emit
-    emit -- "event: reasoning" --> use_sse
-    use_sse --> use_chat
-    use_chat --> reason_bubble
+    emit -- "event: reasoning" --> session_mgr
+    session_mgr --> reason_bubble
     reason_bubble --> chat_view
 
     llm -- "assistant content" --> think
     think -- "accumulated text" --> emit
-    emit -- "event: assistant" --> use_sse
-    use_sse --> use_chat
-    use_chat --> msg_item
+    emit -- "event: assistant" --> session_mgr
+    session_mgr --> msg_item
     msg_item --> chat_view
 
     llm -- "tool_use blocks" --> think
@@ -838,30 +835,29 @@ flowchart TD
 
     pre_exec --> tool_server
     pre_exec -- "streaming_tool_results" --> emit
-    emit -- "event: tool_call + tool_result" --> use_sse
+    emit -- "event: tool_call + tool_result" --> session_mgr
 
     review --> tool_server
     review -- "高风险" --> interrupt
-    interrupt -- "event: tool_approval_required" --> emit
-    emit --> use_sse
-    use_sse --> approval_modal
-    approval_modal --> api_approval
-    api_approval --> act
+    interrupt -- "event: tool_approval_required<br/>SSE 连接保持存活" --> emit
+    emit --> session_mgr
+    session_mgr --> approval_inline
+    approval_inline -- "POST /approval" --> api_approval
+    api_approval -- "resume 后同一 SSE 连接继续" --> act
 
     review -- "自动批准" --> act
     act --> tool_server
     act -- "tool_results" --> observe
     observe -- "tool 消息" --> emit
-    emit -- "event: tool_result" --> use_sse
-    use_sse --> use_chat
-    use_chat --> tc_card
+    emit -- "event: tool_result" --> session_mgr
+    session_mgr --> tc_inline
 
     observe --> think
 
-    emit -- "event: done" --> use_sse
-    use_sse --> use_chat
+    emit -- "event: done" --> session_mgr
 
-    use_chat -- "agentPhase / phaseLabel" --> status_bar
+    session_mgr -- "error" --> error_banner
+    session_mgr -- "agentPhase / phaseLabel" --> status_bar
 ```
 
 ### 用户消息 → SSE 事件序列图
@@ -870,9 +866,8 @@ flowchart TD
 sequenceDiagram
     participant U as Browser
     participant CV as ChatView.vue
-    participant UC as useChat
-    participant SSE as useSSE (Reader)
-    participant WS as web-server /api/chat-turn
+    participant SM as useSessionManager
+    participant WS as web-server /api/chat
     participant Q as asyncio.Queue
     participant DT as drain_task
     participant TH as think_node
@@ -880,8 +875,8 @@ sequenceDiagram
     participant EM as emit_events
 
     U->>CV: 输入文字 / 点击发送
-    CV->>UC: sendMessage(text)
-    UC->>WS: POST /api/chat-turn (SSE)
+    CV->>SM: state.sendMessage(text)
+    SM->>WS: POST /api/chat (SSE)
 
     Note over WS: 创建 Queue, set contextvar
     Note over WS: 启动 drain_task (后台)
@@ -911,38 +906,32 @@ sequenceDiagram
     loop 每个 buffered reasoning
         DT->>EM: buffered reasoning events
         EM-->>WS: reasoning event
-        WS-->>SSE: event: reasoning\ndata: {"delta":"..."}
-        SSE->>UC: onReasoning()
-        UC->>UC: accumulate reasoningBuffer
-        UC->>CV: reasoning bubble live update
+        WS-->>SM: event: reasoning\ndata: {"delta":"..."}
+        SM->>SM: on_reasoning → reasonings[]
+        SM->>CV: ReasoningBubble live update
     end
 
     EM-->>WS: assistant event
-    WS-->>SSE: event: assistant\ndata: {"delta":"...","message_id":"..."}
-    SSE->>UC: onAssistant()
-    UC->>UC: mark streaming reasoning done
-    UC->>CV: update messages[]
+    WS-->>SM: event: assistant\ndata: {"delta":"...","message_id":"..."}
+    SM->>SM: on_assistant → messages[]
+    SM->>CV: update messages[]
 
     EM-->>WS: reasoning event (batch done=true)
-    WS-->>SSE: event: reasoning\ndata: {"delta":"...","done":true}
-    SSE->>UC: onReasoning(done=true)
-    UC->>UC: dedup → mark existing done
-    UC->>CV: reasoning bubble → "Thought (Nc)"
+    WS-->>SM: event: reasoning\ndata: {"delta":"...","done":true}
+    SM->>SM: dedup → mark existing done
+    SM->>CV: reasoning bubble → "Done"
 
     EM-->>WS: tool_call event
-    WS-->>SSE: event: tool_call\ndata: {"tool_name":"get_cpu","server":"tool-server",...}
-    SSE->>UC: onToolCall()
-    UC->>UC: create ToolCallInfo
+    WS-->>SM: event: tool_call\ndata: {"tool_name":"get_cpu","server":"tool-server",...}
+    SM->>SM: on_tool_call → toolCalls Map
 
     EM-->>WS: tool_result event
-    WS-->>SSE: event: tool_result\ndata: {"tool_name":"get_cpu","execution_time_ms":45}
-    SSE->>UC: onToolResult()
-    UC->>UC: update ToolCallInfo.execution_time_ms
+    WS-->>SM: event: tool_result\ndata: {"tool_name":"get_cpu","execution_time_ms":45}
+    SM->>SM: on_tool_result → update ToolCallInfo
 
     EM-->>WS: done event
-    WS-->>SSE: event: done\ndata: {}
-    SSE->>UC: onDone()
-    UC->>UC: agentPhase = 'done'
+    WS-->>SM: event: done\ndata: {"chat_id":"..."}
+    SM->>SM: on_done → isStreaming=false<br/>新 session: transitionDraftToReal
     CV->>CV: status bar disappears
 ```
 
@@ -959,29 +948,32 @@ flowchart LR
         D["event: done"]
     end
 
-    subgraph handlers["useChat 回调处理"]
-        onR["onReasoning"]
-        onA["onAssistant"]
-        onTC["onToolCall"]
-        onTR["onToolResult"]
-        onAP["onToolApprovalRequired"]
-        onDone["onDone"]
+    subgraph handlers["SessionState SSE 回调"]
+        onR["on_reasoning"]
+        onA["on_assistant"]
+        onTC["on_tool_call"]
+        onTR["on_tool_result"]
+        onAP["on_tool_approval_required"]
+        onDone["on_done"]
+        onErr["on_error → connectionError"]
     end
 
-    subgraph state["useChat 响应式状态"]
+    subgraph state["SessionState 响应式状态"]
         MSG["messages: Ref&lt;Message[]&gt;"]
         TC_STATE["toolCalls: Ref&lt;Map&gt;"]
         REASON["reasonings: Ref&lt;ReasoningEntry[]&gt;"]
-        PHASE["agentPhase: AgentPhase<br/>idle / thinking / calling_tool<br/>/ responding / done"]
+        PHASE["agentPhase: AgentPhase<br/>idle / thinking / calling_tool<br/>/ awaiting_approval / responding / done"]
+        APEVT["approvalEvent: ApprovalEvent<br/>status: pending / approved / rejected"]
         LABEL["phaseLabel: ComputedRef<br/>Thinking… / Calling tool…<br/>/ Responding…"]
-        APPROVAL["approvalPending"]
+        ERR["connectionError: string|null<br/>错误横幅显示"]
     end
 
     subgraph timeline["ChatView timeline 合并"]
         items["TimelineItem[]<br/>按 ts 排序"]
         msg_t["type: message<br/>MessageItem.vue"]
-        tc_t["type: tool_card<br/>ToolCallCard.vue"]
+        tc_t["type: tool_call<br/>ToolCallInline.vue"]
         reason_t["type: reasoning<br/>ReasoningBubble.vue"]
+        ap_t["type: approval<br/>ApprovalInline.vue"]
     end
 
     R --> onR
@@ -998,8 +990,10 @@ flowchart LR
     onTC --> TC_STATE
     onTC --> PHASE
     onTR --> TC_STATE
-    onAP --> APPROVAL
+    onAP --> APEVT
+    onAP --> PHASE
     onDone --> PHASE
+    onErr --> ERR
 
     MSG --> items
     TC_STATE --> items
@@ -1009,6 +1003,9 @@ flowchart LR
     msg_t --> items
     tc_t --> items
     reason_t --> items
+    ap_t --> items
+
+    APEVT --> ap_t
 ```
 
 ### 三池工具分配

@@ -241,7 +241,7 @@ LLM 流式输出 token
 
 ## SSE 事件契约
 
-`POST /api/chat-turn` 返回 `text/event-stream`，事件定义：
+`POST /api/chat` 返回 `text/event-stream`，事件定义：
 
 | event | data | 说明 |
 |-------|------|------|
@@ -286,9 +286,9 @@ LLM 流式输出 token
 | 端点 | 说明 |
 |------|------|
 | GET /api/health | 健康检查 |
-| POST /api/chat-turn | 聊天入口（SSE 流式） |
+| POST /api/chat | 聊天入口（SSE 流式） |
 | GET /api/sessions | 列出全部会话 |
-| POST /api/sessions | 创建新会话 |
+| POST /api/sessions | 创建新会话（前端不再主动调用；session 由 POST /api/chat 首条消息自动创建） |
 | GET /api/sessions/{chat_id} | 获取会话详情 |
 | GET /api/tools | 列出可用 MCP 工具 |
 | GET /api/tool-requests/{request_id} | 查询审批请求状态 |

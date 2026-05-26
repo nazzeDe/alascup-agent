@@ -5,12 +5,12 @@ interface SSEEvent {
   data: unknown;
 }
 
-/** Mock POST /api/chat-turn to replay a canned SSE stream. */
+/** Mock POST /api/chat to replay a canned SSE stream. */
 export async function mockChatTurn(
   page: Page,
   events: SSEEvent[],
 ): Promise<void> {
-  await page.route("**/api/chat-turn", (route: Route) => {
+  await page.route("**/api/chat", (route: Route) => {
     const body =
       events
         .map((e) => `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n`)
@@ -23,12 +23,12 @@ export async function mockChatTurn(
   });
 }
 
-/** Mock POST /api/chat-turn to return an HTTP error. */
+/** Mock POST /api/chat to return an HTTP error. */
 export async function mockChatTurnError(
   page: Page,
   status = 500,
 ): Promise<void> {
-  await page.route("**/api/chat-turn", (route: Route) => {
+  await page.route("**/api/chat", (route: Route) => {
     route.fulfill({ status });
   });
 }
