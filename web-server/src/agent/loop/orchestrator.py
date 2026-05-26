@@ -1,6 +1,7 @@
 """Agent loop orchestrator — composes graph invocation, event emission, and handlers."""
 
 import json
+from uuid import uuid4
 from typing import AsyncIterator
 
 from langgraph.types import Command
@@ -26,13 +27,34 @@ def _log_profile(profiler: Profiler) -> None:
         write_profile(report)
 
 
+def _extract_request_id(state: dict) -> str:
+    """Extract request_id from LangGraph interrupt state."""
+    interrupts = state.get("__interrupt__", [])
+    obj = interrupts[0] if interrupts else None
+    value = getattr(obj, "value", obj) if obj else {}
+    if isinstance(value, dict):
+        return value.get("request_id", str(uuid4()))
+    return str(uuid4())
+
+
+def _extract_pending_count(state: dict) -> int:
+    """Count pending tool calls in an interrupt state."""
+    interrupts = state.get("__interrupt__", [])
+    obj = interrupts[0] if interrupts else None
+    value = getattr(obj, "value", obj) if obj else {}
+    if isinstance(value, dict):
+        pending = value.get("pending_tool_calls", [])
+        return len(pending) if pending else 1
+    return 1
+
+
 class LoopOrchestrator:
     """Orchestrates the think → review → act → observe ReAct loop.
 
-    Owns the loop dependencies and exposes a single async generator.
-    Dependencies are injected at construction time — the orchestrator is
-    stateless across loop iterations (all mutable state lives in the
-    state dict).
+    SSE connection stays alive across the full chat turn.  When the graph
+    interrupts for approval the orchestrator yields the approval event,
+    waits for a decision via the bridge, then resumes the graph inline
+    — all on the same SSE stream.
     """
 
     def __init__(
@@ -56,7 +78,7 @@ class LoopOrchestrator:
         self._chat_id = chat_id
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
-        """Execute the ReAct loop until interrupt or DONE."""
+        """Execute ReAct loop, yielding all events on one SSE connection."""
         state = dict(initial_state)
         def _is_assistant(m):
             r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))
@@ -87,9 +109,9 @@ class LoopOrchestrator:
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
 
-            # 3. Interrupt → yield approval event, stop
-            if has_interrupt(result):
-                debug_log("INFO", "Approval required — pausing loop",
+            # 3. Interrupt → yield approval events, wait for decision, resume inline.
+            while has_interrupt(result):
+                debug_log("INFO", "Approval required — SSE stays connected",
                           chat_id=str(self._chat_id))
                 async for event in handle_interrupt(
                     result,
@@ -99,9 +121,23 @@ class LoopOrchestrator:
                 ):
                     yield event
                 profiler.checkpoint("interrupt_handled")
-                _log_profile(profiler)
-                complete_feature(loop_feature)
-                return
+
+                request_id = _extract_request_id(result)
+                pending = _extract_pending_count(result)
+                decisions = await self._bridge.gather_decisions(request_id, pending)
+                debug_log("INFO", "Approval decisions collected",
+                          request_id=request_id, count=len(decisions))
+
+                await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+                result = await self._graph.ainvoke(
+                    Command(resume={"decisions": decisions}),
+                    self._config,
+                )
+                profiler.checkpoint("graph_resume")
+                logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
+                             msgs=len(result.get("messages", [])),
+                             t=result.get("transition"),
+                             intr=has_interrupt(result))
 
             state = result
 
@@ -160,8 +196,9 @@ class LoopOrchestrator:
     async def resume(self, decisions: list[str]) -> AsyncIterator[dict]:
         """Resume from checkpoint after human approval.
 
-        A single ainvoke(Command(resume=...)) runs from the interrupt point
-        to END (or another interrupt).
+        Used by tests and programmatic approval paths.  For the normal
+        user-facing flow the orchestrator handles interrupts inline in
+        run() via the bridge's await_approval.
         """
         feature = f"resume:{self._chat_id}"
         start_feature(feature)
@@ -173,15 +210,12 @@ class LoopOrchestrator:
             Command(resume={"decisions": decisions}),
             {"configurable": {"thread_id": self._chat_id}},
         )
-        msgs = result.get("messages", [])
-        logger.debug("RESUME_GRAPH: msgs={msgs} tool_results={tr} streaming={str} emitted={em} transition={t} interrupt={intr}",
-                     msgs=len(msgs), tr=len(result.get("tool_results", [])),
-                     str=len(result.get("streaming_tool_results", [])),
-                     em=len(result.get("_emitted_results", [])),
+        logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
+                     msgs=len(result.get("messages", [])),
                      t=result.get("transition"),
                      intr=has_interrupt(result))
 
-        if has_interrupt(result):
+        while has_interrupt(result):
             async for event in handle_interrupt(
                 result,
                 bridge=self._bridge,
@@ -189,8 +223,14 @@ class LoopOrchestrator:
                 chat_id=self._chat_id,
             ):
                 yield event
-            complete_feature(feature)
-            return
+            request_id = _extract_request_id(result)
+            pending = _extract_pending_count(result)
+            decisions = await self._bridge.gather_decisions(request_id, pending)
+            await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+            result = await self._graph.ainvoke(
+                Command(resume={"decisions": decisions}),
+                {"configurable": {"thread_id": self._chat_id}},
+            )
 
         evs = emit_events(result, chat_id=self._chat_id)
         logger.debug("RESUME_EVENTS: {events}", events=[e.get("event", "") for e in evs])

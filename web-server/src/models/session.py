@@ -12,6 +12,5 @@ class ChatSession(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     executed_tool_list: list[ToolCall] = Field(default_factory=list)
     turn_count: int = 0
-    max_turns: int = 30
     transition: str = ""
     timestamp: str

@@ -33,7 +33,7 @@ class ChatTurnRequest(BaseModel):
     chat_id: str | None = None
 
 
-@router.post("/chat-turn")
+@router.post("/chat")
 async def chat_turn(
     body: ChatTurnRequest,
     request: Request,

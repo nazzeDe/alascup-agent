@@ -1,12 +1,13 @@
 """Agent outer loop + inner LangGraph ReAct graph.
 
-Outer layer: context compression, approval pause/resume, exit detection,
+Outer layer: context compression, approval handling, exit detection,
 audit logging, SSE streaming.
 Inner graph: think → review → act → observe → think → … → END.
 
-Async approval model:
-  - run() executes until interrupt, then returns immediately.
-  - resume(decisions) restores from persisted checkpoint and continues.
+async approval model:
+  - run() yields all events on a single SSE connection.
+  - Interrupts are handled inline via bridge.gather_decisions().
+  - resume(decisions) kept for programmatic/test use.
 """
 
 from __future__ import annotations

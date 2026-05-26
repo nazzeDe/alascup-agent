@@ -207,15 +207,14 @@ class TestQueryHighRisk:
         tools = _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
-        # Phase 1: run until interrupt
-        async for e in query.run(
+        gen = query.run(
             [{"role": "user", "content": "restart"}], available_tools=tools,
-        ):
+        )
+        async for e in gen:
             events.append((e["event"], e["data"]))
-
-        # Phase 2: resume
-        async for e in query.resume(["APPROVED"]):
-            events.append((e["event"], e["data"]))
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
 
         event_types = [e[0] for e in events]
         assert "tool_approval_required" in event_types
@@ -322,15 +321,14 @@ class TestQueryConcurrent:
         tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
-        # Phase 1: run until interrupt
-        async for e in query.run(
+        gen = query.run(
             [{"role": "user", "content": "check and restart"}], available_tools=tools,
-        ):
+        )
+        async for e in gen:
             events.append((e["event"], e["data"]))
-
-        # Phase 2: resume
-        async for e in query.resume(["APPROVED"]):
-            events.append((e["event"], e["data"]))
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
 
         event_types = [e[0] for e in events]
         assert "tool_approval_required" in event_types
@@ -375,15 +373,14 @@ class TestQueryStreamingExecution:
         tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
         events: list[tuple] = []
 
-        # Phase 1: run until interrupt
-        async for e in query.run(
+        gen = query.run(
             [{"role": "user", "content": "check and restart"}], available_tools=tools,
-        ):
+        )
+        async for e in gen:
             events.append((e["event"], e["data"]))
-
-        # Phase 2: resume
-        async for e in query.resume(["APPROVED"]):
-            events.append((e["event"], e["data"]))
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
 
         event_types = [e[0] for e in events]
         assert "tool_approval_required" in event_types
@@ -495,15 +492,13 @@ class TestQueryFullChainAudit:
             {"content": "Service restarted.", "tool_calls": None},
         ]
 
-        # Phase 1: run until interrupt
-        async for e in query.run(
+        gen = query.run(
             [{"role": "user", "content": "restart"}], available_tools=[],
-        ):
-            pass
-
-        # Phase 2: resume after approval
-        async for e in query.resume(["APPROVED"]):
-            pass
+        )
+        async for e in gen:
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
 
         audit_events = [e.event for e in audit.events]
         assert "TOOL_REQUEST_CREATED" in audit_events
@@ -527,15 +522,17 @@ class TestQueryFullChainAudit:
             {"content": "Done.", "tool_calls": None},
         ]
 
-        # Phase 1: run until interrupt
-        async for e in query.run(
+        gen = query.run(
             [{"role": "user", "content": "restart and clean"}], available_tools=[],
-        ):
-            pass
+        )
+        approval_count = 0
+        async for e in gen:
+            if e["event"] == "tool_approval_required":
+                approval_count += 1
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
 
-        # Phase 2: resume after approval
-        async for e in query.resume(["APPROVED", "APPROVED"]):
-            pass
+        assert approval_count == 2  # two tools, two approvals
 
         audit_events = [e.event for e in audit.events]
         assert "TOOL_REQUEST_CREATED" in audit_events

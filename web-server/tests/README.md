@@ -149,7 +149,7 @@
 
 ### API-001 SSE 流式响应
 
-| 输入 | POST /api/chat-turn |
+| 输入 | POST /api/chat |
 | 预期 | Content-Type: text/event-stream；事件格式符合 SSE 规范 |
 
 ### API-002 会话生命周期

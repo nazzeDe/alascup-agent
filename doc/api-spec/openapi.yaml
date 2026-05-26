@@ -24,12 +24,13 @@ paths:
                     type: string
                     example: 0.1.0
 
-  /chat-turn:
+  /chat:
     post:
-      summary: LLM 聊天回合入口（SSE 流式响应）
+      summary: LLM 聊天入口（SSE 流式响应）
       description: |
         前端发送用户消息，web-server 驱动 LangGraph Agent 循环，
-        通过 SSE 流式返回 assistant message、tool_call、tool_result、审批请求等事件。
+        通过 SSE 流式返回 assistant、reasoning、tool_call、tool_result、审批请求等全部事件。
+        SSE 连接在完整对话轮次内保持不中断。
       requestBody:
         required: true
         content:
@@ -133,7 +134,7 @@ paths:
   /tool-requests/{request_id}/approval:
     post:
       summary: 审批工具请求（批准或拒绝）
-      description: 前端用户对高风险 tool_call 做出批准或拒绝决定
+      description: 前端用户对高风险 tool_call 做出批准或拒绝决定。后端接收后恢复 Agent 循环，事件通过已存在的 SSE 连接继续推送。
       parameters:
         - in: path
           name: request_id

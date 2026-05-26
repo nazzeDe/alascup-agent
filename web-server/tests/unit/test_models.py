@@ -288,13 +288,11 @@ class TestChatSession:
             messages=[],
             executed_tool_list=[],
             turn_count=3,
-            max_turns=30,
             transition="tool_results",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         assert session.title == "CPU 诊断会话"
         assert session.turn_count == 3
-        assert session.max_turns == 30
         assert session.transition == "tool_results"
 
     def test_session_defaults(self):
@@ -309,7 +307,6 @@ class TestChatSession:
         )
         assert session.title is None
         assert session.turn_count == 0
-        assert session.max_turns == 30
         assert session.transition == ""
 
 

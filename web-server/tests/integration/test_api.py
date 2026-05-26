@@ -29,7 +29,15 @@ class _MockToolExecutor:
     async def classify_companion(self, tool_name, params, server_name):
         return {"safe": True}
 
-    async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None):
+    async def execute(
+        self,
+        tool_name,
+        arguments,
+        *,
+        server_name=None,
+        approval_status=None,
+        request_id=None,
+    ):
         return {"execution_status": "SUCCEEDED", "output": {}}
 
     async def execute_parallel(self, calls):
@@ -126,8 +134,10 @@ class TestChatTurnSSE:
         r = await client.post("/api/sessions")
         chat_id = r.json()["id"]
 
-        url = "/api/chat-turn"
-        async with client.stream("POST", url, json={"message": "hello", "chat_id": chat_id}) as response:
+        url = "/api/chat"
+        async with client.stream(
+            "POST", url, json={"message": "hello", "chat_id": chat_id}
+        ) as response:
             assert response.status_code == 200
             assert "text/event-stream" in response.headers.get("content-type", "")
 
@@ -145,7 +155,7 @@ class TestChatTurnSSE:
     async def test_chat_turn_missing_message(self, client):
         r = await client.post("/api/sessions")
         chat_id = r.json()["id"]
-        response = await client.post("/api/chat-turn", json={"chat_id": chat_id})
+        response = await client.post("/api/chat", json={"chat_id": chat_id})
         assert response.status_code == 422
 
 
@@ -163,7 +173,7 @@ class TestSessionLifecycle:
         # 2. 发送消息
         async with client.stream(
             "POST",
-            "/api/chat-turn",
+            "/api/chat",
             json={
                 "message": "hello",
                 "chat_id": chat_id,
@@ -188,7 +198,7 @@ class TestSessionLifecycle:
 
         async with client.stream(
             "POST",
-            "/api/chat-turn",
+            "/api/chat",
             json={
                 "message": "hello",
                 "chat_id": chat_id,
@@ -214,7 +224,7 @@ class TestSessionLifecycle:
 
         async with client.stream(
             "POST",
-            "/api/chat-turn",
+            "/api/chat",
             json={
                 "message": "first message",
                 "chat_id": chat_id,
@@ -227,7 +237,7 @@ class TestSessionLifecycle:
         # 第二轮——同 chat_id
         async with client.stream(
             "POST",
-            "/api/chat-turn",
+            "/api/chat",
             json={
                 "message": "second message",
                 "chat_id": chat_id,

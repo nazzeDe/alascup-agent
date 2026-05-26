@@ -139,7 +139,7 @@ class TestApprovalEndpoint:
 
     @pytest.mark.asyncio
     async def test_approve_request_succeeds(self, app_with_bridge):
-        """Approve an existing request → returns agent_resumed=True."""
+        """Approve an existing request → signals bridge and returns success."""
         services, bridge = app_with_bridge
         req_id = str(uuid.uuid4())
         chat_id = str(uuid.uuid4())
@@ -155,11 +155,12 @@ class TestApprovalEndpoint:
             assert r.status_code == 200
             data = r.json()
             assert data["approval_status"] == "APPROVED"
-            assert data["agent_resumed"] is True
+            assert data["request_id"] == req_id
+            assert data["reason"] == "looks safe"
 
     @pytest.mark.asyncio
     async def test_reject_request(self, app_with_bridge):
-        """Reject a request → returns agent_resumed=True."""
+        """Reject a request → signals bridge and returns success."""
         services, bridge = app_with_bridge
         req_id = str(uuid.uuid4())
         chat_id = str(uuid.uuid4())
@@ -175,6 +176,7 @@ class TestApprovalEndpoint:
             assert r.status_code == 200
             data = r.json()
             assert data["approval_status"] == "REJECTED"
+            assert data["request_id"] == req_id
 
     @pytest.mark.asyncio
     async def test_approval_without_reason(self, app_with_bridge):
