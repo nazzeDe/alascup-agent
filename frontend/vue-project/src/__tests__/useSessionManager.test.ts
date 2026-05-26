@@ -53,9 +53,11 @@ describe('useSessionManager', () => {
   it('sendMessage in draft sets chatId from done event and updates session list', async () => {
     const mockConnect = vi.fn()
     let capturedCallbacks: any = null
+    let capturedOnSessionId: any = null
 
-    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown, _signal: unknown, onSessionId: unknown) => {
       capturedCallbacks = callbacks
+      capturedOnSessionId = onSessionId
       return Promise.resolve()
     })
 
@@ -72,9 +74,12 @@ describe('useSessionManager', () => {
     expect(state.messages.value[0]!.content).toBe('hello')
     expect(state.isStreaming.value).toBe(true)
 
+    // Simulate onopen delivering X-Session-ID
+    capturedOnSessionId('new-session-1')
+
     // Simulate server events
     capturedCallbacks.on_assistant({ chat_id: '', message_id: 'm1', delta: 'Hi there!' })
-    capturedCallbacks.on_done({ chat_id: 'new-session-1' })
+    capturedCallbacks.on_done({})
 
     // After done, chat_id should be assigned
     expect(manager.activeChatId.value).toBe('new-session-1')

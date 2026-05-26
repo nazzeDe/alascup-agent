@@ -41,15 +41,21 @@ export interface SessionState {
   loadHistory(): Promise<boolean>
 }
 
-type SSEConnectFn = (body: Record<string, unknown>, callbacks: SSECallbacks, signal: AbortSignal) => Promise<void>
+type OnSessionIdCb = (chatId: string) => void
 
-function realSSEConnect(body: Record<string, unknown>, callbacks: SSECallbacks, signal: AbortSignal): Promise<void> {
+type SSEConnectFn = (body: Record<string, unknown>, callbacks: SSECallbacks, signal: AbortSignal, onSessionId?: OnSessionIdCb) => Promise<void>
+
+function realSSEConnect(body: Record<string, unknown>, callbacks: SSECallbacks, signal: AbortSignal, onSessionId?: OnSessionIdCb): Promise<void> {
   return fetchEventSource('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
     body: JSON.stringify(body),
     signal,
     openWhenHidden: true,
+    onopen(response) {
+      const sid = response.headers.get('X-Session-ID')
+      if (sid) onSessionId?.(sid)
+    },
     onmessage(msg) {
       if (!msg.event || !msg.data) return
       try {
@@ -190,6 +196,8 @@ export function useSessionManager(deps?: ManagerDeps) {
       let currentReasoningId = ''
       let reasoningBuffer = ''
 
+      let newChatId: string | null = null
+
       connectFn(
         { chat_id: chatId.value ?? undefined, message: text },
         {
@@ -315,19 +323,19 @@ export function useSessionManager(deps?: ManagerDeps) {
             currentActivity.value = data.tool_name
           },
 
-          on_done(data: any) {
+          on_done(_data: any) {
             agentPhase.value = 'done'
             currentActivity.value = ''
             isStreaming.value = false
-            if (isNewChat && data.chat_id) {
-              _transitionDraftToReal(data.chat_id, _self)
+            if (isNewChat && newChatId) {
+              _transitionDraftToReal(newChatId, _self)
               sessions.value = [{
-                chat_id: data.chat_id,
+                chat_id: newChatId,
                 messages: messages.value,
                 executed_tool_list: [],
                 timestamp: new Date().toISOString(),
               }, ...sessions.value]
-              activeChatId.value = data.chat_id
+              activeChatId.value = newChatId
             }
           },
 
@@ -337,6 +345,7 @@ export function useSessionManager(deps?: ManagerDeps) {
           },
         },
         abortController.signal,
+        (sid: string) => { if (isNewChat) newChatId = sid },
       ).catch((err: unknown) => {
         isStreaming.value = false
         if (err instanceof DOMException && err.name === 'AbortError') return
