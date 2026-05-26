@@ -1229,6 +1229,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "psutil" },
+    { name = "pydantic" },
     { name = "tree-sitter" },
     { name = "tree-sitter-bash" },
 ]
@@ -1253,6 +1254,7 @@ dev = [
 requires-dist = [
     { name = "fastmcp", specifier = ">=3.2.4" },
     { name = "psutil", specifier = ">=7.0.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6" },
     { name = "tree-sitter", specifier = ">=0.22" },

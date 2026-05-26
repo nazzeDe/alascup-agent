@@ -10,7 +10,9 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 
 COPY src/ src/
+COPY config.json ./
 
+ENV TOOLSERVER_PORT 11451
 EXPOSE 11451
 
 CMD ["python", "-m", "src.main"]

@@ -1,0 +1,9 @@
+{
+    "proc_path": "/proc",
+    "log_path": "/var/log",
+    "sandbox_root": "/tmp/tool-server-sandbox",
+    "cache_ttl": 600,
+    "bash_timeout": 30,
+    "host_exec": "direct",
+    "port": 11451
+}

@@ -261,7 +261,7 @@ def main() -> int:
     try:
         config = load_config()
         server = create_server(config)
-        server.run(transport="streamable-http", host="0.0.0.0", port=11451)
+        server.run(transport="streamable-http", host="0.0.0.0", port=config.port)
         return 0
     except KeyboardInterrupt:
         return 0

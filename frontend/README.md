@@ -36,7 +36,7 @@ frontend/
     public/
       favicon.ico
     src/
-      main.ts           # 应用入口（createApp + Bootstrap + highlight.js）
+      main.ts           # 应用入口
       types.ts          # TypeScript 类型定义
       App.vue           # 根组件（布局 + SessionList + ChatView）
       assets/
@@ -63,17 +63,17 @@ frontend/
 
 ```
 useSessionManager
-├── sessions: Ref<ChatSession[]>            # 会话列表（同旧 useSessions）
+├── sessions: Ref<ChatSession[]>            # 会话列表
 ├── activeChatId: Ref<string | null>        # 当前活跃 session（null = 空白草稿）
 ├── isLoadingSessions / loadError           # 加载/错误状态
 ├── instances: Map<chatId, SessionState>    # 懒创建的 per-session state
 │
 └── SessionState
     ├── chatId: string | null              # 自身标识（null 表示尚未持久化）
-    ├── messages / toolCalls / reasonings   # 聊天数据（同旧 useChat）
+    ├── messages / toolCalls / reasonings   # 聊天数据
     ├── agentPhase / currentActivity        # agent 状态（'thinking' | 'calling_tool' | ...）
     ├── phaseLabel                          # computed: "Thinking…" / "Calling: …"
-    ├── approvalEvent                       # 审批事件（timeline 内嵌，不再弹 modal）
+    ├── approvalEvent                       # 审批事件（timeline 内嵌）
     ├── draftInput                          # 输入框草稿（切换 session 保留）
     ├── isStreaming                         # 每个 session 独立的流状态
     ├── connectionError                     # 连接错误消息（null = 正常）
@@ -89,34 +89,10 @@ useSessionManager
 
 新接口只接收一个 prop：`chatId: string | null`。内部通过 `useSessionManager().get(chatId)` 获取一切状态。
 
-### 关键设计决策
+### 设计决策
 
 - **Session 按第一条消息创建**：点击 "New Session" 仅清空 ChatView（本地 draft），不发 HTTP 请求。发送第一条消息时，后端在 SSE `done` 事件中带回 `chatId`。
 - **后台 session 保持连接**：切换 activeChatId 不 abort 其他 session 的 SSE。
 - **审批降级为 timeline 内嵌**：不再弹全局 modal。审批事件以 `ApprovalInline.vue` 卡片形式出现在消息流中。卡片内可直接 approve/reject，附带可选消息。
 - **Tool call 内联显示**：紧凑的单行文本（tool_name + params + 状态 + 耗时），可折叠展开输出。
 - **Toast 过滤**：全局 Toast 带 `chatId` 字段，只渲染当前活跃 session 的 toast。
-
-## 前端开发闭环
-
-通过 Playwright MCP（`.claude/mcp.json`），支持 agent 自主完成：启动 dev server → 加载页面 → 截图验证 → 捕获运行时错误 → 修复 → 循环。
-
-### 关键 Playwright MCP 工具
-
-| 工具 | 用途 |
-|------|------|
-| `browser_navigate` | 加载页面（`http://localhost:5173`） |
-| `browser_screenshot` | 全页截图，Claude 直接看到渲染结果 |
-| `browser_console_messages` | 抓取 console.error / page error |
-| `browser_network_requests` | 检查 API 请求是否成功 |
-| `browser_snapshot` | 无障碍树快照，验证元素存在/文本内容 |
-| `browser_click` / `browser_type` | 交互测试 |
-
-### 典型流程
-
-1. 后台启动 dev server：`cd frontend/vue-project && bun run dev &`
-2. `curl -s -o /dev/null http://localhost:5173` 确认就绪
-3. `browser_navigate` → `browser_screenshot` → `browser_console_messages`
-4. 根据截图和错误日志修复代码
-5. 循环 3-4 直到无错误
-6. `bun run test:e2e` 最终验证

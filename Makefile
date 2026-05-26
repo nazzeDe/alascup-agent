@@ -1,7 +1,8 @@
 .PHONY: build build-test up down up-test down-test logs logs-web logs-tool clean \
         test test-unit test-integration test-e2e test-coverage \
         test-unit-web test-unit-tool test-unit-rag test-unit-fe \
-        test-integration-web test-integration-tool test-integration-rag
+        test-integration-web test-integration-tool test-integration-rag \
+        dev dev-web dev-tool dev-fe
 
 COMPOSE_PROD := docker compose
 COMPOSE_TEST := docker compose -f docker-compose.test.yml
@@ -86,3 +87,20 @@ test-coverage:
 clean:
 	$(COMPOSE_TEST) down -v
 	rm -rf logs/
+
+# === 开发 ===
+dev:
+	@trap 'echo "Stopping..."; kill 0' EXIT; \
+		$(MAKE) dev-web & \
+		$(MAKE) dev-tool & \
+		$(MAKE) dev-fe & \
+		wait
+
+dev-web:
+	cd web-server && DATABASE_URL=postgresql://nazze:1115@localhost:5432/alascup_agent SERVERS_CONFIG=config/servers.dev.json uv run uvicorn src.main:app --port 11450
+
+dev-tool:
+	cd tool-server && uv run python -m src.main
+
+dev-fe:
+	cd frontend/vue-project && bun run dev

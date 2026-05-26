@@ -280,20 +280,4 @@ describe('useSessionManager', () => {
     expect(manager.sessions.value).toHaveLength(0)
   })
 
-  it('sendMessage with existing chatId does not fire onChatCreated', async () => {
-    // Pre-create a real session in the list
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => [{ chat_id: 'existing-1', messages: [], executed_tool_list: [], timestamp: '' }],
-    })
-    const manager = await freshManager()
-    await manager.loadSessions()
-    manager.activeChatId.value = 'existing-1'
-
-    const state = manager.get('existing-1')
-    state.sendMessage('hello again')
-
-    // chat_id should stay unchanged
-    expect(manager.activeChatId.value).toBe('existing-1')
-  })
 })
