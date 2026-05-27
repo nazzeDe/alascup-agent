@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import asyncpg
 import pytest
 
 from src.models.audit import AuditEvent, AuditLevel
 from src.observability.audit_logger import PostgresAuditLogger
+from src.services.db import Database
 from src.services.session_manager import PostgresSessionManager
 
 pytestmark = pytest.mark.integration
@@ -20,6 +23,56 @@ class TestDatabaseConnection:
     async def test_connect_uses_postgresql_scheme(self, test_db):
         """DSN must use postgresql:// not postgresql+asyncpg://."""
         assert test_db.pool is not None
+
+
+class TestDatabaseAutoCreate:
+    """Database.connect() should auto-create the target database if it doesn't exist."""
+
+    @pytest.mark.asyncio
+    async def test_connect_creates_missing_database(self, pg_dsn):
+        """When the target database doesn't exist, connect() should create it."""
+        parsed = urlparse(pg_dsn)
+        target_db = parsed.path.lstrip("/")
+        tmp_db_name = f"{target_db}_autocreate_test"
+        tmp_dsn = pg_dsn.rsplit("/", 1)[0] + f"/{tmp_db_name}"
+
+        # Ensure the temp database does NOT exist
+        admin_dsn = pg_dsn.rsplit("/", 1)[0] + "/postgres"
+        admin_conn = await asyncpg.connect(admin_dsn)
+        try:
+            await admin_conn.execute(f"DROP DATABASE IF EXISTS {tmp_db_name}")
+        finally:
+            await admin_conn.close()
+
+        # connect() should auto-create the database
+        db = Database(tmp_dsn)
+        try:
+            await db.connect()
+            assert db.pool is not None
+            # Verify the database actually exists by querying
+            async with db.pool.acquire() as conn:
+                result = await conn.fetchval("SELECT 1")
+                assert result == 1
+        finally:
+            await db.disconnect()
+            # Cleanup: drop the temp database
+            admin_conn = await asyncpg.connect(admin_dsn)
+            try:
+                # Terminate any remaining connections
+                await admin_conn.execute(
+                    f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    f"WHERE datname = '{tmp_db_name}' AND pid != pg_backend_pid()"
+                )
+                await admin_conn.execute(f"DROP DATABASE IF EXISTS {tmp_db_name}")
+            finally:
+                await admin_conn.close()
+
+    @pytest.mark.asyncio
+    async def test_connect_fails_when_postgresql_unavailable(self):
+        """When PostgreSQL is not reachable, connect() should raise."""
+        db = Database("postgresql://localhost:19999/nonexistent")
+        with pytest.raises(Exception):
+            await db.connect()
 
 
 class TestPostgresSessionManager:

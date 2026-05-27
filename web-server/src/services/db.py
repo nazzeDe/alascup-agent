@@ -1,9 +1,12 @@
+import logging
+from urllib.parse import urlparse
+
 import asyncpg
 
+logger = logging.getLogger(__name__)
 
 CREATE_TABLES_SQL = """
 DO $$ BEGIN CREATE TYPE msg_type AS ENUM ('user', 'assistant', 'tool_call', 'tool_result', 'system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS title VARCHAR(256);
 DO $$ BEGIN CREATE TYPE approval_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE execution_status AS ENUM ('PENDING_APPROVAL', 'RUNNING', 'SUCCEEDED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE audit_level AS ENUM ('INFO', 'WARN', 'ERROR', 'CRITICAL'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -106,7 +109,24 @@ class Database:
         return self._pool
 
     async def connect(self) -> None:
-        self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
+        try:
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
+        except asyncpg.InvalidCatalogNameError:
+            # Database doesn't exist — create it via the default 'postgres' database
+            parsed = urlparse(self._dsn)
+            target_db = parsed.path.lstrip("/")
+            admin_dsn = self._dsn.rsplit("/", 1)[0] + "/postgres"
+            logger.info("Database '%s' not found, creating...", target_db)
+            admin_conn = await asyncpg.connect(admin_dsn)
+            try:
+                await admin_conn.execute(f'CREATE DATABASE "{target_db}"')
+            finally:
+                await admin_conn.close()
+            self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
+        except OSError as exc:
+            raise RuntimeError(
+                f"PostgreSQL is not reachable at {self._dsn}: {exc}"
+            ) from exc
         async with self._pool.acquire() as conn:
             await conn.execute(CREATE_TABLES_SQL)
 

@@ -25,7 +25,7 @@ async def test_db(pg_dsn):
     async with db.pool.acquire() as conn:
         tables = [
             "graph_writes", "graph_checkpoints",
-            "tool_requests", "tool_calls",
+            "tool_calls",
             "messages", "audit_events", "llm_traces",
             "chat_sessions",
         ]
