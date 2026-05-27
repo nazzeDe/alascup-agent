@@ -16,12 +16,6 @@ async def think_node(state, *, llm, executor=None):
 
     AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
     Mutable and write tools stay in tool_calls for review_node.
-
-    Returns:
-      - messages: assistant text
-      - tool_calls: non-readonly tool_use blocks (go to review → act)
-      - streaming_tool_results: readonly pre-executed results
-      - transition: DONE (no output) or None
     """
     available_tools = state.get("available_tools", [])
     tools = _format_tools(available_tools)
@@ -37,44 +31,72 @@ async def think_node(state, *, llm, executor=None):
     start_feature(feature)
     debug_log("DEBUG", "LLM call start", chat_id=str(chat_id), tools=len(tools))
 
-    async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
-        result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
-        if result is True:
-            complete_feature(feature)
-            tc_count = len(tool_call_blocks)
-            if tc_count:
-                names = [b.get("function", {}).get("name", "?") for b in tool_call_blocks]
-                debug_log("DEBUG", "LLM generated tool calls", chat_id=str(chat_id),
-                          count=tc_count, tools=",".join(names))
-            else:
-                text_len = len("".join(accumulated_text))
-                debug_log("DEBUG", "LLM call complete (text only)", chat_id=str(chat_id),
-                          text_len=text_len)
-            break
-        if result is not None:
-            debug_log("WARN", "LLM call error", chat_id=str(chat_id),
-                      code=result.get("code", "?"))
-            logger.debug("think_node LLM error: code={code} msg={msg}",
-                         code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
-            complete_feature(feature, status="error")
-            return {
-                "messages": [],
-                "tool_calls": [],
-                "llm_error": result,
-                "transition": Transition.ERROR_EXIT,
-            }
-        if queue is not None and event["event"] == "assistant":
-            data = json.loads(event["data"])
-            rc = data.get("reasoning_content", "")
-            if rc:
-                await queue.put({"event": "reasoning", "data": json.dumps({"delta": rc})})
-            content_chunk = data.get("delta", "")
-            if content_chunk:
-                await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
+    error = await _stream_llm(
+        llm, messages, tools, system, chat_id, feature, queue,
+        accumulated_text, accumulated_reasoning, tool_call_blocks,
+    )
+    if error is not None:
+        return error
 
     if queue is not None:
         await queue.put({"event": "thinking_done"})
 
+    return await _build_think_result(
+        accumulated_text, accumulated_reasoning, tool_call_blocks,
+        executor, available_tools,
+    )
+
+
+async def _stream_llm(
+    llm, messages, tools, system, chat_id, feature, queue,
+    accumulated_text, accumulated_reasoning, tool_call_blocks,
+) -> dict | None:
+    """Drive the LLM stream. Returns error dict or None on success."""
+    async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
+        result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
+        if result is True:
+            complete_feature(feature)
+            _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
+            return None
+        if result is not None:
+            _log_stream_error(result, chat_id)
+            complete_feature(feature, status="error")
+            return {"messages": [], "tool_calls": [], "llm_error": result, "transition": Transition.ERROR_EXIT}
+        if queue is not None and event["event"] == "assistant":
+            await _forward_to_queue(queue, event["data"])
+    return None
+
+
+def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
+    tc_count = len(tool_call_blocks)
+    if tc_count:
+        names = [b.get("function", {}).get("name", "?") for b in tool_call_blocks]
+        debug_log("DEBUG", "LLM generated tool calls", chat_id=str(chat_id),
+                  count=tc_count, tools=",".join(names))
+    else:
+        debug_log("DEBUG", "LLM call complete (text only)", chat_id=str(chat_id),
+                  text_len=len("".join(accumulated_text)))
+
+
+def _log_stream_error(result, chat_id):
+    debug_log("WARN", "LLM call error", chat_id=str(chat_id), code=result.get("code", "?"))
+    logger.debug("think_node LLM error: code={code} msg={msg}",
+                 code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
+
+
+async def _forward_to_queue(queue, data_str: str) -> None:
+    """Forward reasoning and content chunks to the SSE queue."""
+    data = json.loads(data_str)
+    rc = data.get("reasoning_content", "")
+    if rc:
+        await queue.put({"event": "reasoning", "data": json.dumps({"delta": rc})})
+    content_chunk = data.get("delta", "")
+    if content_chunk:
+        await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
+
+
+async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools) -> dict:
+    """Assemble the final state dict from accumulated stream data."""
     result: dict = {}
     text = "".join(accumulated_text)
     reasoning = "".join(accumulated_reasoning)
@@ -97,9 +119,7 @@ async def think_node(state, *, llm, executor=None):
 
     result["tool_calls"] = pending_tool_calls
     result["streaming_tool_results"] = pre_executed
-
-    needs_processing = bool(pending_tool_calls or pre_executed)
-    result["transition"] = Transition.DONE if not needs_processing else None
+    result["transition"] = Transition.DONE if not (pending_tool_calls or pre_executed) else None
     return result
 
 

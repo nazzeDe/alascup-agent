@@ -16,9 +16,14 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
     iterations.
     """
     events: list[dict] = []
+    _emit_assistant_messages(state, chat_id, skip_assistant_count, events)
+    _emit_tool_calls(state, chat_id, events)
+    _emit_tool_results(state, chat_id, events)
+    return events
 
-    # Collect assistant messages, deduplicated by ID (LangGraph keeps dicts
-    # alongside converted objects, causing double-counting).
+
+def _emit_assistant_messages(state: dict, chat_id: str, skip_count: int, events: list[dict]) -> None:
+    """Deduplicate and emit assistant messages as SSE events."""
     seen: set[str] = set()
     deduped: list = []
     for m in state.get("messages", []):
@@ -30,25 +35,20 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
         seen.add(mid)
         deduped.append(m)
 
-    assistant_msgs = deduped
     logger.debug("EMIT_EVENTS: total_msgs={t} assistant_msgs={a} skip={s}",
-                 t=len(state.get("messages", [])), a=len(assistant_msgs), s=skip_assistant_count)
-    for i, m in enumerate(assistant_msgs[skip_assistant_count:]):
-        if isinstance(m, dict):
-            msg_id = m.get("id") or str(uuid4())
-        else:
-            msg_id = str(getattr(m, "id", uuid4()))
-        delta = _msg_content(m)
+                 t=len(state.get("messages", [])), a=len(deduped), s=skip_count)
+    for m in deduped[skip_count:]:
+        msg_id = m.get("id") or str(uuid4()) if isinstance(m, dict) else str(getattr(m, "id", uuid4()))
         rc = _msg_reasoning(m)
         if rc:
-            events.append({
-                "event": "reasoning",
-                "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": rc, "done": True}),
-            })
-        if not delta:
-            continue
-        events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": delta})})
+            events.append({"event": "reasoning", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": rc, "done": True})})
+        delta = _msg_content(m)
+        if delta:
+            events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": delta})})
 
+
+def _emit_tool_calls(state: dict, chat_id: str, events: list[dict]) -> None:
+    """Emit pending tool calls as SSE events."""
     for tc in state.get("tool_calls") or []:
         fn = tc.get("function", {})
         params = fn.get("arguments", "{}")
@@ -57,36 +57,31 @@ def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
                 params = {}
-        events.append({
-            "event": "tool_call",
-            "data": _json_dumps({
-                "chat_id": chat_id,
-                "message_id": tc.get("id") or str(uuid4()),
-                "tool_name": fn.get("name", ""),
-                "params": params,
-                "is_read_only": tc.get("is_read_only", False),
-                "server": tc.get("server_name", ""),
-            }),
-        })
+        events.append({"event": "tool_call", "data": _json_dumps({
+            "chat_id": chat_id,
+            "message_id": tc.get("id") or str(uuid4()),
+            "tool_name": fn.get("name", ""),
+            "params": params,
+            "is_read_only": tc.get("is_read_only", False),
+            "server": tc.get("server_name", ""),
+        })})
 
+
+def _emit_tool_results(state: dict, chat_id: str, events: list[dict]) -> None:
+    """Emit tool results and streaming pre-executed results."""
     for r in state.get("tool_results") or []:
         events.append(_build_tool_result_event(r, chat_id))
 
     emitted = state.get("_emitted_results") or state.get("streaming_tool_results") or []
     for sr in emitted:
-        events.append({
-            "event": "tool_call",
-            "data": _json_dumps({
-                "chat_id": chat_id,
-                "message_id": sr.get("tool_call_id") or str(uuid4()),
-                "tool_name": sr.get("tool_name", ""),
-                "params": {},
-                "is_read_only": True,
-            }),
-        })
+        events.append({"event": "tool_call", "data": _json_dumps({
+            "chat_id": chat_id,
+            "message_id": sr.get("tool_call_id") or str(uuid4()),
+            "tool_name": sr.get("tool_name", ""),
+            "params": {},
+            "is_read_only": True,
+        })})
         events.append(_build_tool_result_event(sr, chat_id))
-
-    return events
 
 
 def _build_tool_result_event(r: dict, chat_id: str) -> dict:

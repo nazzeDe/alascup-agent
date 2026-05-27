@@ -206,11 +206,13 @@ async def _do_chat(
         finally:
             reasoning_queue.reset(token)
             _chat_id_ctx.reset(chat_id_token)
+            agent_task.cancel()
             drain_task.cancel()
-            try:
-                await drain_task
-            except asyncio.CancelledError:
-                pass
+            for t in (agent_task, drain_task):
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
 
             complete_feature(feature)
             summarize_feature_durations()

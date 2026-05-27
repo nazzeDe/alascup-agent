@@ -30,6 +30,16 @@ def _safe_uuid(value: str):
         return None
 
 
+def _is_assistant(m) -> bool:
+    r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))
+    return ROLE_MAP.get(r, r) == "assistant"
+
+
+def _finalize_iteration(profiler: Profiler, loop_feature: str) -> None:
+    _log_profile(profiler)
+    complete_feature(loop_feature)
+
+
 def _log_profile(profiler: Profiler) -> None:
     report = profiler.report()
     if report:
@@ -90,29 +100,30 @@ class LoopOrchestrator:
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute ReAct loop, yielding all events on one SSE connection."""
-        # Clear checkpoint to prevent message duplication across turns.
-        # Session DB is the source of truth for history; the checkpoint only
-        # needs to persist within a single turn for interrupt/resume.
-        if self._checkpointer is not None:
-            try:
-                await self._checkpointer.adelete_thread(self._chat_id)
-            except Exception:
-                logger.warning("Failed to clear checkpoint for thread {tid}", tid=self._chat_id)
+        await self._clear_checkpoint()
 
         turn_id = uuid4()
         self._turn_id = turn_id
         self._iteration = 0
         state = dict(initial_state)
-        def _is_assistant(m):
-            r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))
-            return ROLE_MAP.get(r, r) == "assistant"
 
-        emitted_assistant_count = sum(1 for m in state.get("messages", []) if _is_assistant(m))
+        emitted_assistant_count = sum(
+            1 for m in state.get("messages", []) if _is_assistant(m)
+        )
         debug_log("INFO", "Loop start", chat_id=str(self._chat_id),
                   msg_count=len(state.get("messages", [])), assistant_skip=emitted_assistant_count)
 
         profiler = Profiler()
         profiler.activate()
+
+        try:
+            async for event in self._run_loop(state, turn_id, emitted_assistant_count, profiler):
+                yield event
+        finally:
+            profiler.deactivate()
+
+    async def _run_loop(self, state: dict, turn_id, emitted_assistant_count: int, profiler: Profiler) -> AsyncIterator[dict]:
+        """Core ReAct loop — extracted from run() to keep run() as a thin wrapper."""
         it = 0
 
         while True:
@@ -122,24 +133,17 @@ class LoopOrchestrator:
             start_feature(loop_feature)
 
             # 1. Context compression
-            prev_msg_count = len(state.get("messages", []))
             await self._compress_context(state)
-            profiler.checkpoint("compress_context")
-            after_count = len(state.get("messages", []))
-            if after_count < prev_msg_count:
-                debug_log("INFO", "Context compressed",
-                          before=prev_msg_count, after=after_count, chat_id=str(self._chat_id))
 
-            # 2. Invoke graph (think → review → act → observe)
+            # 2. Invoke graph
             state["_turn_id"] = turn_id
             state["_iteration"] = it
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
 
-            # 3. Interrupt → yield approval events, wait for decision, resume inline.
+            # 3. Interrupt → approval flow (must stay inline — handle_interrupt yields events)
             while has_interrupt(result):
-                debug_log("INFO", "Approval required — SSE stays connected",
-                          chat_id=str(self._chat_id))
+                debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
                 async for event in handle_interrupt(
                     result,
                     bridge=self._bridge,
@@ -148,47 +152,21 @@ class LoopOrchestrator:
                 ):
                     yield event
                 profiler.checkpoint("interrupt_handled")
-
-                request_id = _extract_request_id(result)
-                pending = _extract_pending_count(result)
-                decisions = await self._bridge.gather_decisions(request_id, pending)
-                debug_log("INFO", "Approval decisions collected",
-                          request_id=request_id, count=len(decisions))
-
-                await log_transition(
-                    self._audit, Transition.APPROVAL_GRANTED,
-                    chat_id=_safe_uuid(self._chat_id),
-                    turn_id=self._turn_id, iteration=self._iteration,
-                )
-                result = await self._graph.ainvoke(
-                    Command(resume={"decisions": decisions}),
-                    self._config,
-                )
+                result = await self._resume_after_approval(result)
                 profiler.checkpoint("graph_resume")
-                logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
-                             msgs=len(result.get("messages", [])),
-                             t=result.get("transition"),
-                             intr=has_interrupt(result))
 
             state = result
 
-            # 4. LLM error recovery
+            # 4. Error recovery
             action, error_event = await self._recover_from_error(state)
-            profiler.checkpoint("error_recovery")
+            if error_event:
+                yield error_event
             if action == "return":
-                debug_log("WARN", "Error recovery exhausted — exiting",
-                          chat_id=str(self._chat_id))
-                if error_event:
-                    yield error_event
-                _log_profile(profiler)
-                profiler.deactivate()
-                complete_feature(loop_feature)
+                for ev in self._exit_events(profiler, loop_feature, action):
+                    yield ev
                 return
             if action == "continue":
-                debug_log("DEBUG", "Error recovered — retrying loop",
-                          chat_id=str(self._chat_id))
-                _log_profile(profiler)
-                complete_feature(loop_feature)
+                _finalize_iteration(profiler, loop_feature)
                 continue
 
             # 5. Emit SSE events
@@ -199,33 +177,38 @@ class LoopOrchestrator:
                 yield ev
             profiler.checkpoint("emit_events")
 
-            # 6. Clear per-iteration transient fields
+            # 6. Clear transient fields
             clear_transient_fields(state)
 
-            # 7. Route based on transition
+            # 7. Route transition
             action = await self._handle_transition(state)
             profiler.checkpoint("handle_transition")
             if action == "return":
                 debug_log("DEBUG", "Transition → DONE", chat_id=str(self._chat_id))
-                yield {"event": "done", "data": "{}"}
-                _log_profile(profiler)
-                profiler.deactivate()
-                complete_feature(loop_feature)
+                for ev in self._exit_events(profiler, loop_feature, "return"):
+                    yield ev
                 return
-            if action == "continue":
-                debug_log("DEBUG", "Transition → CONTINUE (tool results, re-invoke)",
-                          chat_id=str(self._chat_id))
-                _log_profile(profiler)
-                complete_feature(loop_feature)
-                continue
+            if action is None:
+                debug_log("WARN", "Unknown transition — exiting", chat_id=str(self._chat_id))
+                for ev in self._exit_events(profiler, loop_feature, "return"):
+                    yield ev
+                return
+            debug_log("DEBUG", "Transition → CONTINUE", chat_id=str(self._chat_id))
+            _finalize_iteration(profiler, loop_feature)
 
-            # Unknown transition — exit safely
-            debug_log("WARN", "Unknown transition — exiting", chat_id=str(self._chat_id))
-            yield {"event": "done", "data": "{}"}
-            _log_profile(profiler)
-            profiler.deactivate()
-            complete_feature(loop_feature)
-            return
+    def _exit_events(self, profiler: Profiler, loop_feature: str, action: str) -> list[dict]:
+        """Finalize loop and yield completion events."""
+        _finalize_iteration(profiler, loop_feature)
+        if action == "return":
+            return [{"event": "done", "data": "{}"}]
+        return []
+
+    async def _clear_checkpoint(self) -> None:
+        if self._checkpointer is not None:
+            try:
+                await self._checkpointer.adelete_thread(self._chat_id)
+            except Exception:
+                logger.warning("Failed to clear checkpoint for thread {tid}", tid=self._chat_id)
 
     async def resume(self, decisions: list[str]) -> AsyncIterator[dict]:
         """Resume from checkpoint after human approval.
@@ -301,6 +284,29 @@ class LoopOrchestrator:
                 turn_id=getattr(self, "_turn_id", None),
                 iteration=getattr(self, "_iteration", None),
             )
+
+    async def _resume_after_approval(self, result: dict) -> dict:
+        """Gather approval decisions and resume the graph."""
+        request_id = _extract_request_id(result)
+        pending = _extract_pending_count(result)
+        decisions = await self._bridge.gather_decisions(request_id, pending)
+        debug_log("INFO", "Approval decisions collected",
+                  request_id=request_id, count=len(decisions))
+
+        await log_transition(
+            self._audit, Transition.APPROVAL_GRANTED,
+            chat_id=_safe_uuid(self._chat_id),
+            turn_id=self._turn_id, iteration=self._iteration,
+        )
+        result = await self._graph.ainvoke(
+            Command(resume={"decisions": decisions}),
+            self._config,
+        )
+        logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
+                     msgs=len(result.get("messages", [])),
+                     t=result.get("transition"),
+                     intr=has_interrupt(result))
+        return result
 
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
         """Attempt error recovery. Returns (action, optional_error_event)."""
