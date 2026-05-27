@@ -1,4 +1,6 @@
 from enum import StrEnum
+from typing import Any
+from uuid import UUID
 
 from langgraph.graph import MessagesState
 
@@ -32,3 +34,6 @@ class AgentState(MessagesState):
     streaming_tool_results: list
     direct_tool_results: list
     _emitted_results: list
+    # Observability: set by orchestrator before each graph invocation.
+    _turn_id: Any = None  # UUID, but Any avoids LangGraph annotation issues
+    _iteration: int | None = None

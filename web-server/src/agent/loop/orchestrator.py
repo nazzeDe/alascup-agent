@@ -21,6 +21,15 @@ from src.observability.profiler import Profiler, write_profile
 from src.tools import start_feature, complete_feature
 
 
+def _safe_uuid(value: str):
+    """Parse UUID safely, returning None for non-UUID strings."""
+    from uuid import UUID
+    try:
+        return UUID(value)
+    except (ValueError, AttributeError):
+        return None
+
+
 def _log_profile(profiler: Profiler) -> None:
     report = profiler.report()
     if report:
@@ -90,6 +99,9 @@ class LoopOrchestrator:
             except Exception:
                 logger.warning("Failed to clear checkpoint for thread {tid}", tid=self._chat_id)
 
+        turn_id = uuid4()
+        self._turn_id = turn_id
+        self._iteration = 0
         state = dict(initial_state)
         def _is_assistant(m):
             r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))
@@ -100,10 +112,12 @@ class LoopOrchestrator:
                   msg_count=len(state.get("messages", [])), assistant_skip=emitted_assistant_count)
 
         profiler = Profiler()
+        profiler.activate()
         it = 0
 
         while True:
             it += 1
+            self._iteration = it
             loop_feature = f"loop:{self._chat_id}#{it}"
             start_feature(loop_feature)
 
@@ -117,6 +131,8 @@ class LoopOrchestrator:
                           before=prev_msg_count, after=after_count, chat_id=str(self._chat_id))
 
             # 2. Invoke graph (think → review → act → observe)
+            state["_turn_id"] = turn_id
+            state["_iteration"] = it
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
 
@@ -139,7 +155,11 @@ class LoopOrchestrator:
                 debug_log("INFO", "Approval decisions collected",
                           request_id=request_id, count=len(decisions))
 
-                await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+                await log_transition(
+                    self._audit, Transition.APPROVAL_GRANTED,
+                    chat_id=_safe_uuid(self._chat_id),
+                    turn_id=self._turn_id, iteration=self._iteration,
+                )
                 result = await self._graph.ainvoke(
                     Command(resume={"decisions": decisions}),
                     self._config,
@@ -161,6 +181,7 @@ class LoopOrchestrator:
                 if error_event:
                     yield error_event
                 _log_profile(profiler)
+                profiler.deactivate()
                 complete_feature(loop_feature)
                 return
             if action == "continue":
@@ -188,6 +209,7 @@ class LoopOrchestrator:
                 debug_log("DEBUG", "Transition → DONE", chat_id=str(self._chat_id))
                 yield {"event": "done", "data": "{}"}
                 _log_profile(profiler)
+                profiler.deactivate()
                 complete_feature(loop_feature)
                 return
             if action == "continue":
@@ -201,6 +223,7 @@ class LoopOrchestrator:
             debug_log("WARN", "Unknown transition — exiting", chat_id=str(self._chat_id))
             yield {"event": "done", "data": "{}"}
             _log_profile(profiler)
+            profiler.deactivate()
             complete_feature(loop_feature)
             return
 
@@ -215,7 +238,12 @@ class LoopOrchestrator:
         start_feature(feature)
         debug_log("INFO", "Resume after approval", chat_id=str(self._chat_id),
                   decisions=",".join(decisions))
-        await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+        await log_transition(
+            self._audit, Transition.APPROVAL_GRANTED,
+            chat_id=_safe_uuid(self._chat_id),
+            turn_id=getattr(self, "_turn_id", None),
+            iteration=getattr(self, "_iteration", None),
+        )
 
         result = await self._graph.ainvoke(
             Command(resume={"decisions": decisions}),
@@ -237,7 +265,12 @@ class LoopOrchestrator:
             request_id = _extract_request_id(result)
             pending = _extract_pending_count(result)
             decisions = await self._bridge.gather_decisions(request_id, pending)
-            await log_transition(self._audit, Transition.APPROVAL_GRANTED)
+            await log_transition(
+                self._audit, Transition.APPROVAL_GRANTED,
+                chat_id=_safe_uuid(self._chat_id),
+                turn_id=getattr(self, "_turn_id", None),
+                iteration=getattr(self, "_iteration", None),
+            )
             result = await self._graph.ainvoke(
                 Command(resume={"decisions": decisions}),
                 {"configurable": {"thread_id": self._chat_id}},
@@ -262,7 +295,12 @@ class LoopOrchestrator:
                       tokens=tokens, limit=limit, msg_count=len(messages),
                       chat_id=str(self._chat_id))
             state["messages"] = await self._context_manager.compress(messages)
-            await log_transition(self._audit, Transition.CONTEXT_COMPACTED)
+            await log_transition(
+                self._audit, Transition.CONTEXT_COMPACTED,
+                chat_id=_safe_uuid(self._chat_id),
+                turn_id=getattr(self, "_turn_id", None),
+                iteration=getattr(self, "_iteration", None),
+            )
 
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
         """Attempt error recovery. Returns (action, optional_error_event)."""
@@ -281,7 +319,12 @@ class LoopOrchestrator:
         if not handled:
             debug_log("ERROR", "Recovery exhausted — exiting loop",
                       code=llm_error.get("code", "?"), chat_id=str(self._chat_id))
-            await log_transition(self._audit, Transition.ERROR_EXIT)
+            await log_transition(
+                self._audit, Transition.ERROR_EXIT,
+                chat_id=_safe_uuid(self._chat_id),
+                turn_id=getattr(self, "_turn_id", None),
+                iteration=getattr(self, "_iteration", None),
+            )
             return "return", {
                 "event": "error",
                 "data": json.dumps(
@@ -299,10 +342,15 @@ class LoopOrchestrator:
         transition = get_transition(state)
         debug_log("DEBUG", "Routing transition", transition=str(transition),
                   chat_id=str(self._chat_id))
+        _audit_kwargs = dict(
+            chat_id=_safe_uuid(self._chat_id),
+            turn_id=getattr(self, "_turn_id", None),
+            iteration=getattr(self, "_iteration", None),
+        )
         if transition == Transition.DONE:
-            await log_transition(self._audit, Transition.DONE)
+            await log_transition(self._audit, Transition.DONE, **_audit_kwargs)
             return "return"
         if transition == Transition.TOOL_RESULTS:
-            await log_transition(self._audit, Transition.TOOL_RESULTS)
+            await log_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)
             return "continue"
         return None

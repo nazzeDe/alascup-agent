@@ -1,5 +1,6 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -269,6 +270,64 @@ class TestLLMAdapterGenerateStream:
             events.append(event)
 
         assert any(e["event"] == "error" for e in events)
+
+
+class TestStreamTracing:
+    @pytest.mark.asyncio
+    async def test_generate_stream_calls_tracer(self, llm_config):
+        from src.services.llm_adapter import LLMAdapter
+
+        chunks = [
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+            'data: {"choices":[{"delta":{"content":" world"}}]}',
+            'data: [DONE]',
+        ]
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
+
+        tracer = AsyncMock()
+        adapter = LLMAdapter(llm_config, tracer=tracer)
+        adapter._streaming_client = lambda: mock_client
+
+        async for _ in adapter.generate_stream(
+            [{"role": "user", "content": "hi"}], chat_id=UUID("00000000-0000-0000-0000-000000000001")
+        ):
+            pass
+
+        tracer.trace_llm_call.assert_called_once()
+        call = tracer.trace_llm_call.call_args
+        assert call.kwargs["chat_id"] == UUID("00000000-0000-0000-0000-000000000001")
+        assert call.kwargs["model"] == llm_config.model
+        assert "Hello world" in call.kwargs["response"]["content"]
+        assert call.kwargs["latency_ms"] >= 0
+
+    @pytest.mark.asyncio
+    async def test_generate_stream_traces_tool_calls(self, llm_config):
+        from src.services.llm_adapter import LLMAdapter
+
+        chunks = [
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","function":{"name":"get_cpu","arguments":""}}]}}]}',
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
+            'data: [DONE]',
+        ]
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
+
+        tracer = AsyncMock()
+        adapter = LLMAdapter(llm_config, tracer=tracer)
+        adapter._streaming_client = lambda: mock_client
+
+        async for _ in adapter.generate_stream([{"role": "user", "content": "hi"}]):
+            pass
+
+        tracer.trace_llm_call.assert_called_once()
+        resp = tracer.trace_llm_call.call_args.kwargs["response"]
+        assert resp["tool_calls"] is not None
+        assert resp["tool_calls"][0]["function"]["name"] == "get_cpu"
 
 
 class TestBuildPayload:

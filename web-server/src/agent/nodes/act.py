@@ -15,6 +15,8 @@ async def act_node(state, *, executor, audit_logger=None):
     if not tool_calls:
         return {"tool_results": []}
 
+    turn_id = state.get("_turn_id")
+    iteration = state.get("_iteration")
     calls = []
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -43,13 +45,15 @@ async def act_node(state, *, executor, audit_logger=None):
         await _log_act(
             audit_logger, calls[i]["tool_name"],
             execution_status=r.get("execution_status", "UNKNOWN"),
+            turn_id=turn_id, iteration=iteration,
         )
 
     return {"tool_results": formatted}
 
 
 async def _log_act(audit_logger, tool_name: str,
-             execution_status: str = "UNKNOWN") -> None:
+             execution_status: str = "UNKNOWN",
+             turn_id=None, iteration=None) -> None:
     if audit_logger is None:
         return
     await audit_logger.log(AuditEvent(
@@ -59,4 +63,6 @@ async def _log_act(audit_logger, tool_name: str,
         event="TOOL_EXECUTED",
         tool_name=tool_name,
         execution_status=execution_status,
+        turn_id=turn_id,
+        iteration=iteration,
     ))

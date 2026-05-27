@@ -1,8 +1,10 @@
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from loguru import logger
 
 from src.agent.graph import build_graph
 from src.api import api_router
@@ -74,8 +76,35 @@ def _build_services():
     )
 
 
+def _configure_logging() -> None:
+    """Configure loguru: console INFO + rotating file DEBUG."""
+    logger.remove()
+
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    log_dir = Path("logs/app")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Console: concise format, INFO level
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format="{time:HH:mm:ss} | {level:<7} | {name}:{function}:{line} - {message}",
+    )
+
+    # File: detailed format, DEBUG level, daily rotation, 7-day retention
+    logger.add(
+        str(log_dir / "{time:YYYYMMDD}.log"),
+        level="DEBUG",
+        rotation="00:00",
+        retention="7 days",
+        compression="gz",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} - {message}",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _configure_logging()
     services = _build_services()
     db = services.db
     await db.connect()

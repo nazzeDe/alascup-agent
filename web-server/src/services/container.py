@@ -107,3 +107,7 @@ def error_recovery(request: Request) -> ErrorRecovery | None:
 
 def graph(request: Request) -> CompiledStateGraph:
     return _services(request).graph
+
+
+def db(request: Request):
+    return _services(request).db

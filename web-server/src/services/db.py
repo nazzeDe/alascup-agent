@@ -1,9 +1,7 @@
-import logging
 from urllib.parse import urlparse
 
 import asyncpg
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 CREATE_TABLES_SQL = """
 DO $$ BEGIN CREATE TYPE msg_type AS ENUM ('user', 'assistant', 'tool_call', 'tool_result', 'system'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -51,6 +49,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
     timestamp TIMESTAMPTZ NOT NULL,
     chat_id UUID,
     request_id UUID,
+    turn_id UUID,
+    iteration INTEGER,
     level audit_level NOT NULL,
     actor VARCHAR(32) NOT NULL,
     event VARCHAR(64) NOT NULL,

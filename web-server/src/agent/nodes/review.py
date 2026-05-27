@@ -15,6 +15,8 @@ async def review_node(state, *, executor, rule_engine, audit_logger):
     tool_calls = state.get("tool_calls", []) or []
     logger.debug("review_node: tc_count={count}", count=len(tool_calls))
     debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))
+    turn_id = state.get("_turn_id")
+    iteration = state.get("_iteration")
     approved: list[dict] = []
     rejected: list[dict] = []
     pending: list[dict] = []
@@ -22,7 +24,8 @@ async def review_node(state, *, executor, rule_engine, audit_logger):
     for tc in tool_calls:
         name, is_read_only, is_rollbackable = await _classify_tool_call(tc, executor)
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
-        await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending)
+        await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending,
+                              turn_id=turn_id, iteration=iteration)
 
     tool_names = [t.get("function", {}).get("name", "?") for t in tool_calls]
     debug_log("DEBUG", "Review done",
@@ -90,22 +93,29 @@ async def _apply_decision(
     approved: list[dict],
     rejected: list[dict],
     pending: list[dict],
+    *,
+    turn_id=None,
+    iteration=None,
 ) -> None:
     if decision == "REJECT":
         rejected.append(tc)
-        await _log_review(audit_logger, "TOOL_REJECTED", name, decision="REJECT")
+        await _log_review(audit_logger, "TOOL_REJECTED", name, decision="REJECT",
+                          turn_id=turn_id, iteration=iteration)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
         approved.append(tc)
-        await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO)
+        await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO,
+                          turn_id=turn_id, iteration=iteration)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)
-        await _log_review(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN)
+        await _log_review(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN,
+                          turn_id=turn_id, iteration=iteration)
 
 
-async def _log_review(audit_logger, event: str, tool_name: str, level=None, **kwargs) -> None:
+async def _log_review(audit_logger, event: str, tool_name: str, level=None,
+                      turn_id=None, iteration=None, **kwargs) -> None:
     if audit_logger is None:
         return
     if level is None:
@@ -116,5 +126,7 @@ async def _log_review(audit_logger, event: str, tool_name: str, level=None, **kw
         actor="system",
         event=event,
         tool_name=tool_name or None,
+        turn_id=turn_id,
+        iteration=iteration,
         **{k: v for k, v in kwargs.items() if v is not None},
     ))

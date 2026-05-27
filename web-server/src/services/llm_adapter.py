@@ -125,8 +125,13 @@ class LLMAdapter:
         system: str | None = None,
         chat_id: UUID | None = None,
     ):
+        import time as _time
+        import uuid as _uuid
+
+        start = _time.monotonic()
         payload = self._build_payload(messages, tools, system, stream=True)
         accumulated: dict[int, dict] = {}
+        accumulated_content = ""
 
         async with self._streaming_client() as client:
             async with client.stream("POST", "/chat/completions", json=payload) as resp:
@@ -152,6 +157,25 @@ class LLMAdapter:
 
                     for event in self._process_chunk(data_str, accumulated):
                         yield event
+                        if event.get("event") == "assistant":
+                            try:
+                                delta = json.loads(event["data"]).get("delta", "")
+                                accumulated_content += delta
+                            except (json.JSONDecodeError, KeyError):
+                                pass
+
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        if self._tracer:
+            full_response: dict = {"content": accumulated_content}
+            if accumulated:
+                full_response["tool_calls"] = list(accumulated.values())
+            await self._tracer.trace_llm_call(
+                chat_id=chat_id if chat_id else _uuid.uuid4(),
+                model=self._config.model,
+                messages=messages,
+                response=full_response,
+                latency_ms=latency_ms,
+            )
 
     @staticmethod
     def _process_chunk(data_str: str, accumulated: dict[int, dict]):

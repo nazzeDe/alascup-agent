@@ -16,6 +16,8 @@ class AuditEvent(BaseModel):
     timestamp: str
     chat_id: UUID | None = None
     request_id: UUID | None = None
+    turn_id: UUID | None = None
+    iteration: int | None = None
     level: AuditLevel
     actor: str
     event: str

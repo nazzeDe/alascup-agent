@@ -4,7 +4,9 @@ Main flow only needs two lines:
 1) start_feature("feature-name")
 2) complete_feature("feature-name")
 
-Formatting and summary stay inside this module.
+When a Profiler is active (via context variable), timing records are
+delegated to the Profiler for unified reporting. Otherwise, records
+are stored locally as before.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from loguru import logger
 
 @dataclass(frozen=True)
 class FeatureDurationRecord:
-    # 一条记录代表一次“功能”完成后的耗时结果。
+    # 一条记录代表一次"功能"完成后的耗时结果。
     feature_name: str
     duration_ms: float
     status: str
@@ -36,29 +38,26 @@ class FeatureTimeTracker:
         self._lock = Lock()
 
     def start_feature(self, feature_name: str) -> None:
-        # 先把功能名整理干净，再记录开始时间。
         normalized_name = _normalize_feature_name(feature_name)
+        # Delegate to active Profiler if available.
+        from src.observability.profiler import get_current_profiler
+        profiler = get_current_profiler()
+        if profiler is not None:
+            profiler.start_feature(normalized_name)
         with self._lock:
             self._active_starts[normalized_name] = perf_counter()
-
-        # 这里打日志，方便一眼看出某个“功能”什么时候开始的。
         logger.info("feature_started feature={feature}", feature=normalized_name)
 
     def complete_feature(self, feature_name: str, status: str = "success") -> float:
-        # 结束时同样先规范化名称，避免前后写法不一致导致找不到开始记录。
         normalized_name = _normalize_feature_name(feature_name)
-        # status 可能被传成空字符串，所以这里兜底成 success。
         normalized_status = status.strip() or "success"
 
         with self._lock:
-            # 取出开始时间的同时把它从字典里移除，表示这次计时已经结束。
             started_at = self._active_starts.pop(normalized_name, None)
             if started_at is None:
                 raise ValueError(
                     f"Feature '{normalized_name}' has not been started, cannot complete."
                 )
-
-            # perf_counter 适合算耗时，因为它单调递增，不容易受系统时间变化影响。
             duration_ms = (perf_counter() - started_at) * 1000.0
             self._records.append(
                 FeatureDurationRecord(
@@ -67,6 +66,12 @@ class FeatureTimeTracker:
                     status=normalized_status,
                 )
             )
+
+        # Delegate to active Profiler if available.
+        from src.observability.profiler import get_current_profiler
+        profiler = get_current_profiler()
+        if profiler is not None:
+            profiler.complete_feature(normalized_name, normalized_status)
 
         logger.info(
             "feature_completed feature={feature} status={status} duration_ms={duration}",

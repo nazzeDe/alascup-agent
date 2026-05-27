@@ -12,7 +12,7 @@ async approval model:
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.agent.loop.audit import log_transition
 from src.agent.loop.orchestrator import LoopOrchestrator
@@ -44,7 +44,15 @@ class Query:
         self, messages: list[dict], available_tools: list, system: str | None = None
     ):
         """Run agent until interrupt or DONE. Yields SSE events."""
-        await log_transition(self._audit, Transition.USER_MESSAGE)
+        chat_uuid = None
+        try:
+            chat_uuid = UUID(self._chat_id)
+        except (ValueError, AttributeError):
+            pass
+        await log_transition(
+            self._audit, Transition.USER_MESSAGE,
+            chat_id=chat_uuid,
+        )
 
         state = {
             "messages": messages,
