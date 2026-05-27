@@ -499,6 +499,26 @@ class TestMessagesConversionWithLangGraphObjects:
         assert result[2].get("name") == "get_cpu"
         assert result[2].get("tool_call_id") == "tc1"
 
+    def test_preserves_reasoning_content_from_aimessage(self):
+        """AIMessage with reasoning_content in additional_kwargs must be preserved.
+
+        DeepSeek API requires reasoning_content to be passed back in subsequent
+        messages. LangGraph's add_messages stores it in additional_kwargs.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+        ai = AIMessage(content="let me check", tool_calls=[{"name": "get_cpu", "args": {}, "id": "tc1", "type": "tool_call"}])
+        ai.additional_kwargs["reasoning_content"] = "The user wants CPU info"
+        state = {
+            "messages": [
+                HumanMessage(content="check cpu"),
+                ai,
+                ToolMessage(content="[get_cpu] SUCCEEDED", tool_call_id="tc1", name="get_cpu"),
+            ]
+        }
+        result = _messages(state)
+        assert result[1]["role"] == "assistant"
+        assert result[1].get("reasoning_content") == "The user wants CPU info"
+
 
 class TestMergeToolBlock:
     """Verify _merge_tool_block sets required fields."""
@@ -565,8 +585,35 @@ class TestReasoningStreaming:
         assert result["messages"][0]["reasoning_content"] == "think"
         assert result["transition"] == Transition.DONE
 
+    async def test_content_streamed_to_queue_without_message_id(self):
+        """Content chunks are forwarded to queue as plain deltas (no message_id)."""
+        import asyncio
+        from src.agent.nodes import _event_queue
+
+        llm = MockLLM([
+            {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
+            {"event": "assistant", "data": json.dumps({"delta": "world"})},
+            {"event": "done", "data": "{}"},
+        ])
+        queue = asyncio.Queue()
+        token = _event_queue.set(queue)
+
+        result = await think_node(_state(), llm=llm)
+        _event_queue.reset(token)
+
+        assert result["messages"][0]["content"] == "Hello world"
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        assistant_items = [i for i in items if i["event"] == "assistant"]
+        assert len(assistant_items) == 2
+        for item in assistant_items:
+            data = json.loads(item["data"])
+            assert "message_id" not in data
+            assert "delta" in data
+
     async def test_no_reasoning_no_queue_events(self):
-        """When there's no reasoning_content, no reasoning events pushed to queue."""
+        """When there's no reasoning_content, only content + thinking_done pushed to queue."""
         import asyncio
         from src.agent.nodes import _event_queue
 
@@ -583,5 +630,8 @@ class TestReasoningStreaming:
         items = []
         while not queue.empty():
             items.append(queue.get_nowait())
-        assert len(items) == 1
-        assert items[0]["event"] == "thinking_done"
+        # Content chunk and thinking_done are pushed; no reasoning events.
+        assert len(items) == 2
+        assert items[0]["event"] == "assistant"
+        assert "CPU normal." in items[0]["data"]
+        assert items[1]["event"] == "thinking_done"

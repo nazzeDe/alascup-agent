@@ -789,3 +789,74 @@ class TestOrchestratorTermination:
         assert call_count >= 2, f"orchestrator should loop at least once, got {call_count} iterations"
         assert any(e["event"] == "done" for e in events)
 
+
+class TestOrchestratorClearsCheckpoint:
+    @pytest.mark.asyncio
+    async def test_clears_checkpoint_before_first_invoke(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        cleared_threads = []
+
+        class MockCheckpointer:
+            async def adelete_thread(self, thread_id):
+                cleared_threads.append(thread_id)
+
+        class _DoneGraph:
+            async def ainvoke(self, state, config=None):
+                return {
+                    **state,
+                    "transition": Transition.DONE,
+                    "messages": state.get("messages", []),
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "streaming_tool_results": [],
+                }
+
+        orch = LoopOrchestrator(
+            graph=_DoneGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test-thread",
+            checkpointer=MockCheckpointer(),
+        )
+        state = {
+            "messages": [],
+            "transition": None,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+        async for _ in orch.run(state):
+            pass
+
+        assert cleared_threads == ["test-thread"]
+
+    @pytest.mark.asyncio
+    async def test_no_checkpointer_no_crash(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+            checkpointer=None,
+        )
+        state = {
+            "messages": [{"role": "assistant", "content": "OK"}],
+            "transition": Transition.DONE,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+        events = []
+        async for ev in orch.run(state):
+            events.append(ev)
+        assert any(e["event"] == "done" for e in events)
+

@@ -14,6 +14,7 @@ from src.models.message import Message, MessageType
 from src.services.container import (
     approval_bridge,
     audit_logger,
+    checkpointer as checkpointer_dep,
     context_manager,
     error_recovery,
     graph,
@@ -25,6 +26,9 @@ from src.services.container import (
 from src.tools import start_feature, complete_feature, summarize_feature_durations
 
 router = APIRouter()
+
+# Per-chat-id active task tracking for abort-on-new-message semantics.
+_active_tasks: dict[str, asyncio.Task] = {}
 
 
 class ChatTurnRequest(BaseModel):
@@ -46,12 +50,51 @@ async def chat_turn(
     bridge=Depends(approval_bridge),
     graph_dep=Depends(graph),
     error_rec=Depends(error_recovery),
+    checkpointer_saver=Depends(checkpointer_dep),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
     chat_id_str = body.chat_id
     if not chat_id_str:
         new_session = await session_mgr.create_session()
         chat_id_str = str(new_session.id)
+
+    # Abort previous request for this chat (Anthropic Claude pattern).
+    if old_task := _active_tasks.get(chat_id_str):
+        if not old_task.done():
+            old_task.cancel()
+
+    current = asyncio.current_task()
+    _active_tasks[chat_id_str] = current
+
+    try:
+        return await _do_chat(
+            body, request, chat_id_str,
+            session_mgr, prompt_mgr, llm, context_mgr,
+            executor, audit_logger, bridge, graph_dep,
+            error_rec, checkpointer_saver,
+        )
+    except asyncio.CancelledError:
+        raise HTTPException(status_code=499, detail="Request cancelled by newer message")
+    finally:
+        _active_tasks.pop(chat_id_str, None)
+
+
+async def _do_chat(
+    body: ChatTurnRequest,
+    request: Request,
+    chat_id_str: str,
+    session_mgr,
+    prompt_mgr,
+    llm,
+    context_mgr,
+    executor,
+    audit_logger,
+    bridge,
+    graph_dep,
+    error_rec,
+    checkpointer_saver,
+):
+    """Core chat logic, separated for abort wrapping."""
     try:
         chat_id = UUID(chat_id_str)
     except ValueError:
@@ -91,6 +134,7 @@ async def chat_turn(
         audit_logger=audit_logger,
         error_recovery=error_rec,
         chat_id=chat_id,
+        checkpointer=checkpointer_saver,
     )
 
     available_tools = executor.list_tools()
@@ -102,42 +146,62 @@ async def chat_turn(
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
         token = reasoning_queue.set(queue)
         chat_id_token = _chat_id_ctx.set(str(chat_id))
+
         collected_text: list[str] = []
-        buffered: list[dict] = []
+
+        # Unified event queue for concurrent drain + agent processing.
+        event_queue: asyncio.Queue = asyncio.Queue(maxsize=128)
 
         async def drain_queue():
+            """Forward reasoning and assistant streaming events in real-time."""
             while True:
                 item = await queue.get()
                 if item.get("event") == "thinking_done":
                     break
-                buffered.append(item)
+                await event_queue.put(("item", item))
+
+        async def run_agent():
+            """Drive the agent iterator and forward events."""
+            try:
+                async for event in agent.run(messages, available_tools, system=system_prompt):
+                    await event_queue.put(("agent", event))
+            finally:
+                await event_queue.put(("done", None))
 
         drain_task = asyncio.create_task(drain_queue())
-        agent_iter = agent.run(messages, available_tools, system=system_prompt).__aiter__()
+        agent_task = asyncio.create_task(run_agent())
+        agent_done = False
 
         try:
-            while True:
-                while buffered:
-                    yield buffered.pop(0)
-
+            while not agent_done:
                 if await request.is_disconnected():
                     break
 
                 try:
-                    event = await agent_iter.__anext__()
-                except StopAsyncIteration:
-                    break
+                    tag, event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
 
+                if tag == "done":
+                    agent_done = True
+                    continue
+
+                # Track assistant text from emit_events (formal messages with message_id).
                 if event.get("event") == "assistant":
                     try:
                         data = json.loads(event["data"])
-                        collected_text.append(data.get("delta", ""))
+                        if data.get("message_id"):
+                            collected_text.append(data.get("delta", ""))
                     except (json.JSONDecodeError, KeyError):
                         pass
+
                 yield event
 
-            while buffered:
-                yield buffered.pop(0)
+            # Drain any remaining items after agent completes.
+            while not event_queue.empty():
+                tag, event = event_queue.get_nowait()
+                if event:
+                    yield event
 
         finally:
             reasoning_queue.reset(token)

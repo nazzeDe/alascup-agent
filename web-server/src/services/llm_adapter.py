@@ -1,7 +1,7 @@
 import json
 from uuid import UUID, uuid4
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Timeout
 
 from src.config.models import LLMConfig
 
@@ -73,6 +73,18 @@ class LLMAdapter:
             transport=self._transport,
         )
 
+    def _streaming_client(self) -> AsyncClient:
+        """Client with tighter read timeout for streaming (30s between chunks)."""
+        return AsyncClient(
+            base_url=self._config.api_url,
+            headers={
+                "Authorization": f"Bearer {self._config.api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=Timeout(connect=30, read=30, write=30, pool=30),
+            transport=self._transport,
+        )
+
     async def generate(
         self,
         messages: list[dict],
@@ -116,7 +128,7 @@ class LLMAdapter:
         payload = self._build_payload(messages, tools, system, stream=True)
         accumulated: dict[int, dict] = {}
 
-        async with self._client() as client:
+        async with self._streaming_client() as client:
             async with client.stream("POST", "/chat/completions", json=payload) as resp:
                 if resp.status_code != 200:
                     text = await resp.aread()
@@ -224,6 +236,7 @@ class LLMAdapter:
             "model": self._config.model,
             "messages": msgs,
             "stream": stream,
+            "max_tokens": self._max_tokens,
         }
         if tools:
             payload["tools"] = tools

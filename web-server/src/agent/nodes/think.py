@@ -68,6 +68,9 @@ async def think_node(state, *, llm, executor=None):
             rc = data.get("reasoning_content", "")
             if rc:
                 await queue.put({"event": "reasoning", "data": json.dumps({"delta": rc})})
+            content_chunk = data.get("delta", "")
+            if content_chunk:
+                await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
 
     if queue is not None:
         await queue.put({"event": "thinking_done"})

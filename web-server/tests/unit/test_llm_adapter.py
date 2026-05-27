@@ -157,7 +157,7 @@ class TestLLMAdapterGenerateStream:
         mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
 
         adapter = LLMAdapter(llm_config)
-        adapter._client = lambda: mock_client
+        adapter._streaming_client = lambda: mock_client
 
         parts = []
         async for event in adapter.generate_stream([{"role": "user", "content": "hi"}]):
@@ -180,7 +180,7 @@ class TestLLMAdapterGenerateStream:
         mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
 
         adapter = LLMAdapter(llm_config)
-        adapter._client = lambda: mock_client
+        adapter._streaming_client = lambda: mock_client
 
         events = []
         async for event in adapter.generate_stream([{"role": "user", "content": "check"}]):
@@ -211,7 +211,7 @@ class TestLLMAdapterGenerateStream:
         mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
 
         adapter = LLMAdapter(llm_config)
-        adapter._client = lambda: mock_client
+        adapter._streaming_client = lambda: mock_client
 
         events = []
         async for event in adapter.generate_stream([{"role": "user", "content": "check"}]):
@@ -240,7 +240,7 @@ class TestLLMAdapterGenerateStream:
         mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks))
 
         adapter = LLMAdapter(llm_config)
-        adapter._client = lambda: mock_client
+        adapter._streaming_client = lambda: mock_client
 
         found = False
         async for event in adapter.generate_stream(
@@ -262,10 +262,29 @@ class TestLLMAdapterGenerateStream:
         mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks, status=500))
 
         adapter = LLMAdapter(llm_config)
-        adapter._client = lambda: mock_client
+        adapter._streaming_client = lambda: mock_client
 
         events = []
         async for event in adapter.generate_stream([{"role": "user", "content": "hi"}]):
             events.append(event)
 
         assert any(e["event"] == "error" for e in events)
+
+
+class TestBuildPayload:
+    def test_includes_max_tokens(self, llm_config):
+        from src.services.llm_adapter import LLMAdapter
+
+        adapter = LLMAdapter(llm_config)
+        payload = adapter._build_payload([{"role": "user", "content": "hi"}], None, None, False)
+        assert "max_tokens" in payload
+        assert payload["max_tokens"] == llm_config.max_tokens
+
+    def test_escalate_max_tokens_changes_payload(self, llm_config):
+        from src.services.llm_adapter import LLMAdapter
+
+        adapter = LLMAdapter(llm_config)
+        original = adapter._max_tokens
+        adapter.escalate_max_tokens()
+        payload = adapter._build_payload([{"role": "user", "content": "hi"}], None, None, False)
+        assert payload["max_tokens"] == original * 2

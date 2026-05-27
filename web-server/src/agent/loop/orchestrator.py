@@ -67,6 +67,7 @@ class LoopOrchestrator:
         error_recovery,
         llm,
         chat_id: str,
+        checkpointer=None,
     ):
         self._graph = graph
         self._context_manager = context_manager
@@ -76,9 +77,19 @@ class LoopOrchestrator:
         self._llm = llm
         self._config = {"configurable": {"thread_id": chat_id}}
         self._chat_id = chat_id
+        self._checkpointer = checkpointer
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute ReAct loop, yielding all events on one SSE connection."""
+        # Clear checkpoint to prevent message duplication across turns.
+        # Session DB is the source of truth for history; the checkpoint only
+        # needs to persist within a single turn for interrupt/resume.
+        if self._checkpointer is not None:
+            try:
+                await self._checkpointer.adelete_thread(self._chat_id)
+            except Exception:
+                logger.warning("Failed to clear checkpoint for thread {tid}", tid=self._chat_id)
+
         state = dict(initial_state)
         def _is_assistant(m):
             r = m.get("role", m.get("type", "")) if isinstance(m, dict) else str(getattr(m, "type", ""))

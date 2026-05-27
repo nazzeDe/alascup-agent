@@ -195,6 +195,8 @@ export function useSessionManager(deps?: ManagerDeps) {
       let assistantBuffer = ''
       let currentReasoningId = ''
       let reasoningBuffer = ''
+      let streamingBuffer = ''
+      const STREAMING_PLACEHOLDER_ID = '__streaming__'
 
       let newChatId: string | null = null
 
@@ -256,23 +258,54 @@ export function useSessionManager(deps?: ManagerDeps) {
             agentPhase.value = 'responding'
             currentActivity.value = ''
 
-            if (data.message_id !== currentAssistantMsgId) {
-              currentAssistantMsgId = data.message_id
-              assistantBuffer = ''
-              messages.value = [...messages.value, {
-                message_id: data.message_id,
-                chat_id: data.chat_id,
-                timestamp: new Date().toISOString(),
-                type: 'assistant',
-                content: '',
-              }]
-            }
-            assistantBuffer += data.delta
-            const idx = messages.value.findIndex(m => m.message_id === currentAssistantMsgId)
-            if (idx !== -1) {
-              const updated = [...messages.value]
-              updated[idx] = { ...updated[idx]!, content: assistantBuffer }
-              messages.value = updated
+            if (data.message_id) {
+              // Formal message from emit_events (has message_id).
+              // Replace streaming placeholder if it exists.
+              streamingBuffer = ''
+              const placeholderIdx = messages.value.findIndex(m => m.message_id === STREAMING_PLACEHOLDER_ID)
+              if (data.message_id !== currentAssistantMsgId) {
+                currentAssistantMsgId = data.message_id
+                assistantBuffer = ''
+                const newMsg: Message = {
+                  message_id: data.message_id,
+                  chat_id: data.chat_id ?? chatId.value ?? '',
+                  timestamp: new Date().toISOString(),
+                  type: 'assistant',
+                  content: '',
+                }
+                if (placeholderIdx !== -1) {
+                  // Replace placeholder with formal message.
+                  const updated = [...messages.value]
+                  updated[placeholderIdx] = newMsg
+                  messages.value = updated
+                } else {
+                  messages.value = [...messages.value, newMsg]
+                }
+              }
+              assistantBuffer += data.delta
+              const idx = messages.value.findIndex(m => m.message_id === currentAssistantMsgId)
+              if (idx !== -1) {
+                const updated = [...messages.value]
+                updated[idx] = { ...updated[idx]!, content: assistantBuffer }
+                messages.value = updated
+              }
+            } else {
+              // Streaming delta (no message_id) — show as temporary placeholder.
+              streamingBuffer += data.delta
+              const placeholderIdx = messages.value.findIndex(m => m.message_id === STREAMING_PLACEHOLDER_ID)
+              if (placeholderIdx === -1) {
+                messages.value = [...messages.value, {
+                  message_id: STREAMING_PLACEHOLDER_ID,
+                  chat_id: chatId.value ?? '',
+                  timestamp: new Date().toISOString(),
+                  type: 'assistant',
+                  content: streamingBuffer,
+                }]
+              } else {
+                const updated = [...messages.value]
+                updated[placeholderIdx] = { ...updated[placeholderIdx]!, content: streamingBuffer }
+                messages.value = updated
+              }
             }
           },
 

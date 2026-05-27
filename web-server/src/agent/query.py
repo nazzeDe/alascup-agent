@@ -29,6 +29,7 @@ class Query:
         audit_logger=None,
         error_recovery=None,
         chat_id=None,
+        checkpointer=None,
     ):
         self._llm = llm
         self._graph = graph
@@ -37,6 +38,7 @@ class Query:
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._chat_id = str(chat_id) if chat_id else str(uuid4())
+        self._checkpointer = checkpointer
 
     async def run(
         self, messages: list[dict], available_tools: list, system: str | None = None
@@ -75,4 +77,5 @@ class Query:
             error_recovery=self._error_recovery,
             llm=self._llm,
             chat_id=self._chat_id,
+            checkpointer=self._checkpointer,
         )
