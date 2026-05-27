@@ -2,3 +2,4 @@ CLAUDE.md
 .claude
 .playwright-mcp
 .pytest_cache
+web-server/config/llm.json
