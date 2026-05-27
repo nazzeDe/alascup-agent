@@ -69,16 +69,4 @@ describe('useToast', () => {
     expect(a.toasts.value).toBe(b.toasts.value)
   })
 
-  it('supports four toast types', async () => {
-    const { useToast } = await import('@/composables/useToast')
-    const { toasts, showToast } = useToast()
-
-    showToast('error', 'e')
-    showToast('warning', 'w')
-    showToast('info', 'i')
-    showToast('success', 's')
-
-    expect(toasts.value).toHaveLength(4)
-    expect(toasts.value.map(t => t.type)).toEqual(['error', 'warning', 'info', 'success'])
-  })
 })

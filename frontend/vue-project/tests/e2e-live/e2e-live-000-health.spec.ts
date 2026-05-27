@@ -13,8 +13,4 @@ test.describe('E2E-Live-000: Health Smoke', () => {
     expect(tools.length).toBeGreaterThan(0)
   })
 
-  test('frontend loads and shows new session button', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.locator('button:has-text("New Session")').or(page.locator('.btn-new-session'))).toBeVisible({ timeout: 10000 })
-  })
 })

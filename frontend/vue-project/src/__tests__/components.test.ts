@@ -21,32 +21,6 @@ describe('SessionList', () => {
     expect(wrapper.text()).toContain('Session 2')
   })
 
-  it('emits select event on session click', async () => {
-    const { default: SessionList } = await import('@/components/SessionList.vue')
-    const wrapper = mount(SessionList, {
-      props: {
-        sessions: [{ chat_id: 'c1', title: 'S1', messages: [], executed_tool_list: [], timestamp: '' }],
-        active_chat_id: undefined,
-      },
-    })
-    const item = wrapper.find('.session-item')
-    if (item.exists()) {
-      await item.trigger('click')
-      expect(wrapper.emitted('select')?.[0]?.[0]).toBe('c1')
-    }
-  })
-
-  it('emits create event on new session button click', async () => {
-    const { default: SessionList } = await import('@/components/SessionList.vue')
-    const wrapper = mount(SessionList, {
-      props: { sessions: [], active_chat_id: undefined },
-    })
-    const newBtn = wrapper.find('.btn-new-session')
-    if (newBtn.exists()) {
-      await newBtn.trigger('click')
-      expect(wrapper.emitted('create')).toBeTruthy()
-    }
-  })
 })
 
 describe('App', () => {

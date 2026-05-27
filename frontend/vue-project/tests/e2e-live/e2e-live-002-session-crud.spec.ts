@@ -1,13 +1,8 @@
 import { test, expect } from '@playwright/test'
 import { SEL, sendMessage, waitForAssistantMessage, waitForStreamToEnd } from './fixtures'
-import { createSession, checkHealth } from './helpers'
+import { createSession } from './helpers'
 
 test.describe('E2E-Live-002: Session CRUD', () => {
-  test('backend health check passes', async ({ page, request }) => {
-    const health = await checkHealth(page)
-    expect(health).toHaveProperty('status', 'ok')
-  })
-
   test('create session via API', async ({ page }) => {
     const id = await createSession(page)
     expect(id).toBeTruthy()
