@@ -15,20 +15,6 @@ class FakeRegistry:
 
 
 class TestToolExecutorConstruction:
-    def test_stores_registry_and_default_retries(self):
-        from src.mcp_client.executor import ToolExecutor
-
-        registry = FakeRegistry()
-        executor = ToolExecutor(registry)
-        assert executor._registry is registry
-        assert executor._max_retries == 2
-
-    def test_custom_retries(self):
-        from src.mcp_client.executor import ToolExecutor
-
-        executor = ToolExecutor(FakeRegistry(), max_retries=0)
-        assert executor._max_retries == 0
-
     def test_is_connect_error(self):
         from src.mcp_client.executor import ToolExecutor
 

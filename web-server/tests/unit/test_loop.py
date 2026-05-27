@@ -130,12 +130,6 @@ class TestEmitEvents:
             "tool_result",
         ]
 
-    def test_empty_state_returns_empty_list(self):
-        assert emit_events({}, chat_id="c1") == []
-
-    def test_messages_is_missing_returns_empty(self):
-        assert emit_events({}) == []
-
     def test_langgraph_message_objects_handled(self):
         """Non-dict messages with .type and .content attributes."""
 

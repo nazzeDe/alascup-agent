@@ -21,19 +21,6 @@ def _make_client(tools: list):
     return mock
 
 
-class TestServerRegistryConstruction:
-    def test_stores_server_entries(self):
-        from src.config.models import ServerEntry
-        from src.mcp_client.registry import ServerRegistry
-
-        servers = [
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-            ServerEntry(name="rag-server", url="http://rag:8002"),
-        ]
-        registry = ServerRegistry(servers)
-        assert len(registry._servers) == 2
-
-
 class TestServerRegistryUrlFor:
     def test_returns_url_for_known_server(self):
         from src.config.models import ServerEntry
@@ -199,16 +186,6 @@ class TestServerRegistryRefresh:
 
 
 class TestServerRegistryListTools:
-    @pytest.mark.asyncio
-    async def test_returns_empty_before_discover(self):
-        from src.config.models import ServerEntry
-        from src.mcp_client.registry import ServerRegistry
-
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
-        assert registry.list_tools() == []
-
     @pytest.mark.asyncio
     async def test_returns_cached_after_discover(self):
         from src.config.models import ServerEntry

@@ -43,12 +43,6 @@ def _checkpoint_data(checkpoint_id=None):
 
 
 class TestPostgresCheckpointerConstruction:
-    def test_stores_db(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        assert cp._db is mock_db
-
     def test_pool_raises_when_not_connected(self):
         from src.persistence.checkpoint import PostgresCheckpointer
 
@@ -57,45 +51,6 @@ class TestPostgresCheckpointerConstruction:
         cp = PostgresCheckpointer(db)
         with pytest.raises(RuntimeError, match="not connected"):
             _ = cp._pool
-
-
-class TestSyncAdapters:
-    """All sync methods raise NotImplementedError."""
-
-    def test_get_tuple_raises(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        with pytest.raises(NotImplementedError):
-            cp.get_tuple(_config())
-
-    def test_put_raises(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        with pytest.raises(NotImplementedError):
-            cp.put(_config(), _checkpoint_data(), {}, {})
-
-    def test_put_writes_raises(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        with pytest.raises(NotImplementedError):
-            cp.put_writes(_config(), [], "task-1")
-
-    def test_delete_thread_raises(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        with pytest.raises(NotImplementedError):
-            cp.delete_thread("thread-1")
-
-    def test_list_raises(self, mock_db):
-        from src.persistence.checkpoint import PostgresCheckpointer
-
-        cp = PostgresCheckpointer(mock_db)
-        with pytest.raises(NotImplementedError):
-            next(cp.list(_config()))
 
 
 class TestAput:

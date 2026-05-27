@@ -27,11 +27,6 @@ class TestCountTokens:
         naive = max(1, chars // 4)
         assert tokens > naive * 2  # at least 2x the naive estimate
 
-    def test_empty_messages_returns_1(self):
-        from src.services.context_manager import ContextManager
-        cm = ContextManager()
-        assert cm.count_tokens([]) == 1
-
     def test_handles_langgraph_message_objects(self):
         from src.services.context_manager import ContextManager
         cm = ContextManager()

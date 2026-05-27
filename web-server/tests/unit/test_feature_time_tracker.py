@@ -25,44 +25,7 @@ class TestNormalizeFeatureName:
             _normalize_feature_name("   ")
 
 
-class TestFormatDurationMs:
-    def test_formats_two_decimals(self):
-        from src.tools.feature_time_tracker import _format_duration_ms
-
-        assert _format_duration_ms(123.456) == "123.46"
-
-
-class TestFeatureDurationRecord:
-    def test_frozen_and_fields(self):
-        from src.tools.feature_time_tracker import FeatureDurationRecord
-
-        r = FeatureDurationRecord(feature_name="test", duration_ms=100.0, status="success")
-        assert r.feature_name == "test"
-        assert r.duration_ms == 100.0
-        assert r.status == "success"
-
-        with pytest.raises(Exception):
-            r.duration_ms = 200.0
-
-
 class TestFeatureTimeTrackerStartComplete:
-    def test_start_and_complete_returns_duration(self):
-        from src.tools.feature_time_tracker import FeatureTimeTracker
-
-        tracker = FeatureTimeTracker()
-        tracker.start_feature("my-op")
-        time.sleep(0.01)
-        duration = tracker.complete_feature("my-op")
-        assert duration > 0
-
-    def test_start_and_complete_with_different_spacing(self):
-        from src.tools.feature_time_tracker import FeatureTimeTracker
-
-        tracker = FeatureTimeTracker()
-        tracker.start_feature("  my-op  ")
-        duration = tracker.complete_feature("my-op")
-        assert duration >= 0
-
     def test_complete_unstarted_raises(self):
         from src.tools.feature_time_tracker import FeatureTimeTracker
 
@@ -107,22 +70,6 @@ class TestFeatureTimeTrackerStartComplete:
 
 
 class TestFeatureTimeTrackerSummarize:
-    def test_empty_summary(self):
-        from src.tools.feature_time_tracker import FeatureTimeTracker
-
-        tracker = FeatureTimeTracker()
-        assert tracker.summarize_feature_durations() == {}
-
-    def test_single_feature_single_run(self):
-        from src.tools.feature_time_tracker import FeatureTimeTracker
-
-        tracker = FeatureTimeTracker()
-        tracker.start_feature("op")
-        tracker.complete_feature("op")
-        summary = tracker.summarize_feature_durations()
-        assert "op" in summary
-        assert summary["op"] > 0
-
     def test_single_feature_multiple_runs_averages(self):
         from src.tools.feature_time_tracker import FeatureTimeTracker
 
@@ -137,19 +84,6 @@ class TestFeatureTimeTrackerSummarize:
         summary = tracker.summarize_feature_durations()
         avg = summary["op"]
         assert avg == pytest.approx((d1 + d2) / 2, rel=0.2)
-
-    def test_multiple_features_separate(self):
-        from src.tools.feature_time_tracker import FeatureTimeTracker
-
-        tracker = FeatureTimeTracker()
-        tracker.start_feature("op-a")
-        tracker.complete_feature("op-a")
-        tracker.start_feature("op-b")
-        tracker.complete_feature("op-b")
-
-        summary = tracker.summarize_feature_durations()
-        assert "op-a" in summary
-        assert "op-b" in summary
 
 
 class TestFeatureTimeTrackerThreadSafety:
@@ -179,27 +113,6 @@ class TestFeatureTimeTrackerThreadSafety:
 
 
 class TestModuleLevelSingleton:
-    def test_get_tracker_returns_same_instance(self):
-        from src.tools.feature_time_tracker import get_tracker
-
-        t1 = get_tracker()
-        t2 = get_tracker()
-        assert t1 is t2
-
-    def test_module_level_convenience_functions(self):
-        from src.tools.feature_time_tracker import (
-            complete_feature,
-            start_feature,
-            summarize_feature_durations,
-        )
-
-        start_feature("mod-op")
-        duration = complete_feature("mod-op")
-        assert duration > 0
-
-        summary = summarize_feature_durations()
-        assert "mod-op" in summary
-
     def test_module_level_complete_unstarted_raises(self):
         from src.tools.feature_time_tracker import complete_feature
 

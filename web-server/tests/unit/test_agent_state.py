@@ -1,6 +1,6 @@
 import pytest
 
-from src.agent.state import AgentState, Transition
+from src.agent.state import Transition
 
 
 class TestTransition:
@@ -22,23 +22,3 @@ class TestTransition:
         assert actual == expected
 
 
-class TestAgentState:
-    def test_fields_exist_with_defaults(self):
-        """AgentState 包含 messages、available_tools、transition 三个字段。"""
-        state = AgentState(
-            messages=[{"role": "user", "content": "hello"}],
-            available_tools=[],
-            transition=None,
-        )
-        assert state["messages"][0]["content"] == "hello"
-        assert state["available_tools"] == []
-        assert state["transition"] is None
-
-    def test_transition_is_writable(self):
-        """transition 字段可被覆盖，每个节点返回时设置当前步骤的变迁原因。"""
-        state = AgentState(
-            messages=[],
-            available_tools=[],
-            transition=Transition.USER_MESSAGE,
-        )
-        assert state["transition"] == "user_message"

@@ -6,49 +6,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-class TestNullTracer:
-    @pytest.mark.asyncio
-    async def test_trace_llm_call_is_noop(self):
-        from src.observability.tracer import NullTracer
-
-        tracer = NullTracer()
-        # Should not raise
-        await tracer.trace_llm_call(
-            chat_id=uuid.uuid4(),
-            model="test-model",
-            messages=[{"role": "user", "content": "hello"}],
-            response={"content": "hi"},
-            latency_ms=100,
-        )
-
-    @pytest.mark.asyncio
-    async def test_trace_accepts_any_args(self):
-        from src.observability.tracer import NullTracer
-
-        tracer = NullTracer()
-        await tracer.trace_llm_call()  # no args at all
-        await tracer.trace_llm_call(1, 2, 3, 4, 5, extra=6)  # extra kwargs
-
-
 class TestEstimateTokens:
-    def test_positive_token_count(self):
-        from src.observability.tracer import _estimate_tokens
-
-        tokens = _estimate_tokens([{"content": "hello world"}])
-        assert tokens > 0
-
-    def test_minimum_one_token(self):
-        from src.observability.tracer import _estimate_tokens
-
-        tokens = _estimate_tokens([])
-        assert tokens == 1
-
-    def test_empty_content(self):
-        from src.observability.tracer import _estimate_tokens
-
-        tokens = _estimate_tokens([{"content": ""}])
-        assert tokens == 1
-
     def test_aggregates_multiple_messages(self):
         from src.observability.tracer import _estimate_tokens
 

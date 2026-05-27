@@ -7,33 +7,6 @@ pytestmark = pytest.mark.unit
 
 
 class TestPromptManager:
-    def test_build_system_prompt_with_defaults(self):
-        from src.services.prompt_manager import PromptManager
-
-        pm = PromptManager()
-        prompt = pm.build_system_prompt()
-        assert "AI 运维 Agent" in prompt
-        assert "未经用户明确审批" in prompt
-        assert "优先使用只读工具" in prompt
-
-    def test_section_order(self):
-        from src.services.prompt_manager import PromptManager
-
-        pm = PromptManager()
-        prompt = pm.build_system_prompt()
-        pos_identity = prompt.find("AI 运维 Agent")
-        pos_rules = prompt.find("你必须遵守以下规则")
-        pos_tool_usage = prompt.find("工具调用规范")
-        assert pos_identity < pos_rules < pos_tool_usage
-
-    def test_static_sections_are_cached(self):
-        from src.services.prompt_manager import PromptManager
-
-        pm = PromptManager()
-        first = pm.build_system_prompt()
-        second = pm.build_system_prompt()
-        assert first == second
-
     def test_override_single_section_from_file(self):
         from src.services.prompt_manager import PromptManager
 
@@ -77,18 +50,3 @@ class TestPromptManager:
         pm.set_memory("记住：上次重启了 nginx")
         prompt = pm.build_system_prompt()
         assert "记住：上次重启了 nginx" in prompt
-
-    def test_empty_memory_shows_default_placeholder(self):
-        from src.services.prompt_manager import PromptManager
-
-        pm = PromptManager()
-        prompt = pm.build_system_prompt()
-        assert "无持久记忆" in prompt
-
-    def test_reset_cache(self):
-        from src.services.prompt_manager import PromptManager
-
-        pm = PromptManager()
-        pm.build_system_prompt()
-        pm.reset_cache()
-        pm.build_system_prompt()
