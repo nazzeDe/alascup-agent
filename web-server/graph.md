@@ -226,9 +226,9 @@ stateDiagram-v2
 
 ---
 
-## Agent 循环：StateGraph + astream + interrupt
+## Agent 循环：StateGraph + 编排器驱动
 
-LangGraph StateGraph 管理节点拓扑。`astream()` 在每个节点执行完成后产出状态，web-server 映射为 SSE 事件推送到前端。审批点通过 `interrupt()` 暂停图执行，SSE 连接保持存活，审批决策通过 REST 传入后在同一连接上继续推送事件。
+LangGraph StateGraph 管理节点拓扑。Graph 是纯函数（无 checkpointer、无 interrupt/resume），编排器（LoopOrchestrator）通过 `ainvoke()` 调用图并驱动审批循环。SSE 连接在审批等待期间保持存活，审批决策通过 REST 传入后由编排器合并到状态中并重新调用图。
 
 ```mermaid
 stateDiagram-v2
@@ -263,11 +263,11 @@ stateDiagram-v2
     THINK_PRE --> OBSERVE: ToolResult
 
     REVIEW --> AUTO_EXEC: 只读/白名单 → 直接执行
-    REVIEW --> APPROVAL: 高风险 → interrupt() 暂停
+    REVIEW --> APPROVAL: 高风险 → pending_approval 返回
 
     APPROVAL --> WAIT: yield approval_required SSE
     WAIT --> RESUME: POST /api/tool-requests/{id}/approval
-    RESUME --> EXEC: 审批通过 → 执行
+    RESUME --> EXEC: 编排器合并决策 → 重新调用图
 
     AUTO_EXEC --> OBSERVE: ToolResult
     EXEC --> OBSERVE: ToolResult
@@ -287,6 +287,7 @@ flowchart LR
     observe["observe<br/>处理结果"]
     think -- "只读预执行" --> observe
     think -- "写/可变" --> review
+    think -- "已批准工具" --> act
     review --> act
     act --> observe
     observe --> think
@@ -295,22 +296,22 @@ flowchart LR
 
 ### 审批如何处理
 
-Agent 循环中，`interrupt()` 在图执行到审批节点时暂停，返回当前状态给调用方。web-server 将此映射为 `tool_approval_required` SSE 事件推送到前端，SSE 连接保持存活。前端将审批决策通过 `POST /api/tool-requests/{id}/approval` 发送到后端，`compiled.ainvoke(Command(resume=...))` 恢复执行，后续事件通过同一 SSE 连接继续推送。
+Graph 是纯函数，不内部管理审批状态。`review_node` 返回 `pending_approval` 列表和 `Transition.APPROVAL_PENDING`，图执行结束。编排器（LoopOrchestrator）检测到 `pending_approval` 后：推送 `tool_approval_required` SSE 事件，通过 `ApprovalBridge` 等待用户决策，将决策合并到状态（`approved_tool_calls` / `rejected_tool_calls`），然后重新调用 `graph.ainvoke()`。`think_node` 检测到 `approved_tool_calls` 存在时走快速路径（跳过 LLM），直接路由到 `act_node` 执行。
 
 ### 循环状态
 
-LangGraph 的 `checkpointer` 自动持久化 Agent State。每个节点在返回值中附带 `transition` 字段，记录状态变更原因。
+每个节点在返回值中附带 `transition` 字段，记录状态变更原因。编排器在每轮迭代结束时清理瞬态字段（`tool_calls`、`approved_tool_calls`、`pending_approval` 等）。
 
 ```mermaid
 graph LR
     node_user["user_message"] --> node_think["think: LLM 推理"]
     node_think -- "只读预执行" --> node_tools["tool_results"]
     node_think -- "写/可变" --> node_review["review: 审查层"]
-    node_review --> node_approval["approval_pending<br/>(interrupt 暂停)"]
+    node_review --> node_approval["approval_pending<br/>(编排器接管)"]
     node_review --> node_act["act: 工具执行"]
-    node_approval --> node_granted["approval_granted<br/>(Command.resume)"]
+    node_approval --> node_granted["approval_granted<br/>(编排器合并决策)"]
     node_approval --> node_rejected["approval_rejected"]
-    node_granted --> node_act
+    node_granted --> node_think
     node_act --> node_tools
     node_tools --> node_think
     node_think --> node_done["done"]
@@ -783,7 +784,7 @@ flowchart TD
             dispatch["_dispatch_tool_calls<br/>三池分配"]
             pre_exec["安全池预执行<br/>execute_parallel()"]
             review["review_node<br/>classify_companion<br/>→ rule_engine.evaluate"]
-            interrupt["interrupt()<br/>审批挂起"]
+            pending_approval["pending_approval<br/>编排器接管审批"]
             act["act_node<br/>execute_parallel()"]
             observe["observe_node<br/>合并 tool_results<br/>→ tool 消息"]
         end
@@ -838,12 +839,12 @@ flowchart TD
     emit -- "event: tool_call + tool_result" --> session_mgr
 
     review --> tool_server
-    review -- "高风险" --> interrupt
-    interrupt -- "event: tool_approval_required<br/>SSE 连接保持存活" --> emit
+    review -- "高风险" --> pending_approval
+    pending_approval -- "event: tool_approval_required<br/>SSE 连接保持存活" --> emit
     emit --> session_mgr
     session_mgr --> approval_inline
     approval_inline -- "POST /approval" --> api_approval
-    api_approval -- "resume 后同一 SSE 连接继续" --> act
+    api_approval -- "编排器合并决策 → 重新调用图" --> act
 
     review -- "自动批准" --> act
     act --> tool_server
@@ -1030,7 +1031,7 @@ flowchart TD
         rule_eval["rule_engine.evaluate()"]
         rule_auto["AUTO_APPROVE"]
         rule_pending["NEEDS_APPROVAL"]
-        interrupt_wait["interrupt() / 审批"]
+        pending_wait["编排器等待审批<br/>SSE 保持连接"]
     end
 
     subgraph act_exec["执行 (act_node)"]
@@ -1055,8 +1056,8 @@ flowchart TD
     rule_eval --> rule_pending
 
     rule_auto --> act_exec_par
-    rule_pending --> interrupt_wait
-    interrupt_wait --> act_exec_par
+    rule_pending --> pending_wait
+    pending_wait --> act_exec_par
 
     act_exec_par --> act_result
 ```

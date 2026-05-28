@@ -25,7 +25,7 @@
 | 依赖 | 用途 |
 |------|------|
 | FastAPI | HTTP 框架 + OpenAPI 自动生成 |
-| LangGraph | Agent 状态机（StateGraph, astream, interrupt） |
+| LangGraph | Agent 状态机（StateGraph, ainvoke） |
 | fastmcp | MCP Client，连接 tool-server 和 rag-server |
 | Pydantic | 数据校验（FastAPI 内置） |
 | httpx | LLM API 调用（OpenAI 兼容） |
@@ -76,8 +76,8 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 6. 循环过程中通过 SSE 流式推送状态到前端
 
 关键行为：
-- `astream()` 在每个节点完成后产出状态，web-server 映射为 SSE 事件
-- 高风险 tool_call 通过 `interrupt()` 暂停图执行，等待审批回调后恢复
+- `ainvoke()` 执行完整图后返回最终状态，web-server 通过 `emit_events()` 映射为 SSE 事件；think 节点内通过 contextvar 队列实时转发 reasoning/assistant 流式 token
+- Graph 是纯函数（无 checkpointer、无 interrupt/resume）。高风险 tool_call 由 `review_node` 返回 `pending_approval`，编排器（LoopOrchestrator）接管审批循环：推送 SSE 事件、等待决策、合并状态后重新调用图
 - 每轮 LLM 调用前主动检查 token 用量，超阈值时分层压缩
 - LLM 返回非终端错误（prompt_too_long、max_output_tokens、model overload）时逐层升级恢复
 
@@ -131,9 +131,6 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | `approval_rejected` | 审批拒绝 |
 | `context_compacted` | 上下文压缩后重试 |
 | `max_output_tokens_recovery` | token 上限恢复重试 |
-| `turn_limit_reached` | 循环轮次达阈值，暂停等确认 |
-| `turn_limit_continue` | 用户确认继续推理 |
-| `turn_limit_stop` | 用户选择停止推理 |
 | `done` | LLM 判断结束 |
 | `error_exit` | 异常退出 |
 
@@ -245,11 +242,12 @@ LLM 流式输出 token
 
 | event | data | 说明 |
 |-------|------|------|
+| `reasoning` | `{chat_id, message_id, delta, done?}` | LLM 推理内容流式输出（reasoning_content），`done=true` 表示推理阶段结束 |
 | `assistant` | `{chat_id, message_id, delta}` | LLM 文本流式输出 |
+| `thinking_done` | `{}` | LLM 流式输出完成，think 节点准备分发 tool_call |
 | `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only}` | LLM 请求调用工具 |
 | `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?}` | 工具执行结果 |
 | `tool_approval_required` | `{chat_id, request_id, tool_name, description, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
-| `turn_limit_reached` | `{chat_id, turn_count, message}` | 循环轮次达阈值，流暂停等用户确认 |
 | `error` | `{code, message}` | 异常 |
 | `done` | `{chat_id}` | 流结束 |
 

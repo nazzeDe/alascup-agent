@@ -28,11 +28,12 @@ def classify_error(
     if status_code == 0:
         return "timeout"
 
-    if status_code in (413, 400) and any(
-        kw in response_text.lower()
-        for kw in ("too large", "too long", "context", "token")
-    ):
-        return "prompt_too_long"
+    if status_code in (413, 400):
+        lower = response_text.lower()
+        if "max_tokens" in lower or "invalid" in lower:
+            return "unknown"
+        if any(kw in lower for kw in ("too large", "too long", "context", "token")):
+            return "prompt_too_long"
 
     if mapped := _STATUS_ERROR_MAP.get(status_code):
         return mapped
@@ -43,6 +44,33 @@ def classify_error(
         return "unknown"
 
     return None
+
+
+def _accumulate_tool_call(tc: dict, accumulated: dict[int, dict]) -> None:
+    """Merge a streaming tool_call chunk into the accumulated dict."""
+    idx = tc.get("index", 0)
+    if idx not in accumulated:
+        accumulated[idx] = {
+            "id": tc.get("id") or str(uuid4()),
+            "function": {"name": "", "arguments": ""},
+        }
+    else:
+        tid = tc.get("id", "")
+        if tid and not accumulated[idx].get("id"):
+            accumulated[idx]["id"] = tid
+    fn = tc.get("function", {})
+    if "name" in fn:
+        accumulated[idx]["function"]["name"] += fn["name"]
+    if "arguments" in fn:
+        accumulated[idx]["function"]["arguments"] += fn["arguments"]
+
+
+def _extract_delta(event: dict) -> str:
+    """Extract delta text from an assistant SSE event."""
+    try:
+        return json.loads(event["data"]).get("delta", "")
+    except (json.JSONDecodeError, KeyError):
+        return ""
 
 
 class LLMAdapter:
@@ -126,7 +154,6 @@ class LLMAdapter:
         chat_id: UUID | None = None,
     ):
         import time as _time
-        import uuid as _uuid
 
         start = _time.monotonic()
         payload = self._build_payload(messages, tools, system, stream=True)
@@ -158,24 +185,27 @@ class LLMAdapter:
                     for event in self._process_chunk(data_str, accumulated):
                         yield event
                         if event.get("event") == "assistant":
-                            try:
-                                delta = json.loads(event["data"]).get("delta", "")
-                                accumulated_content += delta
-                            except (json.JSONDecodeError, KeyError):
-                                pass
+                            accumulated_content += _extract_delta(event)
 
+        await self._trace_stream(chat_id, messages, accumulated_content, accumulated, start)
+
+    async def _trace_stream(self, chat_id, messages, content, accumulated, start):
+        import time as _time
+        import uuid as _uuid
+
+        if not self._tracer:
+            return
         latency_ms = int((_time.monotonic() - start) * 1000)
-        if self._tracer:
-            full_response: dict = {"content": accumulated_content}
-            if accumulated:
-                full_response["tool_calls"] = list(accumulated.values())
-            await self._tracer.trace_llm_call(
-                chat_id=chat_id if chat_id else _uuid.uuid4(),
-                model=self._config.model,
-                messages=messages,
-                response=full_response,
-                latency_ms=latency_ms,
-            )
+        full_response: dict = {"content": content}
+        if accumulated:
+            full_response["tool_calls"] = list(accumulated.values())
+        await self._tracer.trace_llm_call(
+            chat_id=chat_id if chat_id else _uuid.uuid4(),
+            model=self._config.model,
+            messages=messages,
+            response=full_response,
+            latency_ms=latency_ms,
+        )
 
     @staticmethod
     def _process_chunk(data_str: str, accumulated: dict[int, dict]):
@@ -192,23 +222,7 @@ class LLMAdapter:
 
         if tool_calls:
             for tc in tool_calls:
-                idx = tc.get("index", 0)
-                if idx not in accumulated:
-                    accumulated[idx] = {
-                        "id": tc.get("id") or str(uuid4()),
-                        "function": {"name": "", "arguments": ""},
-                    }
-                else:
-                    tid = tc.get("id", "")
-                    if tid and not accumulated[idx].get("id"):
-                        accumulated[idx]["id"] = tid
-                fn = tc.get("function", {})
-                if "name" in fn:
-                    accumulated[idx]["function"]["name"] += fn["name"]
-                if "arguments" in fn:
-                    accumulated[idx]["function"]["arguments"] += fn[
-                        "arguments"
-                    ]
+                _accumulate_tool_call(tc, accumulated)
 
         if content or reasoning:
             data: dict[str, str] = {}

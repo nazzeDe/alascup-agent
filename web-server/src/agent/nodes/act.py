@@ -48,7 +48,7 @@ async def act_node(state, *, executor, audit_logger=None):
             turn_id=turn_id, iteration=iteration,
         )
 
-    return {"tool_results": formatted}
+    return {"tool_results": formatted, "approved_tool_calls": []}
 
 
 async def _log_act(audit_logger, tool_name: str,

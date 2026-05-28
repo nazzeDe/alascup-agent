@@ -11,7 +11,6 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from fastapi import Request
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from src.mcp_client.executor import ToolExecutor
@@ -52,7 +51,6 @@ class Services:
     tool_executor: ToolExecutor
     audit_logger: AuditLogger
     approval_bridge: ApprovalBridge
-    checkpointer: BaseCheckpointSaver
     graph: CompiledStateGraph
     error_recovery: ErrorRecovery | None = None
     db: Any | None = None
@@ -95,10 +93,6 @@ def audit_logger(request: Request) -> AuditLogger:
 
 def approval_bridge(request: Request) -> ApprovalBridge:
     return _services(request).approval_bridge
-
-
-def checkpointer(request: Request) -> BaseCheckpointSaver:
-    return _services(request).checkpointer
 
 
 def error_recovery(request: Request) -> ErrorRecovery | None:

@@ -74,28 +74,6 @@ CREATE TABLE IF NOT EXISTS llm_traces (
     latency_ms INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-CREATE TABLE IF NOT EXISTS graph_checkpoints (
-    thread_id TEXT NOT NULL,
-    checkpoint_ns TEXT NOT NULL DEFAULT '',
-    checkpoint_id TEXT NOT NULL,
-    parent_checkpoint_id TEXT,
-    checkpoint BYTEA NOT NULL,
-    metadata JSONB NOT NULL DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
-);
-
-CREATE TABLE IF NOT EXISTS graph_writes (
-    thread_id TEXT NOT NULL,
-    checkpoint_ns TEXT NOT NULL DEFAULT '',
-    checkpoint_id TEXT NOT NULL,
-    task_id TEXT NOT NULL,
-    idx INTEGER NOT NULL DEFAULT 0,
-    channel TEXT NOT NULL,
-    value BYTEA NOT NULL,
-    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
-);
 """
 
 

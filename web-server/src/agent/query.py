@@ -29,7 +29,6 @@ class Query:
         audit_logger=None,
         error_recovery=None,
         chat_id=None,
-        checkpointer=None,
     ):
         self._llm = llm
         self._graph = graph
@@ -38,12 +37,11 @@ class Query:
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._chat_id = str(chat_id) if chat_id else str(uuid4())
-        self._checkpointer = checkpointer
 
     async def run(
         self, messages: list[dict], available_tools: list, system: str | None = None
     ):
-        """Run agent until interrupt or DONE. Yields SSE events."""
+        """Run agent until DONE or approval needed. Yields SSE events."""
         chat_uuid = None
         try:
             chat_uuid = UUID(self._chat_id)
@@ -67,13 +65,14 @@ class Query:
             yield event
 
     async def resume(self, decisions: list[str]):
-        """Resume from checkpoint after human approval.
+        """Resume after human approval (programmatic/test path).
 
-        Delegates to LoopOrchestrator.resume() which handles the full
-        resume cycle: ainvoke → interrupt detection → event emission → done.
+        In the normal user-facing flow the orchestrator handles approval
+        inline in run() via the bridge. This method is kept for backward
+        compatibility with tests.
         """
         orch = self._build_orchestrator()
-        async for event in orch.resume(decisions):
+        async for event in orch.run({"messages": [], "decisions": decisions}):
             yield event
 
     def _build_orchestrator(self) -> LoopOrchestrator:
@@ -85,5 +84,4 @@ class Query:
             error_recovery=self._error_recovery,
             llm=self._llm,
             chat_id=self._chat_id,
-            checkpointer=self._checkpointer,
         )

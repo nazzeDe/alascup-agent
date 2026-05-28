@@ -3,7 +3,6 @@
 import json
 
 import pytest
-from langgraph.checkpoint.memory import MemorySaver
 
 from src.agent.graph import build_graph
 from src.agent.query import Query
@@ -152,8 +151,7 @@ def bridge():
 @pytest.fixture
 def graph(llm, executor, rule_engine, audit):
     return build_graph(llm=llm, executor=executor,
-                       rule_engine=rule_engine, audit_logger=audit,
-                       checkpointer=MemorySaver())
+                       rule_engine=rule_engine, audit_logger=audit)
 
 
 @pytest.fixture
@@ -195,8 +193,8 @@ class TestQueryHighRisk:
     """AG-004: 高风险工具审批。"""
 
     async def test_high_risk_yields_approval_required_and_resumes(self, query, llm, bridge, executor, rule_engine, audit):
-        """High-risk tool_call → interrupt → yield approval_required → resolve → continue."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        """High-risk tool_call → pending_approval → yield approval_required → resolve → continue."""
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -309,7 +307,7 @@ class TestQueryConcurrent:
 
     async def test_mixed_readonly_highrisk(self, query, llm, bridge, executor, rule_engine, audit):
         """AG-004: readonly + high-risk → readonly pre-executed, high-risk needs approval."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -360,8 +358,8 @@ class TestQueryStreamingExecution:
         assert events[-1][0] == "done"
 
     async def test_mixed_streaming_highrisk_still_reviewed(self, query, llm, bridge, executor, rule_engine, audit):
-        """Mixed: readonly pre-executed, high-risk goes through review → interrupt → execute."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        """Mixed: readonly pre-executed, high-risk goes through review → approval → execute."""
+        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -483,7 +481,7 @@ class TestQueryFullChainAudit:
 
     async def test_full_audit_chain_high_risk(self, query, llm, bridge, audit, executor, rule_engine):
         """高风险操作完整审计链：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED。"""
-        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit)
 
         llm.responses = [
             {"content": "", "tool_calls": [
@@ -512,7 +510,7 @@ class TestQueryFullChainAudit:
 
     async def test_full_audit_chain_mixed(self, query, llm, bridge, audit, executor, rule_engine):
         """混合场景：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED 链路完整。"""
-        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit, checkpointer=MemorySaver())
+        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit)
 
         llm.responses = [
             {"content": "", "tool_calls": [

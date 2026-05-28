@@ -10,6 +10,7 @@ TRANSIENT_FIELDS = (
     "tool_calls",
     "approved_tool_calls",
     "rejected_tool_calls",
+    "pending_approval",
     "tool_results",
     "streaming_tool_results",
 )
@@ -21,9 +22,9 @@ def clear_transient_fields(state: dict) -> None:
         state[key] = []
 
 
-def has_interrupt(state: dict) -> bool:
-    """Check if graph execution was suspended for human approval."""
-    return bool(state.get("__interrupt__"))
+def has_pending_approval(state: dict) -> bool:
+    """Check if review_node returned pending tool calls needing human approval."""
+    return bool(state.get("pending_approval"))
 
 
 def get_transition(state: dict) -> Transition | None:

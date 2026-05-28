@@ -24,7 +24,6 @@ async def test_db(pg_dsn):
     # Truncate all tables (order matters for FK constraints)
     async with db.pool.acquire() as conn:
         tables = [
-            "graph_writes", "graph_checkpoints",
             "tool_calls",
             "messages", "audit_events", "llm_traces",
             "chat_sessions",

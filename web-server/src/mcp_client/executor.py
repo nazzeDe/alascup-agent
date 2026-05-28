@@ -91,10 +91,15 @@ class ToolExecutor:
                         "error": {"message": str(e)},
                     }
                 await asyncio.sleep(2**attempt)
-            except TimeoutError as e:
+            except (TimeoutError, RuntimeError) as e:
                 return {
                     "execution_status": ExecutionStatus.FAILED,
                     "error": {"message": str(e)},
+                }
+            except Exception as e:
+                return {
+                    "execution_status": ExecutionStatus.FAILED,
+                    "error": {"message": f"{type(e).__name__}: {e}"},
                 }
         return {"execution_status": ExecutionStatus.FAILED}
 

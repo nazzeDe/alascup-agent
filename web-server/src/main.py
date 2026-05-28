@@ -13,7 +13,6 @@ from src.mcp_client.executor import ToolExecutor
 from src.mcp_client.registry import ServerRegistry
 from src.observability.audit_logger import PostgresAuditLogger
 from src.observability.tracer import PostgresTracer
-from src.persistence.checkpoint import PostgresCheckpointer
 from src.security.pending import ApprovalBridge
 from src.security.rule_engine import RuleEngine
 from src.services.context_manager import ContextManager
@@ -42,7 +41,6 @@ def _build_services():
     session_mgr = PostgresSessionManager(db)
     audit_logger = PostgresAuditLogger(db)
     tracer = PostgresTracer(db)
-    checkpointer = PostgresCheckpointer(db)
 
     from src.services.error_recovery import ErrorRecovery
 
@@ -57,7 +55,6 @@ def _build_services():
         executor=tool_executor,
         rule_engine=rule_engine,
         audit_logger=audit_logger,
-        checkpointer=checkpointer,
     )
 
     return Services(
@@ -70,7 +67,6 @@ def _build_services():
         tool_executor=tool_executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        checkpointer=checkpointer,
         graph=graph,
         error_recovery=ErrorRecovery(),
     )

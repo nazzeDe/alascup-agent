@@ -14,7 +14,6 @@ from src.models.message import Message, MessageType
 from src.services.container import (
     approval_bridge,
     audit_logger,
-    checkpointer as checkpointer_dep,
     context_manager,
     error_recovery,
     graph,
@@ -50,7 +49,6 @@ async def chat_turn(
     bridge=Depends(approval_bridge),
     graph_dep=Depends(graph),
     error_rec=Depends(error_recovery),
-    checkpointer_saver=Depends(checkpointer_dep),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
     chat_id_str = body.chat_id
@@ -71,7 +69,7 @@ async def chat_turn(
             body, request, chat_id_str,
             session_mgr, prompt_mgr, llm, context_mgr,
             executor, audit_logger, bridge, graph_dep,
-            error_rec, checkpointer_saver,
+            error_rec,
         )
     except asyncio.CancelledError:
         raise HTTPException(status_code=499, detail="Request cancelled by newer message")
@@ -92,7 +90,6 @@ async def _do_chat(
     bridge,
     graph_dep,
     error_rec,
-    checkpointer_saver,
 ):
     """Core chat logic, separated for abort wrapping."""
     try:
@@ -134,7 +131,6 @@ async def _do_chat(
         audit_logger=audit_logger,
         error_recovery=error_rec,
         chat_id=chat_id,
-        checkpointer=checkpointer_saver,
     )
 
     available_tools = executor.list_tools()
@@ -143,7 +139,7 @@ async def _do_chat(
     async def event_generator():
         feature = f"chat_turn:{str(chat_id)}"
         start_feature(feature)
-        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+        queue: asyncio.Queue = asyncio.Queue()  # unbounded: graph must never block on put
         token = reasoning_queue.set(queue)
         chat_id_token = _chat_id_ctx.set(str(chat_id))
 

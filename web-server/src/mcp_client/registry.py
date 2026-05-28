@@ -43,7 +43,7 @@ class ServerRegistry:
         for entry in self._servers.values():
             try:
                 server_tools = await self._fetch_tools(entry)
-            except (ConnectionError, ConnectionRefusedError, OSError) as exc:
+            except (ConnectionError, ConnectionRefusedError, OSError, RuntimeError) as exc:
                 logger.warning(
                     "Server {name} ({url}) unavailable, skipping: {err}",
                     name=entry.name,
