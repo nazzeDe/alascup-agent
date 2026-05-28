@@ -14,7 +14,6 @@ flowchart TD
     api_sessions_create["POST /api/sessions<br/>创建会话"]
     api_session_detail["GET /api/sessions/{chat_id}<br/>会话详情"]
     api_tools["GET /api/tools<br/>工具列表"]
-    api_toolreq_get["GET /api/tool-requests/{request_id}<br/>审批状态查询"]
     api_toolreq_approval["POST /api/tool-requests/{request_id}/approval<br/>审批回调"]
     api_health["GET /api/health<br/>健康检查"]
 
@@ -74,7 +73,7 @@ flowchart TD
     obs_tracer["自定义 Tracer<br/>PostgreSQL llm_traces 表<br/>token / 延迟 / 响应追踪"]
 
     %% ── 外部存储 ──
-    db_postgres[("PostgreSQL<br/>chat_sessions / messages<br/>tool_calls / tool_requests<br/>audit_events / llm_traces")]
+    db_postgres[("PostgreSQL<br/>chat_sessions / messages<br/>tool_calls<br/>audit_events / llm_traces")]
 
     %% ── 外部系统 ──
     ext_llm["LLM Provider<br/>OpenAI 兼容 API"]
@@ -523,9 +522,9 @@ flowchart LR
     %% 声明
     create_session["POST /api/sessions<br/>创建会话"]
     active["会话活跃<br/>Agent ReAct 循环中"]
-    persist[("PostgreSQL 持久化<br/>chat_sessions / messages / tool_calls / tool_requests")]
+    persist[("PostgreSQL 持久化<br/>chat_sessions / messages / tool_calls")]
     restore["重启后恢复<br/>加载历史消息"]
-    expire_pending["重启时 PENDING<br/>自动标记 EXPIRED"]
+    expire_pending["重启时审批失效<br/>（内存态，不持久化）"]
 
     %% 连线
     create_session --> active
@@ -698,7 +697,7 @@ classDiagram
     namespace api {
         class ChatRouter
         class SessionRouter
-        class ToolRequestRouter
+        class ApprovalRouter
         class HealthRouter
     }
 
@@ -727,7 +726,7 @@ classDiagram
 
     ChatRouter --> Query : invokes
     SessionRouter --> SessionManager : invokes
-    ToolRequestRouter --> PendingApprovalBridge : uses
+    ApprovalRouter --> PendingApprovalBridge : uses
 
     Query --> LoopOrchestrator : creates
     LoopOrchestrator --> AgentState : drives

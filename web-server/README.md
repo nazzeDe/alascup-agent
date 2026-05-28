@@ -42,7 +42,6 @@ web-server 使用 PostgreSQL 作为唯一持久化存储：
 | `chat_sessions` | 会话元数据 |
 | `messages` | 消息历史 |
 | `tool_calls` | 工具执行记录 |
-| `tool_requests` | 审批请求状态 |
 | `audit_events` | 审计日志（仅 INSERT/SELECT，不可变） |
 | `llm_traces` | LLM 调用追踪（token、延迟、响应） |
 
@@ -50,9 +49,9 @@ web-server 使用 PostgreSQL 作为唯一持久化存储：
 
 ## 依赖注入
 
-每个模块通过接口（Protocol）定义契约，生产与测试环境注入不同实现。关键可替换组件：
+每个模块通过接口（Protocol）定义契约。当前运行时仅提供 PostgreSQL 实现，内存实现仅用于测试。
 
-| 接口 | 生产实现 | 测试实现 |
+| 接口 | 运行时实现 | 测试实现 |
 |------|----------|----------|
 | SessionManager | PostgresSessionManager | InMemorySessionManager |
 | AuditLogger | PostgresAuditLogger | InMemoryAuditLogger |
@@ -60,7 +59,7 @@ web-server 使用 PostgreSQL 作为唯一持久化存储：
 | LLMAdapter | 真实 LLM API 调用 | MockLLMAdapter |
 | RuleEngine | 读取 config/rules.json | 独立 rules 路径 |
 
-无 DATABASE_URL 时自动降级为内存实现，方便本地开发。
+`DATABASE_URL` 必填，未设置时启动失败。
 
 ## Agent 循环
 
@@ -70,7 +69,7 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 
 1. 从 Session 加载历史消息，组装 system prompt（按 section 合并，结构见 `doc/详细设计.md`），进入循环
 2. 每轮迭代中 LLM 流式输出，产出文本或 tool_call
-3. 静态只读 tool_call 在 think 节点内预执行（流式工具执行），其余 tool_call 进入审查层：只读放行，高风险生成审批请求
+3. 静态只读 tool_call 在 think 节点内批量预执行（LLM 输出完成后执行），其余 tool_call 进入审查层：只读放行，高风险生成审批请求
 4. 审批通过后调用 tool-server/rag-server 执行，结果回写消息历史
 5. LLM 判断任务完成或无 tool_call 时退出循环
 6. 循环过程中通过 SSE 流式推送状态到前端
@@ -79,11 +78,11 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 - `ainvoke()` 执行完整图后返回最终状态，web-server 通过 `emit_events()` 映射为 SSE 事件；think 节点内通过 contextvar 队列实时转发 reasoning/assistant 流式 token
 - Graph 是纯函数（无 checkpointer、无 interrupt/resume）。高风险 tool_call 由 `review_node` 返回 `pending_approval`，编排器（LoopOrchestrator）接管审批循环：推送 SSE 事件、等待决策、合并状态后重新调用图
 - 每轮 LLM 调用前主动检查 token 用量，超阈值时分层压缩
-- LLM 返回非终端错误（prompt_too_long、max_output_tokens、model overload）时逐层升级恢复
+- LLM 返回可恢复错误（prompt_too_long、max_output_tokens、model_unavailable、server_error）时逐层升级恢复
 
 ### Prompt Section 默认值
 
-每个 section 的内置默认内容。可通过 `config/prompt/<section>.md` 覆盖对应 section。
+每个 section 的内置默认内容。支持通过单个 prompt 文件覆盖（`## <section>` 分段）；当前运行时默认不加载覆盖文件。
 
 **identity**
 > 你是 AI 运维 Agent，负责诊断系统问题、分析性能指标、执行审批通过的修复操作。先收集信息，再给出判断。
@@ -104,9 +103,9 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 
 **environment**
 
-由 tool-server 启动时上报，PromptManager 在 chat-turn 开始时拉取。拉取失败用上一次成功的缓存值；首次启动无缓存时填 `"unknown"`，不阻塞对话。
+由外部调用 `PromptManager.set_environment()` 注入；未设置时返回固定占位内容，不阻塞对话。
 
-只包含基本不变的系统信息，动态指标（CPU、内存、磁盘等）由 LLM 通过工具按需获取，不注入 prompt。
+只包含相对稳定的系统信息，动态指标（CPU、内存、磁盘等）由 LLM 通过工具按需获取，不注入 prompt。
 
 | 字段 | 说明 |
 |------|------|
@@ -116,7 +115,7 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 | `permissions` | tool-server 容器拥有的 Linux capabilities |
 
 **memory**
-> （由 PromptManager 从记忆系统加载，无持久记忆时为空字符串。格式见 `doc/详细设计.md` 的 System Prompt 结构）
+> （由外部调用 `PromptManager.set_memory()` 注入；未设置时使用默认占位文本。格式见 `doc/详细设计.md` 的 System Prompt 结构）
 
 ### Transition 追踪
 
@@ -134,13 +133,13 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | `done` | LLM 判断结束 |
 | `error_exit` | 异常退出 |
 
-### 循环轮次确认
+### 循环轮次确认（规划中，当前版本未实现）
 
 循环轮次达到阈值（默认 15 轮）时，推送 `turn_limit_reached` 事件并暂停 SSE 流，等待用户确认。用户选择"继续"后恢复循环，每继续 10 轮再次弹窗。用户选择"停止"或 SSE 超时则终止循环。
 
 ### 会话并发
 
-同一 chat_id 同一时间只允许一个活跃的 Agent 循环。新消息到达时，若已有 SSE 流在进行中，则中断旧流（飞行中的工具执行自然跑完，结果保留；等待中的审批自动拒绝），发起新的 Agent 循环。
+同一 chat_id 同一时间只允许一个活跃的 Agent 循环。新消息到达时，若已有 SSE 流在进行中，则中断旧流（飞行中的工具执行自然跑完，结果保留；旧流上的审批请求不再处理），发起新的 Agent 循环。
 
 ### 退出条件
 
@@ -150,24 +149,22 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | abort / 连续失败 | transition=`error_exit`，退出 |
 | 用户拒绝继续 | transition=`done`，退出 |
 
-### 流式工具执行
+### 只读工具预执行
 
-LLM 流式输出过程中，think 节点检测到完整的 tool_use block 后，只读工具立即发起执行，与 LLM 后续 token 生成并行。高风险工具不适用——必须等完整响应后走安全分类和审批。
+LLM 流式输出完成后，think 节点解析 tool_call 并对静态只读工具并行预执行；高风险工具仍进入审查层等待审批。
 
 ```
 LLM 流式输出 token
   │
   ├─ chunk: "Let me check CPU first..."      ← 文本，暂存
-  ├─ chunk: {"tool_use": "get_cpu_info"}     ← 解析到 tool_use → 立即入队
-  │   tool-server.get_cpu_info() 开始执行 ─────────────→ 与 LLM 输出并行
+  ├─ chunk: {"tool_use": "get_cpu_info"}     ← 累积 tool_call
   ├─ chunk: "Also memory..."                 ← LLM 继续输出
-  ├─ chunk: {"tool_use": "get_memory_info"}  ← 再入队
-  │   tool-server.get_memory_info() 开始执行 ──────────→ 并行
+  ├─ chunk: {"tool_use": "get_memory_info"}  ← 累积 tool_call
   └─ LLM 输出完成
-      → 此时工具结果可能已全部就绪
+      → think 节点并行预执行只读工具
 ```
 
-实现依赖 LangGraph 的 `astream_events()`（token 级别），在 think 节点内边消费 token 边分发已完成的 tool_use block 到 act 节点。
+流式 token 由 LLMAdapter.generate_stream 提供，think 节点仅在流结束后处理预执行与审查路由。
 
 ### 上下文压缩
 
@@ -242,22 +239,21 @@ LLM 流式输出 token
 
 | event | data | 说明 |
 |-------|------|------|
-| `reasoning` | `{chat_id, message_id, delta, done?}` | LLM 推理内容流式输出（reasoning_content），`done=true` 表示推理阶段结束 |
-| `assistant` | `{chat_id, message_id, delta}` | LLM 文本流式输出 |
-| `thinking_done` | `{}` | LLM 流式输出完成，think 节点准备分发 tool_call |
-| `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only}` | LLM 请求调用工具 |
-| `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?}` | 工具执行结果 |
-| `tool_approval_required` | `{chat_id, request_id, tool_name, description, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
+| `reasoning` | `{delta, chat_id?, message_id?, done?}` | LLM 推理内容流式输出；最终聚合事件会带 `chat_id/message_id` 与 `done=true` |
+| `assistant` | `{delta, chat_id?, message_id?}` | LLM 文本流式输出；最终聚合事件会带 `chat_id/message_id` |
+| `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only, server?}` | LLM 请求调用工具 |
+| `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?, error?, execution_time_ms?}` | 工具执行结果 |
+| `tool_approval_required` | `{chat_id, request_id, tool_name, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
 | `error` | `{code, message}` | 异常 |
 | `done` | `{chat_id}` | 流结束 |
 
-只读工具 `tool_call`/`tool_result` 流式推送。高风险触发 `tool_approval_required` 后 SSE 暂停，`POST /api/tool-requests/{request_id}/approval` 回调后流继续。
+只读工具在 think 阶段预执行后发送 `tool_call`/`tool_result`。高风险触发 `tool_approval_required` 后 SSE 暂停，`POST /api/tool-requests/{request_id}/approval` 回调后流继续。
 
 ## MCP 客户端
 
 - 统一 Server Pool：`servers.json` 列出所有候选 MCP Server，web-server 动态发现可用 server 及其工具。LLM 看到统一工具列表，不感知 server 拓扑
 - 懒连接：首次 chat-turn 时才连接各 server，避免启动顺序依赖
-- 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）。工具调用失败（tool not found）时刷新对应 server
+- 工具发现：连接后调用 `list_tools`，结果缓存在内存中（TTL 无限）
 - `meta.hidden = true` 的工具（伴生分类工具）从 LLM 可见列表中过滤，保留在内部缓存供审查层使用
 - 三级工具池：
   - **安全池**：`meta.mutable = false` 且 `meta.is_read_only = true` 的静态工具，永远自动放行
@@ -271,13 +267,13 @@ LLM 流式输出 token
 运行时需 `config/` 目录包含：
 
 - `servers.json` — MCP Server 连接配置
-- `prompt/` — System prompt section 文件（可选），每个 `.md` 文件对应一个 section。不存在的文件使用内置默认值
+- `prompt.md` — System prompt 覆盖文件（可选，按 `## <section>` 分段）
 - `rules.json` — 工具调用安全规则（可选）
 - `llm.json` — LLM 接入配置
 
 环境变量：
 
-- `DATABASE_URL` — PostgreSQL 连接串（可选，不设时使用内存实现）
+- `DATABASE_URL` — PostgreSQL 连接串（必填）
 
 ## API 端点
 
@@ -289,7 +285,6 @@ LLM 流式输出 token
 | POST /api/sessions | 创建新会话（前端不再主动调用；session 由 POST /api/chat 首条消息自动创建） |
 | GET /api/sessions/{chat_id} | 获取会话详情 |
 | GET /api/tools | 列出可用 MCP 工具 |
-| GET /api/tool-requests/{request_id} | 查询审批请求状态 |
 | POST /api/tool-requests/{request_id}/approval | 审批回调 |
 
 完整规范见 `doc/api-spec/openapi.yaml`。
