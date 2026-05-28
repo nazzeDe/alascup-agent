@@ -53,7 +53,10 @@ def _format_tool_result(r: dict) -> str:
 
 
 def route_after_think(state) -> str:
-    """Route after think: has tool_call → review, only streaming results → observe, none → END."""
+    """Route after think: approved → act, tool_call → review, streaming → observe, none → END."""
+    approved = state.get("approved_tool_calls") or []
+    if approved:
+        return "act"
     tool_calls = state.get("tool_calls") or []
     streaming_results = state.get("streaming_tool_results") or []
     if tool_calls:

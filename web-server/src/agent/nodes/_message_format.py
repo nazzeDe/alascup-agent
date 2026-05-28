@@ -37,36 +37,41 @@ def _normalize_message(m: dict | object) -> tuple[str, str, dict]:
     role = _get("role", "type", "unknown")
     role = ROLE_MAP.get(role, role)
     content = _get("content", "content", "")
-
-    meta: dict = {}
-    if is_dict:
-        tcs = m.get("tool_calls")
-        if tcs:
-            meta["tool_calls"] = tcs
-        rc = m.get("reasoning_content", "")
-        if rc:
-            meta["reasoning_content"] = rc
-        tc_id = m.get("tool_call_id", "")
-        if tc_id:
-            meta["tool_call_id"] = tc_id
-        nm = m.get("name", "")
-        if nm:
-            meta["name"] = nm
-    else:
-        tcs = getattr(m, "tool_calls", None)
-        if tcs:
-            meta["tool_calls"] = [_langchain_tc_to_openai(tc) for tc in tcs]
-        rc = getattr(m, "additional_kwargs", {}).get("reasoning_content", "")
-        if rc:
-            meta["reasoning_content"] = rc
-        tc_id = getattr(m, "tool_call_id", "")
-        if tc_id:
-            meta["tool_call_id"] = tc_id
-        nm = getattr(m, "name", "")
-        if nm:
-            meta["name"] = nm
+    meta = _extract_meta(m, is_dict)
 
     return role, content, meta
+
+
+def _extract_meta(m, is_dict: bool) -> dict:
+    """Extract tool_calls, reasoning, tool_call_id, name from a message."""
+    meta: dict = {}
+    if is_dict:
+        _fill_dict_meta(m, meta)
+    else:
+        _fill_obj_meta(m, meta)
+    return meta
+
+
+def _fill_dict_meta(m: dict, meta: dict) -> None:
+    if tcs := m.get("tool_calls"):
+        meta["tool_calls"] = tcs
+    if rc := m.get("reasoning_content", ""):
+        meta["reasoning_content"] = rc
+    if tc_id := m.get("tool_call_id", ""):
+        meta["tool_call_id"] = tc_id
+    if nm := m.get("name", ""):
+        meta["name"] = nm
+
+
+def _fill_obj_meta(m, meta: dict) -> None:
+    if tcs := getattr(m, "tool_calls", None):
+        meta["tool_calls"] = [_langchain_tc_to_openai(tc) for tc in tcs]
+    if rc := getattr(m, "additional_kwargs", {}).get("reasoning_content", ""):
+        meta["reasoning_content"] = rc
+    if tc_id := getattr(m, "tool_call_id", ""):
+        meta["tool_call_id"] = tc_id
+    if nm := getattr(m, "name", ""):
+        meta["name"] = nm
 
 
 def _langchain_tc_to_openai(tc: dict) -> dict:

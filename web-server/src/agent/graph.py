@@ -13,19 +13,13 @@ from src.agent.nodes import (
 from src.agent.state import AgentState
 
 
-def build_graph(*, llm, executor, rule_engine, audit_logger, checkpointer) -> CompiledStateGraph:
+def build_graph(*, llm, executor, rule_engine, audit_logger) -> CompiledStateGraph:
     """Build ReAct graph: think → review → act → observe → END.
 
-    After think: has tool_call → review, none → END.
-    review_node uses interrupt() to pause on high-risk tools.
-    checkpointer required for interrupt/Command(resume) state persistence.
+    After think: has tool_call → review, has approved_tool_calls → act, none → END.
+    Graph is a pure function — no checkpointer, no interrupt/resume.
+    The orchestrator owns the approval loop externally.
     """
-    if checkpointer is None:
-        raise ValueError(
-            "checkpointer is required. "
-            "Use PostgresCheckpointer(db) for production or MemorySaver() for development only."
-        )
-
     graph = StateGraph(AgentState)
 
     graph.add_node("think", partial(think_node, llm=llm, executor=executor))
@@ -37,11 +31,14 @@ def build_graph(*, llm, executor, rule_engine, audit_logger, checkpointer) -> Co
     graph.add_node("observe", observe_node)
 
     graph.set_entry_point("think")
-    graph.add_conditional_edges("think", route_after_think, {"review": "review", "observe": "observe", END: END})
+    graph.add_conditional_edges("think", route_after_think, {
+        "review": "review",
+        "act": "act",
+        "observe": "observe",
+        END: END,
+    })
     graph.add_edge("review", "act")
     graph.add_edge("act", "observe")
-    # Loop observe → think for continuous ReAct.  think routes to
-    # END when it produces no output (no tool_calls, no streaming).
     graph.add_edge("observe", "think")
 
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile()

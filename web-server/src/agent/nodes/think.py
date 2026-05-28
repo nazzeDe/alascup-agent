@@ -16,7 +16,19 @@ async def think_node(state, *, llm, executor=None):
 
     AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
     Mutable and write tools stay in tool_calls for review_node.
+
+    Fast-path: when approved_tool_calls is already populated (orchestrator
+    merged human approval decisions), skip LLM and route directly to act_node.
     """
+    # Fast-path: orchestrator has already populated approved_tool_calls
+    # after human approval. Skip LLM, let route_after_think send us to act.
+    if state.get("approved_tool_calls"):
+        return {
+            "tool_calls": [],
+            "streaming_tool_results": [],
+            "transition": None,
+        }
+
     available_tools = state.get("available_tools", [])
     tools = _format_tools(available_tools)
     messages = _messages(state)
@@ -98,16 +110,9 @@ async def _forward_to_queue(queue, data_str: str) -> None:
 async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools) -> dict:
     """Assemble the final state dict from accumulated stream data."""
     result: dict = {}
-    text = "".join(accumulated_text)
-    reasoning = "".join(accumulated_reasoning)
 
-    if text or reasoning or tool_call_blocks:
-        assistant_msg: dict = {"role": "assistant", "content": text or ""}
-        if reasoning:
-            assistant_msg["reasoning_content"] = reasoning
-        if tool_call_blocks:
-            assistant_msg["tool_calls"] = tool_call_blocks
-        result["messages"] = [assistant_msg]
+    if msg := _assemble_assistant_message("".join(accumulated_text), "".join(accumulated_reasoning), tool_call_blocks):
+        result["messages"] = [msg]
 
     if executor is not None and tool_call_blocks:
         pending_tool_calls, pre_executed = await _dispatch_tool_calls(
@@ -121,6 +126,18 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
     result["streaming_tool_results"] = pre_executed
     result["transition"] = Transition.DONE if not (pending_tool_calls or pre_executed) else None
     return result
+
+
+def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict]) -> dict | None:
+    """Build assistant message dict from text, reasoning, and tool calls. Returns None if empty."""
+    if not (text or reasoning or tool_calls):
+        return None
+    msg: dict = {"role": "assistant", "content": text or ""}
+    if reasoning:
+        msg["reasoning_content"] = reasoning
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return msg
 
 
 def _process_stream_event(

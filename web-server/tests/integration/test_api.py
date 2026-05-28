@@ -48,8 +48,6 @@ class _MockToolExecutor:
 
 
 def _build_test_services():
-    from langgraph.checkpoint.memory import MemorySaver
-
     from src.agent.graph import build_graph
     from src.config.models import RulesConfig
     from src.observability.audit_logger import InMemoryAuditLogger
@@ -64,14 +62,12 @@ def _build_test_services():
     executor = _MockToolExecutor()
     rule_engine = RuleEngine(RulesConfig())
     audit_logger = InMemoryAuditLogger()
-    checkpointer = MemorySaver()
 
     graph = build_graph(
         llm=llm_adapter,
         executor=executor,
         rule_engine=rule_engine,
         audit_logger=audit_logger,
-        checkpointer=checkpointer,
     )
 
     return Services(
@@ -83,7 +79,6 @@ def _build_test_services():
         tool_executor=executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        checkpointer=checkpointer,
         graph=graph,
         error_recovery=None,
     )

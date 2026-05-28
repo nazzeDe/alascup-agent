@@ -112,9 +112,9 @@ class TestReviewNode:
         assert len(result["approved_tool_calls"]) == 1
         assert result["rejected_tool_calls"] == []
 
-    async def test_high_risk_triggers_interrupt(self):
-        """Non-readonly, non-whitelist, non-blacklist → interrupt()."""
-        from unittest.mock import MagicMock, patch
+    async def test_high_risk_returns_pending_approval(self):
+        """Non-readonly, non-whitelist, non-blacklist → pending_approval returned."""
+        from src.agent.nodes import review_node
 
         tool_calls = [
             {"function": {"name": "delete_logs", "arguments": '{"path":"/var/log"}'}, "mutable": False, "is_read_only": False},
@@ -123,24 +123,19 @@ class TestReviewNode:
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
-        mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
+        result = await review_node(
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+        )
 
-        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
-            from src.agent.nodes import review_node
-            result = await review_node(
-                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
-            )
+        assert len(result["pending_approval"]) == 1
+        assert result["pending_approval"][0]["function"]["name"] == "delete_logs"
+        assert result["approved_tool_calls"] == []
+        assert result["rejected_tool_calls"] == []
+        assert result["transition"] == Transition.APPROVAL_PENDING
 
-        mock_interrupt.assert_called_once()
-        interrupt_arg = mock_interrupt.call_args[0][0]
-        assert interrupt_arg["event"] == "approval_required"
-        assert len(interrupt_arg["pending_tool_calls"]) == 1
-        assert interrupt_arg["pending_tool_calls"][0]["function"]["name"] == "delete_logs"
-        assert len(result["approved_tool_calls"]) == 1
-
-    async def test_interrupt_resume_rejected(self):
-        """User rejects → tool goes to rejected list."""
-        from unittest.mock import MagicMock, patch
+    async def test_high_risk_no_auto_approved_or_rejected(self):
+        """High-risk tool goes to pending, not approved/rejected."""
+        from src.agent.nodes import review_node
 
         tool_calls = [
             {"function": {"name": "delete_logs", "arguments": "{}"}, "mutable": False, "is_read_only": False},
@@ -149,20 +144,17 @@ class TestReviewNode:
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
-        mock_interrupt = MagicMock(return_value={"decisions": ["REJECTED"]})
-
-        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
-            from src.agent.nodes import review_node
-            result = await review_node(
-                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
-            )
+        result = await review_node(
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+        )
 
         assert result["approved_tool_calls"] == []
-        assert len(result["rejected_tool_calls"]) == 1
+        assert result["rejected_tool_calls"] == []
+        assert len(result["pending_approval"]) == 1
 
     async def test_mixed_classifications(self):
-        """Mixed: readonly auto-approved, blacklist rejected, high-risk pauses."""
-        from unittest.mock import MagicMock, patch
+        """Mixed: readonly auto-approved, blacklist rejected, high-risk pending."""
+        from src.agent.nodes import review_node
 
         tool_calls = [
             {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
@@ -174,20 +166,19 @@ class TestReviewNode:
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
-        mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
+        result = await review_node(
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+        )
 
-        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
-            from src.agent.nodes import review_node
-            result = await review_node(
-                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
-            )
-
-        names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
-        assert "get_cpu" in names
-        assert "get_memory" in names
-        assert "delete_logs" in names
-        assert "blacklist_cmd" not in names
+        approved_names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
+        pending_names = [tc["function"]["name"] for tc in result["pending_approval"]]
+        assert "get_cpu" in approved_names
+        assert "get_memory" in approved_names
+        assert "delete_logs" in pending_names
+        assert "blacklist_cmd" not in approved_names
+        assert "blacklist_cmd" not in pending_names
         assert len(result["rejected_tool_calls"]) == 1
+        assert result["transition"] == Transition.APPROVAL_PENDING
 
     async def test_audit_logged_for_rejected(self):
         from src.agent.nodes import review_node
@@ -253,7 +244,6 @@ class TestReviewNode:
 
     async def test_mutable_tool_calls_classify(self):
         """Mutable tool triggers executor.classify_companion() for dynamic classification."""
-        from unittest.mock import MagicMock, patch
         from src.agent.nodes import review_node
 
         tool_calls = [
@@ -263,13 +253,11 @@ class TestReviewNode:
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
-        mock_interrupt = MagicMock(return_value={"decisions": ["APPROVED"]})
-        with patch("src.agent.nodes.review.interrupt", mock_interrupt):
-            result = await review_node(
-                _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
-            )
+        result = await review_node(
+            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+        )
 
         assert len(executor.classify_calls) == 1
         assert executor.classify_calls[0]["tool_name"] == "bash"
         assert executor.classify_calls[0]["server_name"] == "tool-server"
-        assert len(result["approved_tool_calls"]) == 1
+        assert len(result["pending_approval"]) == 1

@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from langgraph.types import interrupt
 from loguru import logger
 
 from src.agent.nodes._tool_dispatch import _parse_args
@@ -11,7 +10,11 @@ from src.observability.debug_log import log as debug_log
 
 
 async def review_node(state, *, executor, rule_engine, audit_logger):
-    """Review all tool_calls: classify mutable tools → rule match → decide."""
+    """Review all tool_calls: classify mutable tools → rule match → decide.
+
+    Returns pending_approval when human decision is needed — the orchestrator
+    handles the approval loop externally (no interrupt/resume).
+    """
     tool_calls = state.get("tool_calls", []) or []
     logger.debug("review_node: tc_count={count}", count=len(tool_calls))
     debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))
@@ -33,38 +36,9 @@ async def review_node(state, *, executor, rule_engine, audit_logger):
               tools=",".join(tool_names))
 
     if pending:
-        request_id = str(uuid4())
-        debug_log("WARN", "Tools require approval — pausing",
-                  tools=",".join([t.get("function", {}).get("name", "?") for t in pending]))
-        approval_result = interrupt({
-            "event": "approval_required",
-            "request_id": request_id,
-            "pending_tool_calls": pending,
-        })
-        decisions = approval_result.get("decisions", [])
-        for i, tc in enumerate(pending):
-            user_decision = decisions[i] if i < len(decisions) else "EXPIRED"
-            if user_decision == "APPROVED":
-                tc["approval_status"] = "APPROVED"
-                tc["request_id"] = request_id
-                approved.append(tc)
-                await _log_review(audit_logger, "TOOL_APPROVED",
-                            tc.get("function", {}).get("name", ""),
-                            level=AuditLevel.WARN)
-            else:
-                rejected.append(tc)
-                await _log_review(audit_logger, "TOOL_REJECTED",
-                            tc.get("function", {}).get("name", ""),
-                            decision=user_decision)
+        return await _build_pending_response(pending, approved, rejected, audit_logger, turn_id, iteration)
 
-    return {
-        "approved_tool_calls": approved,
-        "rejected_tool_calls": rejected,
-        "transition": (
-            Transition.APPROVAL_GRANTED if approved
-            else Transition.APPROVAL_REJECTED
-        ) if (approved or rejected) else None,
-    }
+    return _build_final_response(approved, rejected)
 
 
 async def _classify_tool_call(tc: dict, executor) -> tuple[str, bool, bool]:
@@ -112,6 +86,30 @@ async def _apply_decision(
         pending.append(tc)
         await _log_review(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN,
                           turn_id=turn_id, iteration=iteration)
+
+
+async def _build_pending_response(pending, approved, rejected, audit_logger, turn_id, iteration):
+    request_id = str(uuid4())
+    for tc in pending:
+        tc["request_id"] = request_id
+    names = ",".join(t.get("function", {}).get("name", "?") for t in pending)
+    debug_log("WARN", "Tools require approval — returning to orchestrator", tools=names)
+    await _log_review(audit_logger, "TOOL_REQUEST_CREATED", names,
+                      level=AuditLevel.WARN, turn_id=turn_id, iteration=iteration)
+    return {
+        "approved_tool_calls": approved,
+        "rejected_tool_calls": rejected,
+        "pending_approval": pending,
+        "transition": Transition.APPROVAL_PENDING,
+    }
+
+
+def _build_final_response(approved, rejected):
+    transition = (
+        Transition.APPROVAL_GRANTED if approved
+        else Transition.APPROVAL_REJECTED
+    ) if (approved or rejected) else None
+    return {"approved_tool_calls": approved, "rejected_tool_calls": rejected, "transition": transition}
 
 
 async def _log_review(audit_logger, event: str, tool_name: str, level=None,

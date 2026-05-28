@@ -31,7 +31,6 @@ class AgentState(MessagesState):
     tool_results: list
     llm_error: dict | None = None # type: ignore
     streaming_tool_results: list
-    direct_tool_results: list
     _emitted_results: list
     # Observability: set by orchestrator before each graph invocation.
     _turn_id: Any = None  # UUID, but Any avoids LangGraph annotation issues

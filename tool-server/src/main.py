@@ -77,6 +77,9 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Unified output schema — all tools return a dict.
+_ANY_OBJECT: dict[str, Any] = {"type": "object"}
+
 PERCEPTION_TOOLS = {
     "get_cpu_info": ("获取 CPU 型号、核心数、负载和利用率", get_cpu_info, True,
                      {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
@@ -168,36 +171,36 @@ def create_server(config: ToolServerConfig) -> FastMCP:
     server = FastMCP(name="tool-server")
 
     # ── perception tools (explicit signatures — fastmcp rejects **kwargs) ──
-    @server.tool(name="get_cpu_info", description="获取 CPU 型号、核心数、负载和利用率", output_schema=TOOL_SCHEMAS["get_cpu_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="get_cpu_info", description="获取 CPU 型号、核心数、负载和利用率", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_cpu_info() -> dict:
         return get_cpu_info(config)
 
-    @server.tool(name="get_memory_info", description="获取物理内存和 Swap 使用量", output_schema=TOOL_SCHEMAS["get_memory_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="get_memory_info", description="获取物理内存和 Swap 使用量", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_memory_info() -> dict:
         return get_memory_info(config)
 
-    @server.tool(name="get_disk_usage", description="获取磁盘使用率和空间分布", output_schema=TOOL_SCHEMAS["get_disk_usage"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="get_disk_usage", description="获取磁盘使用率和空间分布", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_disk_usage(path: str = "/") -> dict:
         return get_disk_usage(config, path=path)
 
-    @server.tool(name="get_network_info", description="获取网卡地址和 I/O 计数器", output_schema=TOOL_SCHEMAS["get_network_info"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="get_network_info", description="获取网卡地址和 I/O 计数器", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_network_info() -> dict:
         return get_network_info(config)
 
-    @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=TOOL_SCHEMAS["get_process_list"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _get_process_list() -> dict:
         return {"processes": get_process_list(config)}
 
-    @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=TOOL_SCHEMAS["read_logs"], meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
     def _read_logs(path: str = "", lines: int = 50) -> dict:
         return {"lines": read_logs(config, path=path, lines=lines)}
 
     # ── operation tools ──
-    @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=TOOL_SCHEMAS["run_bash"], meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
+    @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=_ANY_OBJECT, meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
     def _run_bash(command: str = "", timeout: int | None = None) -> dict:
         return run_bash(config, command=command, timeout=timeout)
 
-    @server.tool(name="manage_service", description="管理 systemd 服务", output_schema=TOOL_SCHEMAS["manage_service"], meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
+    @server.tool(name="manage_service", description="管理 systemd 服务", output_schema=_ANY_OBJECT, meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
     def _manage_service(name: str = "", action: str = "") -> dict:
         return manage_service(config, name=name, action=action)
 
@@ -247,6 +250,7 @@ def create_server(config: ToolServerConfig) -> FastMCP:
                 "tool_count": {"type": "integer"},
             },
         },
+        meta={"is_read_only": True, "is_rollbackable": False, "mutable": False},
     )
     def health() -> dict:
         return {"status": "healthy", "tool_count": len(list_tools())}

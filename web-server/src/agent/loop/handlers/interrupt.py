@@ -1,4 +1,4 @@
-"""Interrupt handler: detect LangGraph interrupt, map request→session, yield approval event."""
+"""Approval handler: yield approval_required SSE events for pending tool calls."""
 
 import json
 from uuid import uuid4
@@ -7,31 +7,18 @@ from src.agent.loop.audit import log_transition
 from src.agent.state import Transition
 
 
-async def handle_interrupt(state: dict, *, bridge, audit_logger, chat_id: str):
-    """Process LangGraph interrupt and yield an approval_required SSE event.
+async def handle_pending_approval(
+    pending: list[dict], *, request_id: str,
+    bridge, audit_logger, chat_id: str,
+):
+    """Yield approval_required SSE events for each pending tool call.
 
-    Only call when has_interrupt(state) is True.
-
-    Transforms the raw LangGraph interrupt value (which has a list of
-    pending_tool_calls) into individual tool_approval_required SSE events,
-    one per pending tool call.  This keeps the frontend's single-tool
-    approval modal working without change.
+    Registers with the bridge so the orchestrator can await decisions.
     """
-    interrupts = state["__interrupt__"]
-    interrupt_obj = interrupts[0] if interrupts else None
-    value = getattr(interrupt_obj, "value", interrupt_obj) if interrupt_obj else {}
-    request_id = (
-        value.get("request_id", str(uuid4()))
-        if isinstance(value, dict)
-        else str(uuid4())
-    )
-
     if bridge:
         bridge.create(request_id, chat_id)
 
     await log_transition(audit_logger, Transition.APPROVAL_PENDING)
-
-    pending = value.get("pending_tool_calls", []) if isinstance(value, dict) else []
 
     if not pending:
         yield {

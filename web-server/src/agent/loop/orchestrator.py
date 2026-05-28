@@ -4,18 +4,17 @@ import json
 from uuid import uuid4
 from typing import AsyncIterator
 
-from langgraph.types import Command
 from loguru import logger
 
 from src.agent.loop.audit import log_transition
 from src.agent.loop.events import emit_events
-from src.agent.loop.handlers import handle_interrupt, handle_llm_error
+from src.agent.loop.handlers import handle_pending_approval, handle_llm_error
 from src.agent.loop.transitions import (
     clear_transient_fields,
     get_transition,
-    has_interrupt,
 )
 from src.agent.state import ROLE_MAP, Transition
+from src.models.audit import AuditEvent, AuditLevel
 from src.observability.debug_log import log as debug_log
 from src.observability.profiler import Profiler, write_profile
 from src.tools import start_feature, complete_feature
@@ -46,34 +45,29 @@ def _log_profile(profiler: Profiler) -> None:
         write_profile(report)
 
 
-def _extract_request_id(state: dict) -> str:
-    """Extract request_id from LangGraph interrupt state."""
-    interrupts = state.get("__interrupt__", [])
-    obj = interrupts[0] if interrupts else None
-    value = getattr(obj, "value", obj) if obj else {}
-    if isinstance(value, dict):
-        return value.get("request_id", str(uuid4()))
-    return str(uuid4())
-
-
-def _extract_pending_count(state: dict) -> int:
-    """Count pending tool calls in an interrupt state."""
-    interrupts = state.get("__interrupt__", [])
-    obj = interrupts[0] if interrupts else None
-    value = getattr(obj, "value", obj) if obj else {}
-    if isinstance(value, dict):
-        pending = value.get("pending_tool_calls", [])
-        return len(pending) if pending else 1
-    return 1
+def _apply_decisions(pending: list[dict], decisions: list[str]) -> tuple[list[dict], list[dict]]:
+    """Split pending tool calls into approved and rejected based on decisions."""
+    approved = []
+    rejected = []
+    for i, tc in enumerate(pending):
+        decision = decisions[i] if i < len(decisions) else "EXPIRED"
+        if decision == "APPROVED":
+            tc["approval_status"] = "APPROVED"
+            approved.append(tc)
+        else:
+            rejected.append(tc)
+    return approved, rejected
 
 
 class LoopOrchestrator:
     """Orchestrates the think → review → act → observe ReAct loop.
 
-    SSE connection stays alive across the full chat turn.  When the graph
-    interrupts for approval the orchestrator yields the approval event,
-    waits for a decision via the bridge, then resumes the graph inline
-    — all on the same SSE stream.
+    SSE connection stays alive across the full chat turn.  When review_node
+    returns pending_approval, the orchestrator yields the approval event,
+    waits for a decision via the bridge, merges decisions into state, and
+    re-invokes the graph — all on the same SSE stream.
+
+    Graph is a pure function (no checkpointer, no interrupt/resume).
     """
 
     def __init__(
@@ -86,7 +80,6 @@ class LoopOrchestrator:
         error_recovery,
         llm,
         chat_id: str,
-        checkpointer=None,
     ):
         self._graph = graph
         self._context_manager = context_manager
@@ -96,11 +89,9 @@ class LoopOrchestrator:
         self._llm = llm
         self._config = {"configurable": {"thread_id": chat_id}}
         self._chat_id = chat_id
-        self._checkpointer = checkpointer
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute ReAct loop, yielding all events on one SSE connection."""
-        await self._clear_checkpoint()
 
         turn_id = uuid4()
         self._turn_id = turn_id
@@ -141,60 +132,95 @@ class LoopOrchestrator:
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
 
-            # 3. Interrupt → approval flow (must stay inline — handle_interrupt yields events)
-            while has_interrupt(result):
-                debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
-                async for event in handle_interrupt(
-                    result,
-                    bridge=self._bridge,
-                    audit_logger=self._audit,
-                    chat_id=self._chat_id,
-                ):
-                    yield event
-                profiler.checkpoint("interrupt_handled")
-                result = await self._resume_after_approval(result)
-                profiler.checkpoint("graph_resume")
-
+            # 3. Approval flow — orchestrator-owned, no interrupt/resume
+            async for event in self._drain_approval_loop(result, turn_id, it, profiler):
+                yield event
             state = result
 
             # 4. Error recovery
             action, error_event = await self._recover_from_error(state)
             if error_event:
                 yield error_event
+            if action == "continue":
+                _finalize_iteration(profiler, loop_feature)
+                continue
             if action == "return":
                 for ev in self._exit_events(profiler, loop_feature, action):
                     yield ev
                 return
-            if action == "continue":
-                _finalize_iteration(profiler, loop_feature)
-                continue
 
             # 5. Emit SSE events
-            evs = emit_events(state, chat_id=self._chat_id, skip_assistant_count=emitted_assistant_count)
-            for ev in evs:
-                if ev.get("event") == "assistant":
-                    emitted_assistant_count += 1
-                yield ev
-            profiler.checkpoint("emit_events")
+            counter = [emitted_assistant_count]
+            async for event in self._emit_sse(state, counter, profiler):
+                yield event
 
-            # 6. Clear transient fields
+            # 6-7. Clear + transition
             clear_transient_fields(state)
-
-            # 7. Route transition
             action = await self._handle_transition(state)
             profiler.checkpoint("handle_transition")
-            if action == "return":
-                debug_log("DEBUG", "Transition → DONE", chat_id=str(self._chat_id))
-                for ev in self._exit_events(profiler, loop_feature, "return"):
-                    yield ev
-                return
-            if action is None:
-                debug_log("WARN", "Unknown transition — exiting", chat_id=str(self._chat_id))
+            if action not in ("continue",):
                 for ev in self._exit_events(profiler, loop_feature, "return"):
                     yield ev
                 return
             debug_log("DEBUG", "Transition → CONTINUE", chat_id=str(self._chat_id))
             _finalize_iteration(profiler, loop_feature)
+
+    async def _drain_approval_loop(self, result: dict, turn_id, iteration: int, profiler: Profiler) -> AsyncIterator[dict]:
+        """Handle pending approvals until none remain. Mutates result in place."""
+        while result.get("pending_approval"):
+            debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
+            pending = result["pending_approval"]
+            request_id = pending[0].get("request_id", str(uuid4())) if pending else str(uuid4())
+
+            async for event in handle_pending_approval(
+                pending, request_id=request_id,
+                bridge=self._bridge, audit_logger=self._audit,
+                chat_id=self._chat_id,
+            ):
+                yield event
+            profiler.checkpoint("approval_events_emitted")
+
+            decisions = await self._bridge.gather_decisions(request_id, len(pending))
+            debug_log("INFO", "Approval decisions collected",
+                      request_id=request_id, count=len(decisions))
+
+            await log_transition(
+                self._audit, Transition.APPROVAL_GRANTED,
+                chat_id=_safe_uuid(self._chat_id),
+                turn_id=self._turn_id, iteration=self._iteration,
+            )
+
+            approved, rejected = _apply_decisions(pending, decisions)
+            await self._log_approved_tools(approved)
+            result["approved_tool_calls"] = result.get("approved_tool_calls", []) + approved
+            result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + rejected
+            result["pending_approval"] = []
+            result["transition"] = (
+                Transition.APPROVAL_GRANTED if approved
+                else Transition.APPROVAL_REJECTED
+            )
+
+            state = result
+            state["_turn_id"] = turn_id
+            state["_iteration"] = iteration
+            result.update(await self._graph.ainvoke(state, self._config))
+            profiler.checkpoint("graph_resume")
+
+    async def _log_approved_tools(self, approved: list[dict]) -> None:
+        if not self._audit:
+            return
+        for tc in approved:
+            fn = tc.get("function", {})
+            await self._audit.log(AuditEvent(
+                timestamp=str(uuid4()),
+                level=AuditLevel.INFO,
+                actor="system",
+                event="TOOL_APPROVED",
+                tool_name=fn.get("name"),
+                decision="APPROVED",
+                turn_id=self._turn_id,
+                iteration=self._iteration,
+            ))
 
     def _exit_events(self, profiler: Profiler, loop_feature: str, action: str) -> list[dict]:
         """Finalize loop and yield completion events."""
@@ -203,68 +229,15 @@ class LoopOrchestrator:
             return [{"event": "done", "data": "{}"}]
         return []
 
-    async def _clear_checkpoint(self) -> None:
-        if self._checkpointer is not None:
-            try:
-                await self._checkpointer.adelete_thread(self._chat_id)
-            except Exception:
-                logger.warning("Failed to clear checkpoint for thread {tid}", tid=self._chat_id)
-
-    async def resume(self, decisions: list[str]) -> AsyncIterator[dict]:
-        """Resume from checkpoint after human approval.
-
-        Used by tests and programmatic approval paths.  For the normal
-        user-facing flow the orchestrator handles interrupts inline in
-        run() via the bridge's await_approval.
-        """
-        feature = f"resume:{self._chat_id}"
-        start_feature(feature)
-        debug_log("INFO", "Resume after approval", chat_id=str(self._chat_id),
-                  decisions=",".join(decisions))
-        await log_transition(
-            self._audit, Transition.APPROVAL_GRANTED,
-            chat_id=_safe_uuid(self._chat_id),
-            turn_id=getattr(self, "_turn_id", None),
-            iteration=getattr(self, "_iteration", None),
-        )
-
-        result = await self._graph.ainvoke(
-            Command(resume={"decisions": decisions}),
-            {"configurable": {"thread_id": self._chat_id}},
-        )
-        logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
-                     msgs=len(result.get("messages", [])),
-                     t=result.get("transition"),
-                     intr=has_interrupt(result))
-
-        while has_interrupt(result):
-            async for event in handle_interrupt(
-                result,
-                bridge=self._bridge,
-                audit_logger=self._audit,
-                chat_id=self._chat_id,
-            ):
-                yield event
-            request_id = _extract_request_id(result)
-            pending = _extract_pending_count(result)
-            decisions = await self._bridge.gather_decisions(request_id, pending)
-            await log_transition(
-                self._audit, Transition.APPROVAL_GRANTED,
-                chat_id=_safe_uuid(self._chat_id),
-                turn_id=getattr(self, "_turn_id", None),
-                iteration=getattr(self, "_iteration", None),
-            )
-            result = await self._graph.ainvoke(
-                Command(resume={"decisions": decisions}),
-                {"configurable": {"thread_id": self._chat_id}},
-            )
-
-        evs = emit_events(result, chat_id=self._chat_id)
-        logger.debug("RESUME_EVENTS: {events}", events=[e.get("event", "") for e in evs])
+    async def _emit_sse(self, state: dict, counter: list[int], profiler: Profiler):
+        """Emit SSE events. counter[0] is skip_assistant_count, updated in place."""
+        evs = emit_events(state, chat_id=self._chat_id, skip_assistant_count=counter[0])
         for ev in evs:
             yield ev
-        yield {"event": "done", "data": "{}"}
-        complete_feature(feature)
+            if ev.get("event") == "assistant":
+                counter[0] += 1
+        profiler.checkpoint("emit_events")
+
 
     async def _compress_context(self, state: dict) -> None:
         """Compress message context if over token threshold."""
@@ -284,29 +257,6 @@ class LoopOrchestrator:
                 turn_id=getattr(self, "_turn_id", None),
                 iteration=getattr(self, "_iteration", None),
             )
-
-    async def _resume_after_approval(self, result: dict) -> dict:
-        """Gather approval decisions and resume the graph."""
-        request_id = _extract_request_id(result)
-        pending = _extract_pending_count(result)
-        decisions = await self._bridge.gather_decisions(request_id, pending)
-        debug_log("INFO", "Approval decisions collected",
-                  request_id=request_id, count=len(decisions))
-
-        await log_transition(
-            self._audit, Transition.APPROVAL_GRANTED,
-            chat_id=_safe_uuid(self._chat_id),
-            turn_id=self._turn_id, iteration=self._iteration,
-        )
-        result = await self._graph.ainvoke(
-            Command(resume={"decisions": decisions}),
-            self._config,
-        )
-        logger.debug("RESUME_GRAPH: msgs={msgs} transition={t} interrupt={intr}",
-                     msgs=len(result.get("messages", [])),
-                     t=result.get("transition"),
-                     intr=has_interrupt(result))
-        return result
 
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
         """Attempt error recovery. Returns (action, optional_error_event)."""

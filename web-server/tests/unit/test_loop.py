@@ -1,7 +1,7 @@
 """Unit tests for agent loop modules.
 
-Tests emit_events, clear_transient_fields, has_interrupt, get_transition,
-handle_interrupt, and handle_llm_error in isolation — no graph, no LLM.
+Tests emit_events, clear_transient_fields, get_transition,
+handle_pending_approval, and handle_llm_error in isolation — no graph, no LLM.
 """
 
 import json
@@ -11,12 +11,11 @@ import pytest
 from src.agent.loop.audit import log_transition
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers.error import handle_llm_error
-from src.agent.loop.handlers.interrupt import handle_interrupt
+from src.agent.loop.handlers.interrupt import handle_pending_approval
 from src.agent.loop.transitions import (
     TRANSIENT_FIELDS,
     clear_transient_fields,
     get_transition,
-    has_interrupt,
 )
 from src.agent.state import Transition
 
@@ -272,20 +271,6 @@ class TestClearTransientFields:
             assert state[k] == []
 
 
-# ── has_interrupt ──────────────────────────────────────────────────────
-
-
-class TestHasInterrupt:
-    def test_with_interrupt_returns_true(self):
-        assert has_interrupt({"__interrupt__": [{"event": "approval"}]}) is True
-
-    def test_without_interrupt_returns_false(self):
-        assert has_interrupt({}) is False
-
-    def test_empty_interrupt_list_returns_false(self):
-        assert has_interrupt({"__interrupt__": []}) is False
-
-
 # ── get_transition ─────────────────────────────────────────────────────
 
 
@@ -297,7 +282,7 @@ class TestGetTransition:
         assert get_transition({}) is None
 
 
-# ── handle_interrupt ───────────────────────────────────────────────────
+# ── handle_pending_approval ────────────────────────────────────────────
 
 
 class MockBridge:
@@ -316,22 +301,14 @@ class MockAuditLogger:
         self.events.append(event)
 
 
-class TestHandleInterrupt:
+class TestHandlePendingApproval:
     async def test_yields_approval_required_event(self):
-        state = {
-            "__interrupt__": [
-                {
-                    "event": "approval_required",
-                    "request_id": "req-1",
-                    "pending_tool_calls": [
-                        {"function": {"name": "health", "arguments": "{}"}},
-                    ],
-                },
-            ]
-        }
+        pending = [
+            {"function": {"name": "health", "arguments": "{}"}},
+        ]
         events = []
-        async for e in handle_interrupt(
-            state, bridge=None, audit_logger=None, chat_id="s1"
+        async for e in handle_pending_approval(
+            pending, request_id="req-1", bridge=None, audit_logger=None, chat_id="s1"
         ):
             events.append(e)
 
@@ -346,24 +323,20 @@ class TestHandleInterrupt:
 
     async def test_bridge_gets_request_session_mapping(self):
         bridge = MockBridge()
-        state = {
-            "__interrupt__": [
-                {"event": "approval_required", "request_id": "req-abc", "pending_tool_calls": []},
-            ]
-        }
-        async for _ in handle_interrupt(
-            state, bridge=bridge, audit_logger=None, chat_id="session-123"
+        pending = [{"function": {"name": "cmd", "arguments": "{}"}}]
+        async for _ in handle_pending_approval(
+            pending, request_id="req-abc", bridge=bridge, audit_logger=None, chat_id="session-123"
         ):
             pass
 
         assert bridge.created == [("req-abc", "session-123")]
 
     async def test_no_bridge_no_crash(self):
-        """handle_interrupt gracefully handles missing bridge."""
-        state = {"__interrupt__": [{"event": "approval_required", "pending_tool_calls": []}]}
+        """handle_pending_approval gracefully handles missing bridge."""
+        pending = [{"function": {"name": "cmd", "arguments": "{}"}}]
         events = []
-        async for e in handle_interrupt(
-            state, bridge=None, audit_logger=None, chat_id="s1"
+        async for e in handle_pending_approval(
+            pending, request_id="req-1", bridge=None, audit_logger=None, chat_id="s1"
         ):
             events.append(e)
         assert len(events) == 1
@@ -371,11 +344,9 @@ class TestHandleInterrupt:
 
     async def test_logs_approval_pending_transition(self):
         audit = MockAuditLogger()
-        state = {
-            "__interrupt__": [{"event": "approval_required", "request_id": "req-1", "pending_tool_calls": []}]
-        }
-        async for _ in handle_interrupt(
-            state, bridge=None, audit_logger=audit, chat_id="s1"
+        pending = [{"function": {"name": "cmd", "arguments": "{}"}}]
+        async for _ in handle_pending_approval(
+            pending, request_id="req-1", bridge=None, audit_logger=audit, chat_id="s1"
         ):
             pass
 
@@ -384,36 +355,33 @@ class TestHandleInterrupt:
         ]
         assert "approval_pending" in transitions
 
-    @pytest.mark.asyncio
-    async def test_interrupt_obj_is_not_dict(self):
-        """Non-dict interrupt value → yields event without crashing."""
-        state = {"__interrupt__": ["plain_string_value"]}
-        async for e in handle_interrupt(
-            state, bridge=None, audit_logger=None, chat_id="s1"
+    async def test_multiple_pending_tools_yields_multiple_events(self):
+        pending = [
+            {"function": {"name": "tool_a", "arguments": "{}"}},
+            {"function": {"name": "tool_b", "arguments": "{}"}},
+        ]
+        events = []
+        async for e in handle_pending_approval(
+            pending, request_id="req-1", bridge=None, audit_logger=None, chat_id="s1"
         ):
-            assert e["event"] == "tool_approval_required"
+            events.append(e)
 
-    async def test_interrupt_with_value_attribute(self):
-        """LangGraph wraps interrupts in objects with .value attribute."""
+        assert len(events) == 2
+        assert events[0]["event"] == "tool_approval_required"
+        assert events[1]["event"] == "tool_approval_required"
+        data0 = json.loads(events[0]["data"])
+        data1 = json.loads(events[1]["data"])
+        assert data0["tool_name"] == "tool_a"
+        assert data1["tool_name"] == "tool_b"
 
-        class FakeInterrupt:
-            value = {"event": "approval_required", "request_id": "req-via-attr"}
-
-        state = {"__interrupt__": [FakeInterrupt()]}
-        async for e in handle_interrupt(
-            state, bridge=None, audit_logger=None, chat_id="s1"
+    async def test_empty_pending_yields_single_event(self):
+        events = []
+        async for e in handle_pending_approval(
+            [], request_id="req-1", bridge=None, audit_logger=None, chat_id="s1"
         ):
-            data = json.loads(e["data"])
-            assert data["request_id"] == "req-via-attr"
-
-    @pytest.mark.asyncio
-    async def test_empty_interrupts_does_not_crash(self):
-        """Empty interrupt list is defensive — yields event without crashing."""
-        state = {"__interrupt__": []}
-        async for e in handle_interrupt(
-            state, bridge=None, audit_logger=None, chat_id="s1"
-        ):
-            assert e["event"] == "tool_approval_required"
+            events.append(e)
+        assert len(events) == 1
+        assert events[0]["event"] == "tool_approval_required"
 
 
 # ── handle_llm_error ───────────────────────────────────────────────────
@@ -784,73 +752,4 @@ class TestOrchestratorTermination:
         assert any(e["event"] == "done" for e in events)
 
 
-class TestOrchestratorClearsCheckpoint:
-    @pytest.mark.asyncio
-    async def test_clears_checkpoint_before_first_invoke(self):
-        from src.agent.loop.orchestrator import LoopOrchestrator
-
-        cleared_threads = []
-
-        class MockCheckpointer:
-            async def adelete_thread(self, thread_id):
-                cleared_threads.append(thread_id)
-
-        class _DoneGraph:
-            async def ainvoke(self, state, config=None):
-                return {
-                    **state,
-                    "transition": Transition.DONE,
-                    "messages": state.get("messages", []),
-                    "tool_calls": [],
-                    "tool_results": [],
-                    "streaming_tool_results": [],
-                }
-
-        orch = LoopOrchestrator(
-            graph=_DoneGraph(),
-            context_manager=_NoopCtx(),
-            bridge=None,
-            audit_logger=_MockAuditLogger(),
-            error_recovery=None,
-            llm=None,
-            chat_id="test-thread",
-            checkpointer=MockCheckpointer(),
-        )
-        state = {
-            "messages": [],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
-        async for _ in orch.run(state):
-            pass
-
-        assert cleared_threads == ["test-thread"]
-
-    @pytest.mark.asyncio
-    async def test_no_checkpointer_no_crash(self):
-        from src.agent.loop.orchestrator import LoopOrchestrator
-
-        orch = LoopOrchestrator(
-            graph=_NoopGraph(),
-            context_manager=_NoopCtx(),
-            bridge=None,
-            audit_logger=_MockAuditLogger(),
-            error_recovery=None,
-            llm=None,
-            chat_id="test",
-            checkpointer=None,
-        )
-        state = {
-            "messages": [{"role": "assistant", "content": "OK"}],
-            "transition": Transition.DONE,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
-        events = []
-        async for ev in orch.run(state):
-            events.append(ev)
-        assert any(e["event"] == "done" for e in events)
 

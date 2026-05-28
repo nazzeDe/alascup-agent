@@ -112,25 +112,6 @@ paths:
                 items:
                   $ref: "#/components/schemas/Tool"
 
-  /tool-requests/{request_id}:
-    get:
-      summary: 查询工具请求状态
-      parameters:
-        - in: path
-          name: request_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: ToolRequest
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ToolRequest"
-        "404":
-          description: 请求不存在
-
   /tool-requests/{request_id}/approval:
     post:
       summary: 审批工具请求（批准或拒绝）
@@ -153,7 +134,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ToolRequest"
+                $ref: "#/components/schemas/ToolApprovalResult"
         "404":
           description: 请求不存在或已过期
 
@@ -282,6 +263,8 @@ components:
             expired_at:
               type: string
               format: date-time
+            rejected_reason:
+              type: string
 
     ToolApproval:
       type: object
@@ -289,7 +272,20 @@ components:
       properties:
         approval_status:
           type: string
-          enum: [APPROVED, REJECTED]
+          enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+        reason:
+          type: string
+
+    ToolApprovalResult:
+      type: object
+      required: [request_id, approval_status]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        approval_status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXPIRED]
         reason:
           type: string
           description: 审批备注（可选）
@@ -300,7 +296,7 @@ components:
       properties:
         execution_status:
           type: string
-          enum: [SUCCEEDED, FAILED]
+          enum: [SUCCEEDED, FAILED, SECURITY_VIOLATION]
         backup_ref:
           type: string
           description: 可回滚操作的备份引用
@@ -330,7 +326,7 @@ components:
 
     AssistantEventData:
       type: object
-      required: [chat_id, message_id, delta]
+      required: [delta]
       properties:
         chat_id:
           type: string
@@ -358,6 +354,8 @@ components:
           type: object
         is_read_only:
           type: boolean
+        server:
+          type: string
 
     ToolResultEventData:
       type: object
@@ -376,6 +374,10 @@ components:
           enum: [SUCCEEDED, FAILED]
         output:
           type: object
+        error:
+          type: object
+        execution_time_ms:
+          type: integer
 
     ToolApprovalRequiredEventData:
       type: object

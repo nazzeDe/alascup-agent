@@ -44,15 +44,11 @@ def app_with_bridge():
         async def classify(self, tool_name, params, server_name=""):
             return {"is_read_only": True, "is_rollbackable": True}
 
-    from langgraph.checkpoint.memory import MemorySaver
-
-    checkpointer = MemorySaver()
     graph = build_graph(
         llm=_MockLLM(),
         executor=_MockExecutor(),
         rule_engine=RuleEngine(RulesConfig()),
         audit_logger=InMemoryAuditLogger(),
-        checkpointer=checkpointer,
     )
 
     bridge = ApprovalBridge()
@@ -65,7 +61,6 @@ def app_with_bridge():
         tool_executor=_MockExecutor(),
         audit_logger=InMemoryAuditLogger(),
         approval_bridge=bridge,
-        checkpointer=checkpointer,
         graph=graph,
     )
     return services, bridge
