@@ -7,6 +7,7 @@ from src.agent.nodes import (
     act_node,
     observe_node,
     review_node,
+    route_after_review,
     route_after_think,
     think_node,
 )
@@ -37,7 +38,10 @@ def build_graph(*, llm, executor, rule_engine, audit_logger) -> CompiledStateGra
         "observe": "observe",
         END: END,
     })
-    graph.add_edge("review", "act")
+    graph.add_conditional_edges("review", route_after_review, {
+        "act": "act",
+        END: END,
+    })
     graph.add_edge("act", "observe")
     graph.add_edge("observe", "think")
 

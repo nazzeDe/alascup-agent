@@ -167,26 +167,37 @@ class LoopOrchestrator:
             state["_iteration"] = it
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
+            logger.debug("graph_done pending_approval={p} tool_calls={t} approved={a} transition={r}",
+                         p=bool(result.get("pending_approval")),
+                         t=len(result.get("tool_calls", [])),
+                         a=len(result.get("approved_tool_calls", [])),
+                         r=get_transition(result))
 
             # 3. Approval flow — orchestrator-owned, no interrupt/resume
             async for event in self._drain_approval_loop(result, turn_id, it, profiler):
                 yield event
             state = result
+            logger.debug("approval_loop_exited pending_approval={p} transition={r}",
+                         p=bool(state.get("pending_approval")),
+                         r=get_transition(state))
 
             # 4. Error recovery
             action, error_event = await self._recover_from_error(state)
             if error_event:
                 yield error_event
             if action == "continue":
+                logger.debug("error_recovery_continue")
                 _finalize_iteration(profiler, loop_feature)
                 continue
             if action == "return":
+                logger.debug("error_recovery_return")
                 for ev in self._exit_events(profiler, loop_feature, action):
                     yield ev
                 return
 
             # 5. Emit SSE events
             counter = [emitted_assistant_count]
+            logger.debug("emit_sse msgs={m} skip={s}", m=len(state.get("messages", [])), s=counter[0])
             async for event in self._emit_sse(state, counter, profiler):
                 yield event
 
@@ -194,6 +205,7 @@ class LoopOrchestrator:
             clear_transient_fields(state)
             action = await self._handle_transition(state)
             profiler.checkpoint("handle_transition")
+            logger.debug("transition route={r}", r=action)
             if action not in ("continue",):
                 for ev in self._exit_events(profiler, loop_feature, "return"):
                     yield ev

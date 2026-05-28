@@ -52,6 +52,13 @@ def _format_tool_result(r: dict) -> str:
     return "\n".join(parts)
 
 
+def route_after_review(state) -> str:
+    """Route after review: pending_approval → END, otherwise → act."""
+    if state.get("pending_approval"):
+        return "__end__"
+    return "act"
+
+
 def route_after_think(state) -> str:
     """Route after think: approved → act, tool_call → review, streaming → observe, none → END."""
     approved = state.get("approved_tool_calls") or []

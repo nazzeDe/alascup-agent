@@ -47,6 +47,10 @@ async def act_node(state, *, executor, audit_logger=None):
             execution_status=r.get("execution_status", "UNKNOWN"),
             turn_id=turn_id, iteration=iteration,
         )
+        if r.get("execution_status") == "FAILED":
+            err = r.get("error", {})
+            err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            logger.warning("tool_failed tool={name} error={err}", name=calls[i]["tool_name"], err=err_msg)
 
     return {"tool_results": formatted, "approved_tool_calls": []}
 
