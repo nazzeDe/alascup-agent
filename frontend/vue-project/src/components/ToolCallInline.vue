@@ -36,5 +36,8 @@ const rw_label = props.tool_call.is_read_only ? 'R' : 'W'
     </span>
     <span class="ms-2" :class="status_class">— {{ status_label }}</span>
     <span v-if="elapsed" class="ms-1 text-body-tertiary">{{ elapsed }}</span>
+    <div v-if="tool_call.execution_status === 'FAILED' && tool_call.error" class="text-danger small mt-1">
+      {{ tool_call.error.message || 'Unknown error' }}
+    </div>
   </div>
 </template>

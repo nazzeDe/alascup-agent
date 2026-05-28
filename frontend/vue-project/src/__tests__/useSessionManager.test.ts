@@ -280,4 +280,62 @@ describe('useSessionManager', () => {
     expect(manager.sessions.value).toHaveLength(0)
   })
 
+  // --- Bug 7: loadHistory null check ---
+
+  it('loadHistory with null chatId clears state without fetching', async () => {
+    mockFetch.mockReset()
+
+    const manager = await freshManager()
+    const state = manager.get(null)
+    // Pre-populate state
+    state.messages.value = [{ message_id: 'm1', chat_id: '', timestamp: '', type: 'user', content: 'old' }]
+    state.toolCalls.value = new Map([['t1', { message_id: 't1', chat_id: '', tool_name: 'x', is_read_only: true, execution_status: 'SUCCEEDED', timestamp: '' }]])
+
+    const ok = await state.loadHistory()
+
+    expect(ok).toBe(true)
+    expect(state.messages.value).toEqual([])
+    expect(state.toolCalls.value.size).toBe(0)
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('loadHistory with valid chatId fetches from API', async () => {
+    mockFetch.mockReset()
+    const sessionData = {
+      chat_id: 'abc-123',
+      title: 'Test',
+      messages: [{ message_id: 'm2', chat_id: 'abc-123', timestamp: '', type: 'user', content: 'hi' }],
+      executed_tool_list: [],
+      timestamp: '',
+    }
+    mockFetch.mockResolvedValue({ ok: true, json: async () => sessionData })
+
+    const manager = await freshManager()
+    const state = manager.get('abc-123')
+    state.messages.value = [{ message_id: 'old', chat_id: 'abc-123', timestamp: '', type: 'user', content: 'old' }]
+
+    const ok = await state.loadHistory()
+
+    expect(ok).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/api/sessions/abc-123')
+  })
+
+  it('loadHistory treats empty string chatId as real session, not null', async () => {
+    // Bug: !chatId.value treats "" as falsy, same as null.
+    // The original === null check only matched null, letting "" through as a valid id.
+    mockFetch.mockReset()
+    mockFetch.mockResolvedValue({ ok: false, status: 404 })
+
+    const manager = await freshManager()
+    // Simulate a session created with empty string chat_id (rare but possible)
+    const state = manager.get('')
+    state.messages.value = [{ message_id: 'm1', chat_id: '', timestamp: '', type: 'user', content: 'x' }]
+
+    const ok = await state.loadHistory()
+
+    // Should attempt to fetch (empty string is not null), not short-circuit
+    expect(mockFetch).toHaveBeenCalled()
+    expect(ok).toBe(false) // fetch fails with 404
+  })
+
 })

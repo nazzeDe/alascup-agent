@@ -752,6 +752,90 @@ class TestOrchestratorTermination:
         assert any(e["event"] == "done" for e in events)
 
 
+class TestOrchestratorRecoveryEmission:
+    """Bug: orchestrator skips SSE emission after error recovery succeeds.
+
+    When handle_llm_error recovers (compress + retry LLM), the state is updated
+    with new assistant messages, but _run_loop continues without emitting them.
+    The recovered response never reaches the frontend and is never saved.
+    """
+
+    @pytest.mark.asyncio
+    async def test_emits_recovered_assistant_message_after_error_recovery(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+        from src.services.error_recovery import ErrorRecovery
+
+        recovery = ErrorRecovery()
+        call_count = 0
+
+        class RecoveryGraph:
+            """Graph: first call returns llm_error (prompt_too_long), second succeeds."""
+            async def ainvoke(self, state, config=None):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return {
+                        "messages": [{"role": "user", "content": "long input"}],
+                        "llm_error": {"code": 413, "message": "prompt too long"},
+                        "transition": None,
+                        "tool_calls": [],
+                        "tool_results": [],
+                        "streaming_tool_results": [],
+                    }
+                # After recovery: state has been updated by handle_llm_error
+                # (compressed + retry), llm_error cleared. Graph returns final state.
+                return {
+                    "messages": [{"role": "assistant", "content": "Recovered response"}],
+                    "transition": Transition.DONE,
+                    "tool_calls": [],
+                    "tool_results": [],
+                    "streaming_tool_results": [],
+                }
+
+        class RecoveryLLM:
+            escalate_max_tokens = lambda self: None
+            switch_to_fallback = lambda self: None
+
+        class RecoveryCtx:
+            def count_tokens(self, messages):
+                return 1000
+
+            def needs_compression(self, tokens):
+                return False
+
+            async def compress(self, messages):
+                return [{"role": "system", "content": "[compressed]"}]
+
+        orch = LoopOrchestrator(
+            graph=RecoveryGraph(),
+            context_manager=RecoveryCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=recovery,
+            llm=RecoveryLLM(),
+            chat_id="test",
+        )
+        state = {
+            "messages": [{"role": "user", "content": "long input"}],
+            "transition": None,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+
+        events = []
+        async for ev in orch.run(state):
+            events.append(ev)
+
+        # The recovered assistant message should be emitted
+        assistant_events = [e for e in events if e.get("event") == "assistant"]
+        assert len(assistant_events) > 0, (
+            f"Expected assistant event from recovery, but got events: "
+            f"{[e.get('event') for e in events]}"
+        )
+        assert "Recovered response" in assistant_events[0].get("data", "")
+
+
 class TestCircuitBreaker:
     """Verify safety circuit breaker (max_iterations + token_ceiling)."""
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 from typing import Any
 
 from fastmcp import FastMCP
+from loguru import logger
 
 from src.cache import create_cache
 from src.config import ToolServerConfig, load_config
@@ -262,6 +264,10 @@ def create_server(config: ToolServerConfig) -> FastMCP:
 
 
 def main() -> int:
+    log_level = os.getenv("TOOL_SERVER_LOG_LEVEL", "WARNING").upper()
+    logger.remove()
+    logger.add(sys.stderr, level=log_level, format="{time:HH:mm:ss.SSS} | {level: <8} | {message}")
+
     try:
         config = load_config()
         server = create_server(config)
@@ -270,7 +276,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except Exception as exc:
-        print(f"Failed to start tool-server: {exc}", file=sys.stderr)
+        logger.opt(exception=True).error("Failed to start tool-server")
         return 1
 
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 from typing import AsyncIterator
 
@@ -247,7 +248,7 @@ class LoopOrchestrator:
         for tc in approved:
             fn = tc.get("function", {})
             await self._audit.log(AuditEvent(
-                timestamp=str(uuid4()),
+                timestamp=datetime.now(timezone.utc).isoformat(),
                 level=AuditLevel.INFO,
                 actor="system",
                 event="TOOL_APPROVED",

@@ -77,6 +77,7 @@ class ServerRegistry:
                 "name": t.name,
                 "server_name": entry.name,
                 "description": getattr(t, "description", ""),
+                "params_schema": getattr(t, "inputSchema", None) or {},
                 "mutable": meta.get("mutable", False),
                 "is_read_only": meta.get("is_read_only", False),
                 "is_rollbackable": meta.get("is_rollbackable", False),

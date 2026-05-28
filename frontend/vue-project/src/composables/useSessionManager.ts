@@ -16,6 +16,11 @@ export interface SessionManager {
 
 const MANAGER_KEY: InjectionKey<SessionManager> = Symbol('sessionManager')
 
+export interface ErrorInfo {
+  code: string
+  message: string
+}
+
 export interface ApprovalEvent {
   request_id: string
   tool_name: string
@@ -47,7 +52,7 @@ export interface SessionState {
   currentActivity: Ref<string>
   phaseLabel: ComputedRef<string>
   isLoadingHistory: Ref<boolean>
-  connectionError: Ref<string | null>
+  connectionError: Ref<ErrorInfo | null>
   sendMessage(text: string): void
   abort(): void
   approve(requestId: string, message?: string): Promise<void>
@@ -168,7 +173,7 @@ export function useSessionManager(deps?: ManagerDeps) {
     const agentPhase: Ref<AgentPhase> = ref('idle')
     const currentActivity: Ref<string> = ref('')
     const isLoadingHistory: Ref<boolean> = ref(false)
-    const connectionError: Ref<string | null> = ref(null)
+    const connectionError: Ref<ErrorInfo | null> = ref(null)
     let abortController: AbortController | null = null
 
     const phaseLabel = computed(() => {
@@ -378,6 +383,7 @@ export function useSessionManager(deps?: ManagerDeps) {
             agentPhase.value = 'done'
             currentActivity.value = ''
             isStreaming.value = false
+            connectionError.value = null
             if (isNewChat && newChatId) {
               _transitionDraftToReal(newChatId, _self)
               sessions.value = [{
@@ -392,7 +398,10 @@ export function useSessionManager(deps?: ManagerDeps) {
 
           on_error(data: any) {
             isStreaming.value = false
-            connectionError.value = data.code ? `${data.code}: ${data.message}` : String(data)
+            connectionError.value = {
+              code: data.code || 'UNKNOWN',
+              message: data.message || String(data),
+            }
           },
         },
         abortController.signal,
@@ -400,7 +409,10 @@ export function useSessionManager(deps?: ManagerDeps) {
       ).catch((err: unknown) => {
         isStreaming.value = false
         if (err instanceof DOMException && err.name === 'AbortError') return
-        connectionError.value = err instanceof Error ? `NETWORK_ERROR: ${err.message}` : 'NETWORK_ERROR: Connection lost'
+        connectionError.value = {
+          code: 'NETWORK_ERROR',
+          message: err instanceof Error ? err.message : 'Connection lost',
+        }
       })
     }
 
@@ -424,10 +436,10 @@ export function useSessionManager(deps?: ManagerDeps) {
           agentPhase.value = 'thinking'
           currentActivity.value = 'Processing…'
         } else if (!res.ok) {
-          connectionError.value = `Approval failed: server returned ${res.status}`
+          connectionError.value = { code: 'APPROVAL_FAILED', message: `Server returned ${res.status}` }
         }
       } catch (err: unknown) {
-        connectionError.value = `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+        connectionError.value = { code: 'APPROVAL_FAILED', message: err instanceof Error ? err.message : 'Unknown error' }
       }
     }
 
@@ -443,10 +455,10 @@ export function useSessionManager(deps?: ManagerDeps) {
           agentPhase.value = 'thinking'
           currentActivity.value = 'Processing…'
         } else if (!res.ok) {
-          connectionError.value = `Approval failed: server returned ${res.status}`
+          connectionError.value = { code: 'APPROVAL_FAILED', message: `Server returned ${res.status}` }
         }
       } catch (err: unknown) {
-        connectionError.value = `Approval failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+        connectionError.value = { code: 'APPROVAL_FAILED', message: err instanceof Error ? err.message : 'Unknown error' }
       }
     }
 
@@ -457,7 +469,7 @@ export function useSessionManager(deps?: ManagerDeps) {
       currentActivity.value = ''
       connectionError.value = null
 
-      if (!chatId.value) {
+      if (chatId.value === null) {
         messages.value = []
         toolCalls.value = new Map()
         reasonings.value = []

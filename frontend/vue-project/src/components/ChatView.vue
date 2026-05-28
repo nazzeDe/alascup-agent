@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import type { Message, ToolCallInfo } from '@/types'
-import type { ReasoningEntry, ApprovalEvent } from '@/composables/useSessionManager'
+import type { ReasoningEntry, ApprovalEvent, ErrorInfo } from '@/composables/useSessionManager'
 import { useSessionManager } from '@/composables/useSessionManager'
 import MessageItem from './MessageItem.vue'
 import ToolCallInline from './ToolCallInline.vue'
@@ -28,6 +28,22 @@ const _draftInput = computed({
 })
 const _isLoadingHistory = computed(() => state.value?.isLoadingHistory.value ?? false)
 const _connectionError = computed(() => state.value?.connectionError.value ?? null)
+
+const errorBannerClass = computed(() => {
+  const code = _connectionError.value?.code
+  if (code === 'NETWORK_ERROR') return 'bg-warning-subtle text-warning-emphasis'
+  if (code === 'TURN_LIMIT_EXCEEDED' || code === 'TOKEN_BUDGET_EXCEEDED') return 'bg-info-subtle text-info-emphasis'
+  return 'bg-danger-subtle text-danger-emphasis'
+})
+
+const errorBannerTitle = computed(() => {
+  const code = _connectionError.value?.code
+  if (code === 'NETWORK_ERROR') return 'Connection lost —'
+  if (code === 'TURN_LIMIT_EXCEEDED') return 'Turn limit reached —'
+  if (code === 'TOKEN_BUDGET_EXCEEDED') return 'Context too large —'
+  if (code === 'AGENT_CRASH' || code === 'SSE_CRASH') return 'Agent error —'
+  return 'Error —'
+})
 
 const messages_container = ref<HTMLElement | null>(null)
 const user_scrolled_up = ref(false)
@@ -153,8 +169,9 @@ async function handle_reject(requestId: string, message?: string) {
     </div>
 
     <!-- Connection error banner -->
-    <div v-if="_connectionError" class="connection-error px-3 py-2 border-top bg-warning-subtle text-warning-emphasis small">
-      Connection lost — send a new message to resume
+    <div v-if="_connectionError" class="connection-error px-3 py-2 border-top small" :class="errorBannerClass">
+      <span class="fw-semibold">{{ errorBannerTitle }}</span>
+      <span class="ms-1">{{ _connectionError.message }}</span>
     </div>
 
     <div class="chat-input border-top p-2">

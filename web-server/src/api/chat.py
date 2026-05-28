@@ -161,6 +161,13 @@ async def _do_chat(
             try:
                 async for event in agent.run(messages, available_tools, system=system_prompt):
                     await event_queue.put(("agent", event))
+            except Exception as exc:
+                logger.opt(exception=True).error("agent_run_failed chat_id={c}", c=str(chat_id))
+                error_event = {
+                    "event": "error",
+                    "data": json.dumps({"code": "AGENT_CRASH", "message": str(exc)}, default=str),
+                }
+                await event_queue.put(("agent", error_event))
             finally:
                 await event_queue.put(("done", None))
 
@@ -199,6 +206,12 @@ async def _do_chat(
                 if event:
                     yield event
 
+        except Exception as exc:
+            logger.opt(exception=True).error("sse_stream_crash chat_id={c}", c=str(chat_id))
+            yield {
+                "event": "error",
+                "data": json.dumps({"code": "SSE_CRASH", "message": str(exc)}, default=str),
+            }
         finally:
             reasoning_queue.reset(token)
             _chat_id_ctx.reset(chat_id_token)
