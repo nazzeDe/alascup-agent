@@ -7,7 +7,7 @@ from src.models.tool import ToolCall
 
 
 class ChatSession(BaseModel):
-    id: UUID
+    id: UUID = Field(serialization_alias="chat_id")
     title: str | None = None
     messages: list[Message] = Field(default_factory=list)
     executed_tool_list: list[ToolCall] = Field(default_factory=list)
