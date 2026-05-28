@@ -752,4 +752,159 @@ class TestOrchestratorTermination:
         assert any(e["event"] == "done" for e in events)
 
 
+class TestCircuitBreaker:
+    """Verify safety circuit breaker (max_iterations + token_ceiling)."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        """Reset env vars to defaults to prevent leakage between tests."""
+        monkeypatch.delenv("AGENT_MAX_ITERATIONS", raising=False)
+        monkeypatch.delenv("AGENT_TOKEN_CEILING_RATIO", raising=False)
+
+    @pytest.mark.asyncio
+    async def test_turn_limit_exceeded_stops_loop(self, monkeypatch):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        monkeypatch.setenv("AGENT_MAX_ITERATIONS", "2")
+
+        class LoopingGraph:
+            """Graph that always returns tool_results, causing infinite loop."""
+            async def ainvoke(self, state, config=None):
+                return {
+                    "messages": state.get("messages", []),
+                    "transition": Transition.TOOL_RESULTS,
+                    "tool_calls": [],
+                    "tool_results": [{"tool_name": "x", "result": {}}],
+                    "streaming_tool_results": [],
+                }
+
+        audit = _MockAuditLogger()
+        orch = LoopOrchestrator(
+            graph=LoopingGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=audit,
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {
+            "messages": [{"role": "user", "content": "loop"}],
+            "transition": None,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+
+        events = []
+        async for ev in orch.run(state):
+            events.append(ev)
+
+        assert any(
+            e["event"] == "error"
+            and json.loads(e["data"])["code"] == "TURN_LIMIT_EXCEEDED"
+            for e in events
+        ), f"Expected TURN_LIMIT_EXCEEDED error, got: {events}"
+        assert any(e["event"] == "done" for e in events)
+
+    def test_inject_turn_hint_at_70_percent(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        # max_iterations=30 (default), 70% = 21
+        state = {"system": "base prompt"}
+        orch._inject_turn_hint(state, 21)
+        assert "turn limit" in state["system"].lower()
+        assert "base prompt" in state["system"]
+        assert orch._last_hint is not None
+
+    def test_inject_turn_hint_replaces_not_accumulates(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        # First hint at 70%
+        state = {"system": "base prompt"}
+        orch._inject_turn_hint(state, 21)
+        first_hint_count = state["system"].count("[SYSTEM]")
+        assert first_hint_count == 1
+
+        # Second hint at ≤3 turns remaining — replaces, not appends
+        orch._inject_turn_hint(state, 28)
+        second_hint_count = state["system"].count("[SYSTEM]")
+        assert second_hint_count == 1, f"Hint accumulated: {state['system']}"
+        assert "base prompt" in state["system"]
+
+    def test_inject_turn_hint_skips_below_threshold(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=_NoopCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {"system": "clean"}
+        orch._inject_turn_hint(state, 10)  # Well below 70% of 30
+        assert state["system"] == "clean"
+        assert getattr(orch, "_last_hint", None) is None
+
+    @pytest.mark.asyncio
+    async def test_token_ceiling_breach_detected(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        class HugeCtx:
+            """Context manager that always reports tokens over ceiling."""
+            def count_tokens(self, messages):
+                return 200_000  # way over any reasonable ceiling
+            needs_compression = _NoopCtx.needs_compression
+            compress = _NoopCtx.compress
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=HugeCtx(),
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {"messages": [{"role": "user", "content": "hi"}]}
+        result = await orch._check_token_ceiling(state)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_token_ceiling_ok_when_under_limit(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+
+        orch = LoopOrchestrator(
+            graph=_NoopGraph(),
+            context_manager=_NoopCtx(),  # count_tokens returns 0
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test",
+        )
+        state = {"messages": []}
+        result = await orch._check_token_ceiling(state)
+        assert result is False
 

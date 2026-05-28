@@ -15,6 +15,8 @@ class TestTransition:
             "context_compacted",
             "max_output_tokens_recovery",
             "model_fallback",
+            "turn_limit_exceeded",
+            "token_budget_exceeded",
             "done",
             "error_exit",
         }

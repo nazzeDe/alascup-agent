@@ -1,6 +1,7 @@
 """Agent loop orchestrator — composes graph invocation, event emission, and handlers."""
 
 import json
+import os
 from uuid import uuid4
 from typing import AsyncIterator
 
@@ -89,6 +90,12 @@ class LoopOrchestrator:
         self._llm = llm
         self._config = {"configurable": {"thread_id": chat_id}}
         self._chat_id = chat_id
+        # Circuit breaker: hard limits to prevent token explosion and infinite loops.
+        # Industry pattern (LangGraph recursion_limit=25, Claude Code max_turns).
+        # No interactive pause — just stop and report. User can re-submit if needed.
+        self._max_iterations = int(os.getenv("AGENT_MAX_ITERATIONS", "30"))
+        ws = getattr(self._context_manager, "window_size", 128000)
+        self._token_ceiling = int(ws * float(os.getenv("AGENT_TOKEN_CEILING_RATIO", "0.95")))
 
     async def run(self, initial_state: dict) -> AsyncIterator[dict]:
         """Execute ReAct loop, yielding all events on one SSE connection."""
@@ -123,8 +130,36 @@ class LoopOrchestrator:
             loop_feature = f"loop:{self._chat_id}#{it}"
             start_feature(loop_feature)
 
+            # 0. Circuit breaker: max iterations (LangGraph recursion_limit pattern)
+            if it > self._max_iterations:
+                await self._handle_turn_limit_exceeded()
+                yield {
+                    "event": "error",
+                    "data": json.dumps({
+                        "code": "TURN_LIMIT_EXCEEDED",
+                        "message": f"Agent exceeded max iterations ({self._max_iterations}). Task may be too complex — try breaking it down.",
+                    }),
+                }
+                for ev in self._exit_events(profiler, loop_feature, "return"):
+                    yield ev
+                return
+            self._inject_turn_hint(state, it)
+
             # 1. Context compression
             await self._compress_context(state)
+
+            # 1.5 Circuit breaker: token ceiling (compression exhausted, still over budget)
+            if await self._check_token_ceiling(state):
+                yield {
+                    "event": "error",
+                    "data": json.dumps({
+                        "code": "TOKEN_BUDGET_EXCEEDED",
+                        "message": "Context too large even after compression. Start a new session or narrow the task scope.",
+                    }),
+                }
+                for ev in self._exit_events(profiler, loop_feature, "return"):
+                    yield ev
+                return
 
             # 2. Invoke graph
             state["_turn_id"] = turn_id
@@ -258,6 +293,62 @@ class LoopOrchestrator:
                 iteration=getattr(self, "_iteration", None),
             )
 
+    def _inject_turn_hint(self, state: dict, it: int) -> str | None:
+        """Inject progressive hints to LLM when approaching iteration limit.
+
+        Injects once at 70% threshold, then replaces with a stronger hint
+        when ≤3 turns remain. Never appends — hint is replaced not accumulated.
+        """
+        remaining = self._max_iterations - it
+        if remaining <= 3:
+            hint = f"\n\n[SYSTEM] Only {remaining} turns remaining. Conclude immediately with a summary of what you know."
+        elif it >= int(self._max_iterations * 0.7):
+            hint = "\n\n[SYSTEM] Approaching turn limit. Prioritize completion — skip non-critical investigation."
+        else:
+            return None
+
+        system = state.get("system") or ""
+        prev = getattr(self, "_last_hint", None)
+        if prev and prev in system:
+            system = system.replace(prev, hint)
+        else:
+            system += hint
+        self._last_hint = hint
+        state["system"] = system
+        return hint
+
+    async def _check_token_ceiling(self, state: dict) -> bool:
+        """Return True if token count exceeds hard ceiling even after compression.
+
+        This is the last-resort circuit breaker: if compression couldn't bring
+        tokens under the ceiling, the conversation is too large to continue.
+        """
+        messages = state.get("messages", [])
+        tokens = self._context_manager.count_tokens(messages)
+        if tokens > self._token_ceiling:
+            debug_log("ERROR", "Token ceiling breached after compression",
+                      tokens=tokens, ceiling=self._token_ceiling,
+                      msg_count=len(messages), chat_id=str(self._chat_id))
+            await log_transition(
+                self._audit, Transition.TOKEN_BUDGET_EXCEEDED,
+                chat_id=_safe_uuid(self._chat_id),
+                turn_id=getattr(self, "_turn_id", None),
+                iteration=getattr(self, "_iteration", None),
+            )
+            return True
+        return False
+
+    async def _handle_turn_limit_exceeded(self) -> None:
+        """Log turn limit exceeded and audit the event."""
+        debug_log("ERROR", "Turn limit exceeded",
+                  max_iterations=self._max_iterations, chat_id=str(self._chat_id))
+        await log_transition(
+            self._audit, Transition.TURN_LIMIT_EXCEEDED,
+            chat_id=_safe_uuid(self._chat_id),
+            turn_id=getattr(self, "_turn_id", None),
+            iteration=getattr(self, "_iteration", None),
+        )
+
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
         """Attempt error recovery. Returns (action, optional_error_event)."""
         llm_error = state.get("llm_error")
@@ -305,6 +396,8 @@ class LoopOrchestrator:
         )
         if transition == Transition.DONE:
             await log_transition(self._audit, Transition.DONE, **_audit_kwargs)
+            return "return"
+        if transition in (Transition.TURN_LIMIT_EXCEEDED, Transition.TOKEN_BUDGET_EXCEEDED):
             return "return"
         if transition == Transition.TOOL_RESULTS:
             await log_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)

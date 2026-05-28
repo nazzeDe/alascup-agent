@@ -16,6 +16,8 @@ class Transition(StrEnum):
     CONTEXT_COMPACTED = "context_compacted"
     MAX_OUTPUT_TOKENS_RECOVERY = "max_output_tokens_recovery"
     MODEL_FALLBACK = "model_fallback"
+    TURN_LIMIT_EXCEEDED = "turn_limit_exceeded"
+    TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"
     DONE = "done"
     ERROR_EXIT = "error_exit"
 

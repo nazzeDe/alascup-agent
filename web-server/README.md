@@ -130,12 +130,33 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | `approval_rejected` | 审批拒绝 |
 | `context_compacted` | 上下文压缩后重试 |
 | `max_output_tokens_recovery` | token 上限恢复重试 |
+| `turn_limit_exceeded` | 超过最大迭代轮次，熔断停止 |
+| `token_budget_exceeded` | Token 超硬上限，熔断停止 |
+| `model_fallback` | 模型降级恢复 |
 | `done` | LLM 判断结束 |
 | `error_exit` | 异常退出 |
 
-### 循环轮次确认（规划中，当前版本未实现）
+### 安全熔断器
 
-循环轮次达到阈值（默认 15 轮）时，推送 `turn_limit_reached` 事件并暂停 SSE 流，等待用户确认。用户选择"继续"后恢复循环，每继续 10 轮再次弹窗。用户选择"停止"或 SSE 超时则终止循环。
+硬限制防止 Token 爆量和死循环。借鉴大厂做法（LangGraph `recursion_limit`=25、Anthropic `max_turns`、OpenAI token budget）——不暂停问用户，超限直接停。用户可重新发送消息继续。
+
+**熔断规则：**
+
+| 熔断器 | 默认值 | 环境变量 | 行为 |
+|--------|--------|----------|------|
+| 最大迭代轮次 | 30 | `AGENT_MAX_ITERATIONS` | 第 31 轮入口触发 `TURN_LIMIT_EXCEEDED`，停止循环 |
+| Token 硬上限 | 模型窗口 × 95% | `AGENT_TOKEN_CEILING_RATIO` | 压缩后仍超上限 → `TOKEN_BUDGET_EXCEEDED`，停止循环 |
+
+**渐进提示（非阻塞）：**
+
+达到最大迭代的 70% 时，向 system prompt 注入提示催促 LLM 收尾；剩余 ≤3 轮时升级为强提示。提示替换不追加，不膨胀上下文。
+
+**为什么不用交互式确认：**
+
+- Anthropic / OpenAI / Google / LangGraph 全部用硬限制，无人做交互暂停
+- 用户 AFK → SSE 流挂起超时，不如直接停
+- 轮次到上限时 token 已经消耗，暂停无意义
+- 真需继续 → 用户重新发送消息即可
 
 ### 会话并发
 
@@ -147,7 +168,8 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 |------|------|
 | LLM 无 tool_call 且 stop_reason=end | transition=`done`，退出 |
 | abort / 连续失败 | transition=`error_exit`，退出 |
-| 用户拒绝继续 | transition=`done`，退出 |
+| 超过最大迭代轮次 | transition=`turn_limit_exceeded`，退出 |
+| Token 超硬上限 | transition=`token_budget_exceeded`，退出 |
 
 ### 只读工具预执行
 
@@ -244,7 +266,7 @@ LLM 流式输出 token
 | `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only, server?}` | LLM 请求调用工具 |
 | `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?, error?, execution_time_ms?}` | 工具执行结果 |
 | `tool_approval_required` | `{chat_id, request_id, tool_name, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
-| `error` | `{code, message}` | 异常 |
+| `error` | `{code, message}` | 异常（code: `TURN_LIMIT_EXCEEDED`, `TOKEN_BUDGET_EXCEEDED`, 或 LLM 错误码） |
 | `done` | `{chat_id}` | 流结束 |
 
 只读工具在 think 阶段预执行后发送 `tool_call`/`tool_result`。高风险触发 `tool_approval_required` 后 SSE 暂停，`POST /api/tool-requests/{request_id}/approval` 回调后流继续。

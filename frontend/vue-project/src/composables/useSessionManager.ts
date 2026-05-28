@@ -1,6 +1,20 @@
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, provide, inject, type Ref, type ComputedRef, type InjectionKey } from 'vue'
 import type { Message, ToolCallInfo, ChatSession, SSECallbacks } from '@/types'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
+
+export interface SessionManager {
+  sessions: Ref<ChatSession[]>
+  activeChatId: Ref<string | null>
+  isLoadingSessions: Ref<boolean>
+  loadError: Ref<string>
+  createDraft(): void
+  get(chatId: string | null): SessionState
+  loadSessions(): Promise<void>
+  loadHistory(chatId: string): Promise<boolean>
+  deleteSession(chatId: string): void
+}
+
+const MANAGER_KEY: InjectionKey<SessionManager> = Symbol('sessionManager')
 
 export interface ApprovalEvent {
   request_id: string
@@ -76,6 +90,10 @@ interface ManagerDeps {
 }
 
 export function useSessionManager(deps?: ManagerDeps) {
+  // Singleton: inject parent-provided instance, avoiding dual-instance bugs.
+  const existing = inject(MANAGER_KEY, null)
+  if (existing) return existing
+
   const connectFn = deps?._connect ?? realSSEConnect
 
   const sessions: Ref<ChatSession[]> = ref([])
@@ -439,7 +457,7 @@ export function useSessionManager(deps?: ManagerDeps) {
       currentActivity.value = ''
       connectionError.value = null
 
-      if (chatId.value === null) {
+      if (!chatId.value) {
         messages.value = []
         toolCalls.value = new Map()
         reasonings.value = []
@@ -495,7 +513,7 @@ export function useSessionManager(deps?: ManagerDeps) {
     return _self
   }
 
-  return {
+  const manager = {
     sessions,
     activeChatId,
     isLoadingSessions,
@@ -506,4 +524,6 @@ export function useSessionManager(deps?: ManagerDeps) {
     loadHistory,
     deleteSession,
   }
+  provide(MANAGER_KEY, manager)
+  return manager
 }
