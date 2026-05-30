@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     turn_id UUID,
     iteration INTEGER,
     level audit_level NOT NULL,
-    actor VARCHAR(32) NOT NULL,
+    actor VARCHAR(32) NOT NULL,  -- AuditActor enum: user, agent, tool, policy, system
     event VARCHAR(64) NOT NULL,
     tool_name VARCHAR(128),
     params JSONB,

@@ -8,7 +8,7 @@ from typing import AsyncIterator
 
 from loguru import logger
 
-from src.agent.loop.audit import audit_transition
+from src.agent.loop.audit import audit_transition, _safe_uuid
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers import handle_pending_approval, handle_llm_error
 from src.agent.loop.transitions import (
@@ -16,21 +16,13 @@ from src.agent.loop.transitions import (
     get_transition,
 )
 from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
+from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import ROLE_MAP, Transition
-from src.models.audit import AuditEvent, AuditLevel
+from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 from src.observability.profiler import Profiler, write_profile
 from src.tools import start_feature, complete_feature
-
-
-def _safe_uuid(value: str):
-    """Parse UUID safely, returning None for non-UUID strings."""
-    from uuid import UUID
-    try:
-        return UUID(value)
-    except (ValueError, AttributeError):
-        return None
 
 
 def _is_assistant(m) -> bool:
@@ -89,6 +81,7 @@ class LoopOrchestrator:
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._llm = llm
+        self._model: str = getattr(llm, "_config", None) and getattr(llm._config, "model", "") or ""
         self._config = {}
         self._chat_id = chat_id
         # Circuit breaker: hard limits to prevent token explosion and infinite loops.
@@ -165,6 +158,7 @@ class LoopOrchestrator:
             # 2. Invoke graph
             state["_turn_id"] = turn_id
             state["_iteration"] = it
+            state["_model"] = self._model
             result = await self._graph.ainvoke(state, self._config)
             profiler.checkpoint("graph_ainvoke")
             logger.debug("graph_done pending_approval={p} tool_calls={t} approved={a} transition={r}",
@@ -232,6 +226,7 @@ class LoopOrchestrator:
                     bridge=self._bridge, audit_logger=self._audit,
                     chat_id=self._chat_id,
                     turn_id=self._turn_id, iteration=self._iteration,
+                    model=self._model,
                 ):
                     yield event
                 profiler.checkpoint("approval_events_emitted")
@@ -248,10 +243,11 @@ class LoopOrchestrator:
                 self._audit, Transition.APPROVAL_GRANTED,
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=self._turn_id, iteration=self._iteration,
+                actor=AuditActor.POLICY, model=self._model,
             )
 
-            await self._log_approved_tools(all_approved)
-            await self._log_rejected_tools(all_rejected)
+            await self._audit_human_approved(all_approved)
+            await self._audit_human_rejected(all_rejected)
             await _persist_human_decisions(all_approved, all_rejected)
             result["approved_tool_calls"] = result.get("approved_tool_calls", []) + all_approved
             result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + all_rejected
@@ -269,36 +265,46 @@ class LoopOrchestrator:
             result.update(await self._graph.ainvoke(result, self._config))
             profiler.checkpoint("graph_resume")
 
-    async def _log_approved_tools(self, approved: list[dict]) -> None:
+    async def _audit_human_approved(self, approved: list[dict]) -> None:
         if not self._audit:
             return
         for tc in approved:
             fn = tc.get("function", {})
+            args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
             await self._audit.log(AuditEvent(
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                level=AuditLevel.INFO,
-                actor="system",
-                event="TOOL_APPROVED",
-                tool_name=fn.get("name"),
-                decision="APPROVED",
+                chat_id=_safe_uuid(self._chat_id),
+                request_id=_safe_uuid(tc.get("request_id", "")),
                 turn_id=self._turn_id,
                 iteration=self._iteration,
+                level=AuditLevel.INFO,
+                actor=AuditActor.POLICY.value,
+                event="TOOL_APPROVED",
+                tool_name=fn.get("name"),
+                params=args,
+                model=self._model,
+                decision="APPROVED",
             ))
 
-    async def _log_rejected_tools(self, rejected: list[dict]) -> None:
+    async def _audit_human_rejected(self, rejected: list[dict]) -> None:
         if not self._audit:
             return
         for tc in rejected:
             fn = tc.get("function", {})
+            args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
             await self._audit.log(AuditEvent(
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                level=AuditLevel.WARN,
-                actor="system",
-                event="TOOL_REJECTED",
-                tool_name=fn.get("name"),
-                decision="REJECTED",
+                chat_id=_safe_uuid(self._chat_id),
+                request_id=_safe_uuid(tc.get("request_id", "")),
                 turn_id=self._turn_id,
                 iteration=self._iteration,
+                level=AuditLevel.WARN,
+                actor=AuditActor.POLICY.value,
+                event="TOOL_REJECTED",
+                tool_name=fn.get("name"),
+                params=args,
+                model=self._model,
+                decision="REJECTED",
             ))
 
     def _exit_events(self, profiler: Profiler, loop_feature: str, action: str) -> list[dict]:
@@ -335,6 +341,7 @@ class LoopOrchestrator:
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
                 iteration=getattr(self, "_iteration", None),
+                actor=AuditActor.SYSTEM, model=self._model,
             )
 
     def _inject_turn_hint(self, state: dict, it: int) -> str | None:
@@ -378,6 +385,7 @@ class LoopOrchestrator:
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
                 iteration=getattr(self, "_iteration", None),
+                actor=AuditActor.SYSTEM, model=self._model,
             )
             return True
         return False
@@ -391,6 +399,7 @@ class LoopOrchestrator:
             chat_id=_safe_uuid(self._chat_id),
             turn_id=getattr(self, "_turn_id", None),
             iteration=getattr(self, "_iteration", None),
+            actor=AuditActor.SYSTEM, model=self._model,
         )
 
     async def _recover_from_error(self, state: dict) -> tuple[str | None, dict | None]:
@@ -415,6 +424,7 @@ class LoopOrchestrator:
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
                 iteration=getattr(self, "_iteration", None),
+                actor=AuditActor.SYSTEM, model=self._model,
             )
             return "return", {
                 "event": "error",
@@ -437,6 +447,8 @@ class LoopOrchestrator:
             chat_id=_safe_uuid(self._chat_id),
             turn_id=getattr(self, "_turn_id", None),
             iteration=getattr(self, "_iteration", None),
+            actor=AuditActor.AGENT,
+            model=self._model,
         )
         if transition == Transition.DONE:
             await audit_transition(self._audit, Transition.DONE, **_audit_kwargs)

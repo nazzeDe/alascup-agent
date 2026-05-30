@@ -2,6 +2,7 @@
 
 from src.agent.loop.audit import audit_transition
 from src.agent.state import Transition
+from src.models.audit import AuditActor
 
 
 async def handle_llm_error(state: dict, *, error_recovery, context_manager, llm, audit_logger) -> bool:
@@ -30,12 +31,14 @@ async def handle_llm_error(state: dict, *, error_recovery, context_manager, llm,
         compressed = await context_manager.compress(state.get("messages", []))
         state["messages"] = compressed
         await audit_transition(audit_logger, Transition.CONTEXT_COMPACTED,
-                               turn_id=turn_id, iteration=iteration)
+                               turn_id=turn_id, iteration=iteration,
+                               actor=AuditActor.SYSTEM)
     elif action == "aggressive_compress":
         compressed = await context_manager.compress(state.get("messages", []))
         state["messages"] = compressed
         await audit_transition(audit_logger, Transition.CONTEXT_COMPACTED,
-                               turn_id=turn_id, iteration=iteration)
+                               turn_id=turn_id, iteration=iteration,
+                               actor=AuditActor.SYSTEM)
     elif action == "escalate_token_limit":
         llm.escalate_max_tokens()
     elif action == "continue_inject":

@@ -3,15 +3,9 @@
 import json
 from uuid import UUID, uuid4
 
-from src.agent.loop.audit import audit_transition
+from src.agent.loop.audit import audit_transition, _safe_uuid
 from src.agent.state import Transition
-
-
-def _safe_uuid(value: str) -> UUID | None:
-    try:
-        return UUID(value)
-    except (ValueError, AttributeError):
-        return None
+from src.models.audit import AuditActor
 
 
 async def handle_pending_approval(
@@ -19,6 +13,7 @@ async def handle_pending_approval(
     bridge, audit_logger, chat_id: str,
     turn_id: UUID | None = None,
     iteration: int | None = None,
+    model: str | None = None,
 ):
     """Yield approval_required SSE events for each pending tool call.
 
@@ -31,6 +26,7 @@ async def handle_pending_approval(
         audit_logger, Transition.APPROVAL_PENDING,
         chat_id=_safe_uuid(chat_id),
         turn_id=turn_id, iteration=iteration,
+        actor=AuditActor.POLICY, model=model,
     )
 
     if not pending:

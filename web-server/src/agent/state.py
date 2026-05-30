@@ -37,3 +37,4 @@ class AgentState(MessagesState):
     # Observability: set by orchestrator before each graph invocation.
     _turn_id: Any = None  # UUID, but Any avoids LangGraph annotation issues
     _iteration: int | None = None
+    _model: str | None = None

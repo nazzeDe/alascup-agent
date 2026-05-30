@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 from src.agent.loop.audit import audit_transition
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.agent.state import Transition
+from src.models.audit import AuditActor
 
 
 class Query:
@@ -47,9 +48,12 @@ class Query:
             chat_uuid = UUID(self._chat_id)
         except (ValueError, AttributeError):
             pass
+        model = getattr(self._llm, "_config", None) and getattr(self._llm._config, "model", "") or None
         await audit_transition(
             self._audit, Transition.USER_MESSAGE,
             chat_id=chat_uuid,
+            actor=AuditActor.USER,
+            model=model,
         )
 
         state = {

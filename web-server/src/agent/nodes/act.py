@@ -3,9 +3,10 @@ from uuid import UUID, uuid4
 
 from loguru import logger
 
+from src.agent.loop.audit import _safe_uuid
 from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
 from src.agent.nodes._tool_dispatch import _parse_args, _execute_with_error_handling
-from src.models.audit import AuditEvent, AuditLevel
+from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.tool import ExecutionStatus
 from src.tools import start_feature, complete_feature
 
@@ -18,6 +19,7 @@ async def act_node(state, *, executor, audit_logger=None):
 
     turn_id = state.get("_turn_id")
     iteration = state.get("_iteration")
+    model = state.get("_model")
     calls = []
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -43,10 +45,14 @@ async def act_node(state, *, executor, audit_logger=None):
             "result": r,
             "tool_call_id": tc_id,
         })
-        await _log_act(
+        await _audit_tool_executed(
             audit_logger, calls[i]["tool_name"],
             execution_status=r.get("execution_status", "UNKNOWN"),
             turn_id=turn_id, iteration=iteration,
+            chat_id=_safe_uuid(chat_id) if chat_id else None,
+            request_id=_safe_uuid(calls[i].get("request_id", "")),
+            params=calls[i].get("arguments"),
+            model=model,
         )
         await _persist_execution_result(
             tool_calls[i], r, chat_id,
@@ -59,17 +65,25 @@ async def act_node(state, *, executor, audit_logger=None):
     return {"tool_results": formatted, "approved_tool_calls": []}
 
 
-async def _log_act(audit_logger, tool_name: str,
+async def _audit_tool_executed(audit_logger, tool_name: str,
              execution_status: str = "UNKNOWN",
-             turn_id=None, iteration=None) -> None:
+             turn_id=None, iteration=None,
+             chat_id: UUID | None = None,
+             request_id: UUID | None = None,
+             params: dict | None = None,
+             model: str | None = None) -> None:
     if audit_logger is None:
         return
     await audit_logger.log(AuditEvent(
         timestamp=datetime.now(timezone.utc).isoformat(),
+        chat_id=chat_id,
+        request_id=request_id,
         level=AuditLevel.INFO,
-        actor="system",
+        actor=AuditActor.TOOL.value,
         event="TOOL_EXECUTED",
         tool_name=tool_name,
+        params=params,
+        model=model,
         execution_status=execution_status,
         turn_id=turn_id,
         iteration=iteration,

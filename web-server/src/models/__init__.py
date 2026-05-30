@@ -10,7 +10,7 @@ from src.models.tool import (
     ExecutionStatus,
 )
 from src.models.session import ChatSession
-from src.models.audit import AuditEvent, AuditLevel
+from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.api_error import ApiErrorResponse, WebServerError
 
 __all__ = [
@@ -25,6 +25,7 @@ __all__ = [
     "ApprovalStatus",
     "ExecutionStatus",
     "ChatSession",
+    "AuditActor",
     "AuditEvent",
     "AuditLevel",
     "ApiErrorResponse",
