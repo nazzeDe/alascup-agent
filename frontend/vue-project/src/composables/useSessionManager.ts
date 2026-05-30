@@ -11,7 +11,7 @@ export interface SessionManager {
   get(chatId: string | null): SessionState
   loadSessions(): Promise<void>
   loadHistory(chatId: string): Promise<boolean>
-  deleteSession(chatId: string): void
+  deleteSession(chatId: string): Promise<void>
 }
 
 const MANAGER_KEY: InjectionKey<SessionManager> = Symbol('sessionManager')
@@ -121,7 +121,12 @@ export function useSessionManager(deps?: ManagerDeps) {
     return state
   }
 
-  function deleteSession(chatId: string): void {
+  async function deleteSession(chatId: string): Promise<void> {
+    try {
+      await fetch(`/api/sessions/${chatId}`, { method: 'DELETE' })
+    } catch {
+      // Best-effort: clean up locally even if backend unreachable
+    }
     const state = instances.get(chatId)
     if (state) {
       state.abort()

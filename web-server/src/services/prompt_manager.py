@@ -1,26 +1,18 @@
 from pathlib import Path
 
-DEFAULT_IDENTITY = (
-    "你是 AI 运维 Agent，负责诊断系统问题、分析性能指标、执行审批通过的修复操作。"
-    "先收集信息，再给出判断。"
-)
+DEFAULT_IDENTITY = "作为运维 Agent，利用可用工具协助运维人员执行任务。任务完成后返回一份精简的报告,仅包括问题根因和解决方法"
 
-DEFAULT_RULES = (
-    "你必须遵守以下规则：\n"
-    "- 未经用户明确审批，不得执行破坏性操作\n"
-    "- 每次工具调用前验证其必要性\n"
-    "- 所有决策和操作记录审计日志"
-)
+DEFAULT_RULES = "你必须遵守以下规则：\n- 禁止执行恶意破坏系统的操作\n- 禁止画蛇添足\n- 禁止半途而废\n- 禁止没有事实依据就给出回答"
 
 DEFAULT_TOOL_USAGE = (
     "工具调用规范：\n"
     "- 先收集信息再行动——优先使用只读工具了解系统状态\n"
     "- 并行调用独立的只读工具以加速信息收集\n"
     "- 验证每个工具的执行结果，失败时分析原因并调整策略\n"
-    "- 高风险操作先输出计划再请求执行"
+    "- 包含不可回溯或可能对系统安全造成风险的操作必须先输出计划请求用户确认"
 )
 
-DEFAULT_MEMORY = "（无持久记忆）"
+DEFAULT_MEMORY = ""
 
 SECTION_DEFAULTS = {
     "identity": DEFAULT_IDENTITY,
@@ -49,13 +41,17 @@ class PromptManager:
         for line in text.split("\n"):
             if line.startswith("## "):
                 if current_section and current_content:
-                    self._overrides[current_section.strip()] = "\n".join(current_content).strip()
+                    self._overrides[current_section.strip()] = "\n".join(
+                        current_content
+                    ).strip()
                 current_section = line[3:].strip()
                 current_content = []
             else:
                 current_content.append(line)
         if current_section and current_content:
-            self._overrides[current_section.strip()] = "\n".join(current_content).strip()
+            self._overrides[current_section.strip()] = "\n".join(
+                current_content
+            ).strip()
 
     def set_environment(self, env: dict[str, str]) -> None:
         self._environment = env

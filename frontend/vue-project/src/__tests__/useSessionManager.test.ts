@@ -256,7 +256,7 @@ describe('useSessionManager', () => {
     // Mock DELETE
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
 
-    manager.deleteSession('s1')
+    await manager.deleteSession('s1')
 
     // SSE should be aborted
     expect(capturedSignal!.aborted).toBe(true)
@@ -274,7 +274,8 @@ describe('useSessionManager', () => {
       { chat_id: 's1', messages: [], executed_tool_list: [], timestamp: '' },
     ]
 
-    manager.deleteSession('s1')
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    await manager.deleteSession('s1')
 
     expect(manager.activeChatId.value).toBeNull()
     expect(manager.sessions.value).toHaveLength(0)

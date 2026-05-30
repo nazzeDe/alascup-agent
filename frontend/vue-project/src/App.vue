@@ -18,6 +18,10 @@ function handleSelectSession(chatId: string) {
 function handleCreateSession() {
   manager.createDraft()
 }
+
+function handleDeleteSession(chatId: string) {
+  manager.deleteSession(chatId)
+}
 </script>
 
 <template>
@@ -37,6 +41,7 @@ function handleCreateSession() {
           :error="manager.loadError.value"
           @select="handleSelectSession"
           @create="handleCreateSession"
+          @delete="handleDeleteSession"
         />
       </div>
 

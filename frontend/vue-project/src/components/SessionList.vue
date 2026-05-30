@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { ChatSession } from '@/types'
 
 const props = defineProps<{
@@ -13,7 +13,34 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [chatId: string]
   create: []
+  delete: [chatId: string]
 }>()
+
+const ctxMenu = ref<{ visible: boolean; x: number; y: number; chatId: string | null }>({
+  visible: false, x: 0, y: 0, chatId: null,
+})
+
+function onContextMenu(e: MouseEvent, chatId: string) {
+  e.preventDefault()
+  ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, chatId }
+}
+
+function closeMenu() {
+  ctxMenu.value.visible = false
+}
+
+function handleDelete() {
+  const chatId = ctxMenu.value.chatId
+  if (chatId) emit('delete', chatId)
+  closeMenu()
+}
+
+function onDocClick() {
+  closeMenu()
+}
+
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
 
 interface Group {
   label: string
@@ -81,6 +108,7 @@ const groups = computed<Group[]>(() => {
             :key="session.chat_id"
             :class="['session-item p-2 border-bottom', { active: session.chat_id === active_chat_id }]"
             @click="emit('select', session.chat_id)"
+            @contextmenu="onContextMenu($event, session.chat_id)"
           >
             <div class="fw-semibold small text-truncate">
               {{ session.title || session.chat_id?.slice(0, 8) || 'New Session' }}
@@ -98,5 +126,35 @@ const groups = computed<Group[]>(() => {
         </div>
       </template>
     </div>
+
+    <div
+      v-if="ctxMenu.visible"
+      class="ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      @click.stop
+    >
+      <div class="ctx-menu-item text-danger" @click="handleDelete">删除</div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  padding: 4px 0;
+  min-width: 100px;
+}
+.ctx-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.ctx-menu-item:hover {
+  background: #f5f5f5;
+}
+</style>

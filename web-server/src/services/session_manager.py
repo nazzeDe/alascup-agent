@@ -43,6 +43,9 @@ class InMemorySessionManager:
             raise KeyError(f"session not found: {chat_id}")
         self._sessions[chat_id].executed_tool_list.append(call)
 
+    async def delete_session(self, chat_id: uuid.UUID) -> None:
+        self._sessions.pop(chat_id, None)
+
     async def set_title(self, chat_id: uuid.UUID, title: str) -> None:
         if chat_id in self._sessions and not self._sessions[chat_id].title:
             self._sessions[chat_id].title = title
@@ -86,7 +89,7 @@ class PostgresSessionManager:
 
     async def list_sessions(self) -> list[ChatSession]:
         rows = await self._db.fetch(
-            "SELECT id, title, updated_at FROM chat_sessions ORDER BY updated_at DESC"
+            "SELECT id, title, updated_at FROM chat_sessions WHERE deleted = false ORDER BY updated_at DESC"
         )
         return [
             ChatSession(
@@ -98,6 +101,11 @@ class PostgresSessionManager:
             )
             for r in rows
         ]
+
+    async def delete_session(self, chat_id: uuid.UUID) -> None:
+        await self._db.execute(
+            "UPDATE chat_sessions SET deleted = true WHERE id = $1", chat_id
+        )
 
     async def add_message(self, chat_id: uuid.UUID, msg: Message) -> None:
         now = datetime.now(timezone.utc)

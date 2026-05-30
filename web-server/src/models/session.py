@@ -14,3 +14,4 @@ class ChatSession(BaseModel):
     turn_count: int = 0
     transition: str = ""
     timestamp: str
+    deleted: bool = False

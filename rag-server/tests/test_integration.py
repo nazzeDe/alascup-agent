@@ -19,22 +19,35 @@ def chroma_client():
 
 @pytest.fixture
 def embedder():
-    """Use deterministic embedder for CI — SentenceTransformer needs network."""
-    return _DummyEmbedder(384)
+    """Deterministic word-hash-sum embedder — no network needed."""
+    import hashlib
+    return _DummyEmbedder(1024)
 
 
 class _DummyEmbedder:
-    """Deterministic embedder to avoid network-dependent model downloads."""
+    """Word-hash-sum embedder (same algorithm as FakeEmbedder in test_rag.py)."""
 
-    def __init__(self, dim=384):
+    def __init__(self, dim=1024):
         self.dim = dim
+        self._word_cache: dict[str, list[float]] = {}
 
     def embed(self, text: str) -> list[float]:
-        import hashlib
-        h = hashlib.sha256(text.encode()).digest()
-        vec = [h[i] / 255.0 for i in range(min(len(h), self.dim))]
-        while len(vec) < self.dim:
-            vec.append(0.0)
+        words = text.lower().split()
+        if not words:
+            return [0.0] * self.dim
+        vec = [0.0] * self.dim
+        for w in words:
+            wv = self._word_cache.get(w)
+            if wv is None:
+                import hashlib
+                h = hashlib.shake_256(w.encode()).digest(self.dim)
+                wv = [b / 255.0 for b in h]
+                self._word_cache[w] = wv
+            for i in range(self.dim):
+                vec[i] += wv[i]
+        norm = sum(v * v for v in vec) ** 0.5
+        if norm > 0:
+            vec = [v / norm for v in vec]
         return vec
 
 
@@ -44,7 +57,7 @@ def rag_config(chroma_client, embedder):
     return RagServerConfig(
         chroma_client=chroma_client,
         embedding_fn=embedder.embed,
-        similarity_threshold=0.95,
+        similarity_threshold=0.90,
         chroma_mode="memory",
         collection_name="test_knowledge",
     )

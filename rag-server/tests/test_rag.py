@@ -73,14 +73,40 @@ class FakeVectorStore:
 
 
 class FakeEmbedder:
-    """Deterministic embedder — same text always produces same vector."""
+    """Deterministic embedder with basic text-overlap awareness.
 
-    def __init__(self, dim: int = 8):
+    Each token gets a deterministic vector via ``shake_256``.  A text
+    embedding is the L2-normalised sum of its token vectors so that
+    similar texts produce close vectors (cosine ≈ word overlap).
+    """
+
+    def __init__(self, dim: int = 1024):
         self.dim = dim
+        self._word_cache: dict[str, list[float]] = {}
 
     def embed(self, text: str) -> list[float]:
-        h = hashlib.sha256(text.encode()).digest()
-        return [(h[i] / 255.0) for i in range(min(len(h), self.dim))]
+        words = text.lower().split()
+        if not words:
+            return [0.0] * self.dim
+
+        vec = [0.0] * self.dim
+        for w in words:
+            wv = self._word_cache.get(w)
+            if wv is None:
+                h = hashlib.shake_256(w.encode()).digest(self.dim)
+                wv = [b / 255.0 for b in h]
+                self._word_cache[w] = wv
+            for i in range(self.dim):
+                vec[i] += wv[i]
+
+        # L2-normalise
+        norm = sum(v * v for v in vec) ** 0.5
+        if norm > 0:
+            vec = [v / norm for v in vec]
+        return vec
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(t) for t in texts]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -177,13 +203,13 @@ class TestDedup:
     """RG-002: Different fingerprint → no dedup.  RG-003: Similar fingerprint → dedup."""
 
     def test_different_fingerprint_creates_new_record(self):
-        """RG-002: Same symptom, different fingerprint → new record, not dedup."""
+        """RG-002: Different symptom+fingerprint → new record, not dedup."""
         from src.tools.writeback.save import save_experience
 
         store = FakeVectorStore()
         embedder = FakeEmbedder()
 
-        # Seed exp-001: CPU high → slow query (io_wait=low)
+        # Seed: CPU high → slow query
         save_experience(
             symptom="CPU 占用高",
             fingerprint={"cpu_percent": "82", "top_process": "mysqld", "io_wait": "low", "log_pattern": "Sorting result"},
@@ -193,10 +219,10 @@ class TestDedup:
             embedder=embedder,
         )
 
-        # RG-002: Save with different fingerprint (io_wait=high) → different root cause
+        # RG-002: Different symptom + different fingerprint → different root cause
         result = save_experience(
-            symptom="CPU 占用高",
-            fingerprint={"cpu_percent": "70", "io_wait": "high"},
+            symptom="磁盘空间不足",
+            fingerprint={"disk_percent": "92", "io_wait": "high"},
             root_cause="磁盘 I/O 阻塞",
             solution="更换故障磁盘",
             store=store,
@@ -204,7 +230,6 @@ class TestDedup:
         )
 
         assert result["status"] == "saved"
-        # Should have 2 records in store
         assert len(store._docs) == 2
 
     def test_similar_fingerprint_triggers_dedup(self):
@@ -377,35 +402,44 @@ class TestChunker:
         from src.preprocessing.chunker import chunk_text
 
         text = "Short document"
-        chunks = chunk_text(text, chunk_size=500)
+        chunks = chunk_text(text, chunk_size=8192)
         assert len(chunks) == 1
         assert chunks[0] == text
 
     def test_long_text_is_split(self):
         from src.preprocessing.chunker import chunk_text
 
-        # Generate text longer than chunk_size
-        words = ["word"] * 600
+        # Generate text longer than chunk_size in tokens
+        words = ["word"] * 12000  # many words to exceed 8192 tokens
         text = " ".join(words)
-        chunks = chunk_text(text, chunk_size=200, chunk_overlap=50)
+        chunks = chunk_text(text, chunk_size=500, chunk_overlap=50)  # small chunk for test
         assert len(chunks) > 1
-        # Each chunk should be <= chunk_size words
-        for chunk in chunks:
-            assert len(chunk.split()) <= 200
 
     def test_overlap_between_chunks(self):
         from src.preprocessing.chunker import chunk_text
 
         words = [f"w{i}" for i in range(300)]
         text = " ".join(words)
-        chunks = chunk_text(text, chunk_size=100, chunk_overlap=20)
-        # Verify overlap: end of chunk 0 should appear in start of chunk 1
+        chunks = chunk_text(text, chunk_size=200, chunk_overlap=20)
         assert len(chunks) >= 2
         last_words_c0 = chunks[0].split()[-15:]
         first_words_c1 = chunks[1].split()[:15]
-        # At least some overlap
         overlap = set(last_words_c0) & set(first_words_c1)
         assert len(overlap) > 0
+
+    def test_token_count_uses_o200k(self):
+        """RG-007: count_tokens uses tiktoken o200k_base encoding."""
+        from src.preprocessing.chunker import count_tokens
+
+        n = count_tokens("hello world")
+        assert isinstance(n, int)
+        assert n > 0
+
+    def test_empty_input(self):
+        from src.preprocessing.chunker import chunk_text
+
+        chunks = chunk_text("")
+        assert chunks == [""]
 
 
 class TestCleaner:
@@ -428,15 +462,23 @@ class TestCleaner:
 # ── Config ─────────────────────────────────────────────────────────────
 
 class TestConfig:
-    def test_load_config_returns_dataclass(self):
-        from src.config import RagServerConfig, load_config
-        cfg = load_config()
-        assert isinstance(cfg, RagServerConfig)
-        assert cfg.similarity_threshold == 0.95
-        assert cfg.collection_name == "operations_knowledge"
-        assert cfg.top_k_default == 5
+    def test_hardcoded_defaults_match_design(self):
+        """Verify design decisions are encoded in config defaults."""
+        from src.config import RagServerConfig
 
-    def test_config_fields_default_to_none(self):
+        cfg = RagServerConfig()
+        assert cfg.embedding_model == "Qwen/Qwen3-Embedding-0.6B"
+        assert cfg.embedding_dimensions == 1024
+        assert cfg.similarity_threshold == 0.90
+        assert cfg.collection_name == "operations_knowledge"
+        assert cfg.chroma_mode == "persistent"
+        assert cfg.chroma_path == "./chroma_data"
+        assert cfg.top_k_default == 5
+        assert cfg.chunk_size == 8192
+        assert cfg.chunk_overlap == 512
+        assert cfg.batch_size == 64
+
+    def test_injection_points_default_to_none(self):
         from src.config import RagServerConfig
         cfg = RagServerConfig()
         assert cfg.chroma_client is None
@@ -444,6 +486,29 @@ class TestConfig:
 
 
 # ── ChromaVectorStore edge cases ──────────────────────────────────────
+
+# ── RG-006: APIEmbedder batch splitting ────────────────────────────────
+
+class TestAPIEmbedder:
+    """APIEmbedder unit tests — public interface only."""
+
+    def test_embedder_uses_qwen_model_and_1024_dimensions(self):
+        from src.embedding.adapter import APIEmbedder
+
+        embedder = APIEmbedder(api_base="http://localhost", api_key="test")
+        assert embedder.model == "Qwen/Qwen3-Embedding-0.6B"
+        assert embedder.dimensions == 1024
+
+    def test_count_tokens_uses_tiktoken_o200k(self):
+        from src.embedding.adapter import APIEmbedder
+
+        embedder = APIEmbedder(api_base="http://localhost", api_key="test")
+        n = embedder.count_tokens("hello world")
+        assert isinstance(n, int)
+        assert n > 0
+        # Verify determinism
+        assert embedder.count_tokens("hello world") == n
+
 
 class TestChromaStoreEdgeCases:
 

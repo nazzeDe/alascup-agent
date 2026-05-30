@@ -13,8 +13,12 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     id UUID PRIMARY KEY,
     title VARCHAR(256),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted BOOLEAN NOT NULL DEFAULT false
 );
+
+-- Soft migration for existing databases
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY,

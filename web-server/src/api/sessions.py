@@ -24,3 +24,8 @@ async def get_session(chat_id: UUID, mgr=Depends(session_manager)):
         return await mgr.get_session(chat_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="session not found")
+
+
+@router.delete("/sessions/{chat_id}", status_code=204)
+async def delete_session(chat_id: UUID, mgr=Depends(session_manager)):
+    await mgr.delete_session(chat_id)

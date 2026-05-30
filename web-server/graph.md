@@ -34,7 +34,7 @@ flowchart TD
     agent_decide{"继续循环<br/>还是退出？"}
 
     %% ── 审查层 ──
-    sec_entry["审查层入口<br/>静态写工具 + 可变工具"]
+    sec_entry["审查层入口<br/>静态非只读工具 + 可变工具"]
     sec_rule_engine{"Rule Engine<br/>rules.json 匹配"}
     sec_blacklist["黑名单拒绝<br/>审计: WARN"]
     sec_auto_approve["自动审批通过<br/>审计: INFO / WARN"]

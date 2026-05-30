@@ -3,3 +3,4 @@ CLAUDE.md
 .playwright-mcp
 .pytest_cache
 web-server/config/llm.json
+rag-server/chroma_data/

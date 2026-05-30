@@ -4,6 +4,7 @@ import sys
 from typing import Any
 
 from fastmcp import FastMCP
+from loguru import logger
 
 from src.config import RagServerConfig, load_config
 from src.embedding.adapter import APIEmbedder
@@ -19,6 +20,7 @@ class _EmbedAdapter:
 
     def __init__(self, fn):
         self.embed = fn
+
 
 TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "search_experience": {
@@ -53,6 +55,9 @@ TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         "properties": {},
     },
 }
+
+# Module-level cache set by _probe_embedding_api.
+_embedding_api_available = False
 
 
 def create_server(config: RagServerConfig) -> FastMCP:
@@ -123,6 +128,7 @@ def create_server(config: RagServerConfig) -> FastMCP:
             "status": "healthy",
             "collection": config.collection_name,
             "entry_count": store.count(),
+            "embedding_api_available": _embedding_api_available,
         }
 
     return server
@@ -133,13 +139,14 @@ def main() -> int:
         config = load_config()
         _init_chroma(config)
         _init_embedder(config)
+        _probe_embedding_api(config)
         server = create_server(config)
         server.run(transport="streamable-http", host="0.0.0.0", port=11452)
         return 0
     except KeyboardInterrupt:
         return 0
-    except Exception as exc:
-        print(f"Failed to start rag-server: {exc}", file=sys.stderr)
+    except Exception:
+        logger.exception("Failed to start rag-server")
         return 1
 
 
@@ -147,6 +154,7 @@ def _init_chroma(config: RagServerConfig) -> None:
     if config.chroma_client is not None:
         return
     import chromadb
+
     if config.chroma_mode == "memory":
         config.chroma_client = chromadb.Client()
     else:
@@ -156,8 +164,26 @@ def _init_chroma(config: RagServerConfig) -> None:
 def _init_embedder(config: RagServerConfig) -> None:
     if config.embedding_fn is not None:
         return
-    emb = APIEmbedder(api_base=config.embedding_api_base)
+    emb = APIEmbedder(
+        api_base=config.embedding_api_base,
+        api_key=config.embedding_api_key,
+    )
     config.embedding_fn = emb.embed
+
+
+def _probe_embedding_api(config: RagServerConfig) -> None:
+    """Ping the Embedding API once at startup to set ``embedding_api_available``."""
+    global _embedding_api_available
+    try:
+        import httpx
+        resp = httpx.get(
+            config.embedding_api_base.rstrip("/"),
+            headers={"Authorization": f"Bearer {config.embedding_api_key}"},
+            timeout=5.0,
+        )
+        _embedding_api_available = resp.status_code < 500
+    except Exception:
+        _embedding_api_available = False
 
 
 if __name__ == "__main__":
