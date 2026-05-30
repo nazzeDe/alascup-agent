@@ -38,10 +38,24 @@ class InMemorySessionManager:
             raise KeyError(f"session not found: {chat_id}")
         self._sessions[chat_id].messages.append(msg)
 
-    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> None:
+    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> uuid.UUID:
         if chat_id not in self._sessions:
             raise KeyError(f"session not found: {chat_id}")
         self._sessions[chat_id].executed_tool_list.append(call)
+        return uuid.uuid4()
+
+    async def update_tool_call(
+        self,
+        tool_call_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        *,
+        approval_status: ApprovalStatus | None = None,
+        execution_status: ExecutionStatus | None = None,
+        error: dict | None = None,
+        backup_ref: str | None = None,
+        llm_trace_id: uuid.UUID | None = None,
+    ) -> None:
+        """No-op for in-memory manager: tool calls are mutated in-place."""
 
     async def delete_session(self, chat_id: uuid.UUID) -> None:
         self._sessions.pop(chat_id, None)
@@ -125,14 +139,15 @@ class PostgresSessionManager:
             chat_id,
         )
 
-    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> None:
+    async def add_tool_call(self, chat_id: uuid.UUID, call: ToolCall) -> uuid.UUID:
         now = datetime.now(timezone.utc)
+        call_id = uuid.uuid4()
         await self._db.execute(
             """INSERT INTO tool_calls (id, chat_id, message_id, tool_name, server_name,
                is_read_only, is_rollbackable, params, request_id, approval_status,
-               execution_status, created_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
-            call.message_id,
+               execution_status, created_at, llm_trace_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+            call_id,
             chat_id,
             call.message_id,
             call.name,
@@ -144,6 +159,57 @@ class PostgresSessionManager:
             call.approval_status.value,
             call.execution_status.value,
             now,
+            call.llm_trace_id,
+        )
+        await self._db.execute(
+            "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
+            now,
+            chat_id,
+        )
+        return call_id
+
+    async def update_tool_call(
+        self,
+        tool_call_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        *,
+        approval_status: ApprovalStatus | None = None,
+        execution_status: ExecutionStatus | None = None,
+        error: dict | None = None,
+        backup_ref: str | None = None,
+        llm_trace_id: uuid.UUID | None = None,
+    ) -> None:
+        """Update tool_call row after classification, approval, or execution."""
+        now = datetime.now(timezone.utc)
+        sets: list[str] = []
+        args: list = []
+
+        if approval_status is not None:
+            sets.append(f"approval_status = ${len(args) + 1}")
+            args.append(approval_status.value)
+        if execution_status is not None:
+            sets.append(f"execution_status = ${len(args) + 1}")
+            args.append(execution_status.value)
+        if error is not None:
+            sets.append(f"error = ${len(args) + 1}")
+            args.append(json.dumps(error))
+        if backup_ref is not None:
+            sets.append(f"backup_ref = ${len(args) + 1}")
+            args.append(backup_ref)
+        if llm_trace_id is not None:
+            sets.append(f"llm_trace_id = ${len(args) + 1}")
+            args.append(llm_trace_id)
+        if execution_status in (ExecutionStatus.SUCCEEDED, ExecutionStatus.FAILED):
+            sets.append(f"executed_at = ${len(args) + 1}")
+            args.append(now)
+
+        if not sets:
+            return
+
+        args.append(tool_call_id)
+        await self._db.execute(
+            f"UPDATE tool_calls SET {', '.join(sets)} WHERE id = ${len(args)}",
+            *args,
         )
         await self._db.execute(
             "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
@@ -189,5 +255,6 @@ def _tool_call_from_row(row) -> ToolCall:
         error=json.loads(row["error"])
         if isinstance(row.get("error"), str)
         else row.get("error"),
+        llm_trace_id=row.get("llm_trace_id"),
         timestamp=row["created_at"].isoformat(),
     )

@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from loguru import logger
 
+from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
 from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import Transition
 from src.models.audit import AuditEvent, AuditLevel
+from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 
@@ -75,12 +77,14 @@ async def _apply_decision(
         rejected.append(tc)
         await _log_review(audit_logger, "TOOL_REJECTED", name, decision="REJECT",
                           turn_id=turn_id, iteration=iteration)
+        await _persist_review_decision(tc, ApprovalStatus.REJECTED, ExecutionStatus.FAILED)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
         approved.append(tc)
         await _log_review(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO,
                           turn_id=turn_id, iteration=iteration)
+        await _persist_review_decision(tc, ApprovalStatus.APPROVED, ExecutionStatus.RUNNING)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)
@@ -128,3 +132,25 @@ async def _log_review(audit_logger, event: str, tool_name: str, level=None,
         iteration=iteration,
         **{k: v for k, v in kwargs.items() if v is not None},
     ))
+
+
+async def _persist_review_decision(
+    tc: dict,
+    approval_status: ApprovalStatus,
+    execution_status: ExecutionStatus,
+) -> None:
+    """UPDATE tool_call row after rule_engine classification."""
+    session_mgr = _session_manager_ctx.get()
+    if session_mgr is None:
+        return
+    call_id = tc.get("call_id")
+    if call_id is None:
+        return
+    chat_id_str = _chat_id_ctx.get()
+    if not chat_id_str:
+        return
+    await session_mgr.update_tool_call(
+        call_id, UUID(chat_id_str),
+        approval_status=approval_status,
+        execution_status=execution_status,
+    )

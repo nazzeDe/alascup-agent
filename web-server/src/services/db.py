@@ -33,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat_time ON messages(chat_id, timestamp
 CREATE TABLE IF NOT EXISTS tool_calls (
     id UUID PRIMARY KEY,
     chat_id UUID NOT NULL REFERENCES chat_sessions(id),
-    message_id UUID NOT NULL REFERENCES messages(id),
+    message_id UUID REFERENCES messages(id),
     tool_name VARCHAR(128) NOT NULL,
     server_name VARCHAR(32) NOT NULL,
     is_read_only BOOLEAN NOT NULL,
@@ -44,9 +44,16 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     execution_status execution_status NOT NULL,
     error JSONB,
     backup_ref VARCHAR(256),
+    llm_trace_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     executed_at TIMESTAMPTZ
 );
+
+-- Soft migrations for existing databases
+ALTER TABLE tool_calls ADD COLUMN IF NOT EXISTS llm_trace_id UUID;
+ALTER TABLE tool_calls ALTER COLUMN message_id DROP NOT NULL;
+ALTER TABLE tool_calls DROP CONSTRAINT IF EXISTS tool_calls_message_id_fkey;
+CREATE INDEX IF NOT EXISTS idx_tool_calls_trace ON tool_calls(llm_trace_id);
 
 CREATE TABLE IF NOT EXISTS audit_events (
     id BIGSERIAL PRIMARY KEY,

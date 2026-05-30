@@ -10,13 +10,14 @@ class Tracer:
         messages: list[dict],
         response: dict,
         latency_ms: int,
-    ) -> None:
+        usage: dict | None = None,
+    ) -> UUID | None:
         raise NotImplementedError
 
 
 class NullTracer(Tracer):
-    async def trace_llm_call(self, *args, **kwargs) -> None:
-        pass
+    async def trace_llm_call(self, *args, **kwargs) -> UUID | None:
+        return None
 
 
 class PostgresTracer(Tracer):
@@ -30,26 +31,32 @@ class PostgresTracer(Tracer):
         messages: list[dict],
         response: dict,
         latency_ms: int,
-    ) -> None:
+        usage: dict | None = None,
+    ) -> UUID:
         completion = response.get("content", "")
         tool_calls = response.get("tool_calls")
         completion_data = {"content": completion}
         if tool_calls:
             completion_data["tool_calls"] = tool_calls
 
+        prompt_tokens = usage.get("prompt_tokens") if usage else None
+        completion_tokens = usage.get("completion_tokens") if usage else None
+
+        trace_id = uuid4()
         await self._db.execute(
             """INSERT INTO llm_traces (id, chat_id, model, prompt_text, completion_text,
                prompt_tokens, completion_tokens, latency_ms)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
-            uuid4(),
+            trace_id,
             chat_id,
             model,
             json.dumps(messages),
             json.dumps(completion_data) if (completion or tool_calls) else None,
-            _estimate_tokens(messages),
-            _estimate_tokens([{"content": completion}]),
+            prompt_tokens if prompt_tokens else _estimate_tokens(messages),
+            completion_tokens if completion_tokens else _estimate_tokens([{"content": completion}]),
             latency_ms,
         )
+        return trace_id
 
 
 import tiktoken

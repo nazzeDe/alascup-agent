@@ -3,7 +3,7 @@
 import json
 import os
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 from typing import AsyncIterator
 
 from loguru import logger
@@ -15,8 +15,10 @@ from src.agent.loop.transitions import (
     clear_transient_fields,
     get_transition,
 )
+from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
 from src.agent.state import ROLE_MAP, Transition
 from src.models.audit import AuditEvent, AuditLevel
+from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 from src.observability.profiler import Profiler, write_profile
 from src.tools import start_feature, complete_feature
@@ -238,6 +240,8 @@ class LoopOrchestrator:
 
             approved, rejected = _apply_decisions(pending, decisions)
             await self._log_approved_tools(approved)
+            await self._log_rejected_tools(rejected)
+            await _persist_human_decisions(approved, rejected)
             result["approved_tool_calls"] = result.get("approved_tool_calls", []) + approved
             result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + rejected
             result["pending_approval"] = []
@@ -264,6 +268,22 @@ class LoopOrchestrator:
                 event="TOOL_APPROVED",
                 tool_name=fn.get("name"),
                 decision="APPROVED",
+                turn_id=self._turn_id,
+                iteration=self._iteration,
+            ))
+
+    async def _log_rejected_tools(self, rejected: list[dict]) -> None:
+        if not self._audit:
+            return
+        for tc in rejected:
+            fn = tc.get("function", {})
+            await self._audit.log(AuditEvent(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                level=AuditLevel.WARN,
+                actor="system",
+                event="TOOL_REJECTED",
+                tool_name=fn.get("name"),
+                decision="REJECTED",
                 turn_id=self._turn_id,
                 iteration=self._iteration,
             ))
@@ -414,3 +434,30 @@ class LoopOrchestrator:
             await audit_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)
             return "continue"
         return None
+
+
+async def _persist_human_decisions(approved: list[dict], rejected: list[dict]) -> None:
+    """UPDATE tool_call rows after human approval/rejection."""
+    session_mgr = _session_manager_ctx.get()
+    if session_mgr is None:
+        return
+    chat_id_str = _chat_id_ctx.get()
+    if not chat_id_str:
+        return
+    chat_id = UUID(chat_id_str)
+    for tc in approved:
+        call_id = tc.get("call_id")
+        if call_id:
+            await session_mgr.update_tool_call(
+                call_id, chat_id,
+                approval_status=ApprovalStatus.APPROVED,
+                execution_status=ExecutionStatus.RUNNING,
+            )
+    for tc in rejected:
+        call_id = tc.get("call_id")
+        if call_id:
+            await session_mgr.update_tool_call(
+                call_id, chat_id,
+                approval_status=ApprovalStatus.REJECTED,
+                execution_status=ExecutionStatus.FAILED,
+            )

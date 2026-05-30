@@ -8,7 +8,7 @@ from loguru import logger
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from src.agent.nodes import _event_queue as reasoning_queue, _chat_id_ctx
+from src.agent.nodes import _event_queue as reasoning_queue, _chat_id_ctx, _session_manager_ctx
 from src.agent.query import Query
 from src.models.message import Message, MessageType
 from src.services.container import (
@@ -142,6 +142,7 @@ async def _do_chat(
         queue: asyncio.Queue = asyncio.Queue()  # unbounded: graph must never block on put
         token = reasoning_queue.set(queue)
         chat_id_token = _chat_id_ctx.set(str(chat_id))
+        session_token = _session_manager_ctx.set(session_mgr)
 
         collected_text: list[str] = []
 
@@ -215,6 +216,7 @@ async def _do_chat(
         finally:
             reasoning_queue.reset(token)
             _chat_id_ctx.reset(chat_id_token)
+            _session_manager_ctx.reset(session_token)
             agent_task.cancel()
             drain_task.cancel()
             for t in (agent_task, drain_task):

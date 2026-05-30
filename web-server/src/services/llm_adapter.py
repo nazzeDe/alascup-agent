@@ -80,6 +80,7 @@ class LLMAdapter:
         self._tracer = tracer
         self._original_model = config.model
         self._max_tokens = config.max_tokens
+        self._last_trace_id: UUID | None = None
 
     def escalate_max_tokens(self) -> None:
         """EH-004 恢复：翻倍 max_tokens 上限。"""
@@ -137,12 +138,14 @@ class LLMAdapter:
             "tool_calls": choice.get("tool_calls"),
         }
         if self._tracer:
-            await self._tracer.trace_llm_call(
+            usage = data.get("usage")
+            self._last_trace_id = await self._tracer.trace_llm_call(
                 chat_id=chat_id if chat_id else _uuid.uuid4(),
                 model=self._config.model,
                 messages=messages,
                 response=result,
                 latency_ms=latency_ms,
+                usage=usage,
             )
         return result
 
@@ -159,6 +162,7 @@ class LLMAdapter:
         payload = self._build_payload(messages, tools, system, stream=True)
         accumulated: dict[int, dict] = {}
         accumulated_content = ""
+        stream_usage: dict | None = None
 
         async with self._streaming_client() as client:
             async with client.stream("POST", "/chat/completions", json=payload) as resp:
@@ -177,7 +181,7 @@ class LLMAdapter:
                         continue
                     data_str = line[6:]
                     if data_str == "[DONE]":
-                        await self._trace_stream(chat_id, messages, accumulated_content, accumulated, start)
+                        await self._trace_stream(chat_id, messages, accumulated_content, accumulated, start, stream_usage)
                         for tc in accumulated.values():
                             yield {"event": "tool_call", "data": json.dumps(tc)}
                         yield {"event": "done", "data": "{}"}
@@ -187,8 +191,15 @@ class LLMAdapter:
                         yield event
                         if event.get("event") == "assistant":
                             accumulated_content += _extract_delta(event)
+                    # capture usage from stream chunks (sent in final chunk with stream_options)
+                    try:
+                        chunk = json.loads(data_str)
+                        if "usage" in chunk:
+                            stream_usage = chunk["usage"]
+                    except json.JSONDecodeError:
+                        pass
 
-    async def _trace_stream(self, chat_id, messages, content, accumulated, start):
+    async def _trace_stream(self, chat_id, messages, content, accumulated, start, usage=None):
         import time as _time
         import uuid as _uuid
 
@@ -198,12 +209,13 @@ class LLMAdapter:
         full_response: dict = {"content": content}
         if accumulated:
             full_response["tool_calls"] = list(accumulated.values())
-        await self._tracer.trace_llm_call(
+        self._last_trace_id = await self._tracer.trace_llm_call(
             chat_id=chat_id if chat_id else _uuid.uuid4(),
             model=self._config.model,
             messages=messages,
             response=full_response,
             latency_ms=latency_ms,
+            usage=usage,
         )
 
     @staticmethod
@@ -275,6 +287,8 @@ class LLMAdapter:
             "stream": stream,
             "max_tokens": self._max_tokens,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         if tools:
             payload["tools"] = tools
         return payload
