@@ -261,10 +261,12 @@ class LoopOrchestrator:
                 else Transition.APPROVAL_REJECTED
             )
 
-            state = result
-            state["_turn_id"] = turn_id
-            state["_iteration"] = self._iteration
-            result.update(await self._graph.ainvoke(state, self._config))
+            # Append rejected tool feedback to messages so LLM can adjust.
+            _inject_rejection_messages(result, all_rejected)
+
+            result["_turn_id"] = turn_id
+            result["_iteration"] = self._iteration
+            result.update(await self._graph.ainvoke(result, self._config))
             profiler.checkpoint("graph_resume")
 
     async def _log_approved_tools(self, approved: list[dict]) -> None:
@@ -441,10 +443,29 @@ class LoopOrchestrator:
             return "return"
         if transition in (Transition.TURN_LIMIT_EXCEEDED, Transition.TOKEN_BUDGET_EXCEEDED):
             return "return"
-        if transition == Transition.TOOL_RESULTS:
-            await audit_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)
+        if transition in (Transition.TOOL_RESULTS, Transition.APPROVAL_REJECTED):
+            await audit_transition(self._audit, transition, **_audit_kwargs)
+            return "continue"
+        if transition == Transition.APPROVAL_GRANTED:
             return "continue"
         return None
+
+
+def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
+    """Append tool-role rejection messages so LLM can propose alternatives."""
+    if not rejected:
+        return
+    messages: list[dict] = []
+    for tc in rejected:
+        fn = tc.get("function", {})
+        name = fn.get("name", "unknown")
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tc.get("id", "rejected"),
+            "name": name,
+            "content": f"[{name}] execution_status=REJECTED\nerror=Tool was rejected by human or policy. Do NOT retry this exact call — propose an alternative approach.",
+        })
+    state["messages"] = state.get("messages", []) + messages
 
 
 async def _persist_human_decisions(approved: list[dict], rejected: list[dict]) -> None:

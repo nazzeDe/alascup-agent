@@ -2,16 +2,26 @@ from src.agent.state import Transition
 
 
 def observe_node(state, *, tool_results=None):
-    """Append tool execution results to message history.
+    """Append tool execution results and rejected tools to message history.
 
-    Merges tool_results from act_node and streaming_tool_results from think_node
-    (AG-007), converting them into role=tool messages.
+    Merges tool_results from act_node, streaming_tool_results from think_node
+    (AG-007), and rejected_tool_calls from human/rule rejection — converting
+    them into role=tool messages so the LLM can adjust its approach.
     """
     results = list(tool_results or [])
     state_tr = state.get("tool_results") or []
     results.extend(state_tr)
     streaming = state.get("streaming_tool_results") or []
     results.extend(streaming)
+
+    rejected = state.get("rejected_tool_calls") or []
+    for tc in rejected:
+        fn = tc.get("function", {})
+        results.append({
+            "tool_name": fn.get("name", "unknown"),
+            "tool_call_id": tc.get("id", "rejected"),
+            "result": {"execution_status": "REJECTED", "error": {"message": "Tool was rejected by human or policy. Do NOT retry this exact tool call — propose an alternative approach."}},
+        })
 
     tool_messages: list[dict] = []
 
@@ -27,6 +37,7 @@ def observe_node(state, *, tool_results=None):
         "messages": tool_messages,
         "streaming_tool_results": [],
         "tool_results": [],
+        "rejected_tool_calls": [],
         "_emitted_results": results,
         "transition": Transition.TOOL_RESULTS,
     }
