@@ -1,6 +1,6 @@
 """LLM error recovery handler."""
 
-from src.agent.loop.audit import log_transition
+from src.agent.loop.audit import audit_transition
 from src.agent.state import Transition
 
 
@@ -23,14 +23,19 @@ async def handle_llm_error(state: dict, *, error_recovery, context_manager, llm,
 
     action = strategy["action"]
 
+    turn_id = state.get("_turn_id")
+    iteration = state.get("_iteration")
+
     if action == "compress_context":
         compressed = await context_manager.compress(state.get("messages", []))
         state["messages"] = compressed
-        await log_transition(audit_logger, Transition.CONTEXT_COMPACTED)
+        await audit_transition(audit_logger, Transition.CONTEXT_COMPACTED,
+                               turn_id=turn_id, iteration=iteration)
     elif action == "aggressive_compress":
         compressed = await context_manager.compress(state.get("messages", []))
         state["messages"] = compressed
-        await log_transition(audit_logger, Transition.CONTEXT_COMPACTED)
+        await audit_transition(audit_logger, Transition.CONTEXT_COMPACTED,
+                               turn_id=turn_id, iteration=iteration)
     elif action == "escalate_token_limit":
         llm.escalate_max_tokens()
     elif action == "continue_inject":

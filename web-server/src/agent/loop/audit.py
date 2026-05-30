@@ -1,4 +1,4 @@
-"""Audit logging helpers for the agent loop."""
+"""Audit event helpers for the agent loop — writes to audit_events table."""
 
 from datetime import datetime, timezone
 from uuid import UUID
@@ -7,7 +7,7 @@ from src.agent.state import Transition
 from src.models.audit import AuditEvent, AuditLevel
 
 
-async def log_transition(
+async def audit_transition(
     audit_logger,
     transition: Transition,
     *,

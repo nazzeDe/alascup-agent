@@ -3,7 +3,7 @@
 import json
 from uuid import uuid4
 
-from src.agent.loop.audit import log_transition
+from src.agent.loop.audit import audit_transition
 from src.agent.state import Transition
 
 
@@ -18,7 +18,7 @@ async def handle_pending_approval(
     if bridge:
         bridge.create(request_id, chat_id)
 
-    await log_transition(audit_logger, Transition.APPROVAL_PENDING)
+    await audit_transition(audit_logger, Transition.APPROVAL_PENDING)
 
     if not pending:
         yield {

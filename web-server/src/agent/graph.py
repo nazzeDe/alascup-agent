@@ -18,8 +18,7 @@ def build_graph(*, llm, executor, rule_engine, audit_logger) -> CompiledStateGra
     """Build ReAct graph: think → review → act → observe → END.
 
     After think: has tool_call → review, has approved_tool_calls → act, none → END.
-    Graph is a pure function — no checkpointer, no interrupt/resume.
-    The orchestrator owns the approval loop externally.
+    The orchestrator owns the approval loop externally via _drain_approval_loop().
     """
     graph = StateGraph(AgentState)
 

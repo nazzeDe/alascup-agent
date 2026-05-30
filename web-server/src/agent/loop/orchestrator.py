@@ -8,7 +8,7 @@ from typing import AsyncIterator
 
 from loguru import logger
 
-from src.agent.loop.audit import log_transition
+from src.agent.loop.audit import audit_transition
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers import handle_pending_approval, handle_llm_error
 from src.agent.loop.transitions import (
@@ -68,8 +68,6 @@ class LoopOrchestrator:
     returns pending_approval, the orchestrator yields the approval event,
     waits for a decision via the bridge, merges decisions into state, and
     re-invokes the graph — all on the same SSE stream.
-
-    Graph is a pure function (no checkpointer, no interrupt/resume).
     """
 
     def __init__(
@@ -89,7 +87,7 @@ class LoopOrchestrator:
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._llm = llm
-        self._config = {"configurable": {"thread_id": chat_id}}
+        self._config = {}
         self._chat_id = chat_id
         # Circuit breaker: hard limits to prevent token explosion and infinite loops.
         # Industry pattern (LangGraph recursion_limit=25, Claude Code max_turns).
@@ -232,7 +230,7 @@ class LoopOrchestrator:
             debug_log("INFO", "Approval decisions collected",
                       request_id=request_id, count=len(decisions))
 
-            await log_transition(
+            await audit_transition(
                 self._audit, Transition.APPROVAL_GRANTED,
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=self._turn_id, iteration=self._iteration,
@@ -299,7 +297,7 @@ class LoopOrchestrator:
                       tokens=tokens, limit=limit, msg_count=len(messages),
                       chat_id=str(self._chat_id))
             state["messages"] = await self._context_manager.compress(messages)
-            await log_transition(
+            await audit_transition(
                 self._audit, Transition.CONTEXT_COMPACTED,
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
@@ -342,7 +340,7 @@ class LoopOrchestrator:
             debug_log("ERROR", "Token ceiling breached after compression",
                       tokens=tokens, ceiling=self._token_ceiling,
                       msg_count=len(messages), chat_id=str(self._chat_id))
-            await log_transition(
+            await audit_transition(
                 self._audit, Transition.TOKEN_BUDGET_EXCEEDED,
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
@@ -355,7 +353,7 @@ class LoopOrchestrator:
         """Log turn limit exceeded and audit the event."""
         debug_log("ERROR", "Turn limit exceeded",
                   max_iterations=self._max_iterations, chat_id=str(self._chat_id))
-        await log_transition(
+        await audit_transition(
             self._audit, Transition.TURN_LIMIT_EXCEEDED,
             chat_id=_safe_uuid(self._chat_id),
             turn_id=getattr(self, "_turn_id", None),
@@ -379,7 +377,7 @@ class LoopOrchestrator:
         if not handled:
             debug_log("ERROR", "Recovery exhausted — exiting loop",
                       code=llm_error.get("code", "?"), chat_id=str(self._chat_id))
-            await log_transition(
+            await audit_transition(
                 self._audit, Transition.ERROR_EXIT,
                 chat_id=_safe_uuid(self._chat_id),
                 turn_id=getattr(self, "_turn_id", None),
@@ -408,11 +406,11 @@ class LoopOrchestrator:
             iteration=getattr(self, "_iteration", None),
         )
         if transition == Transition.DONE:
-            await log_transition(self._audit, Transition.DONE, **_audit_kwargs)
+            await audit_transition(self._audit, Transition.DONE, **_audit_kwargs)
             return "return"
         if transition in (Transition.TURN_LIMIT_EXCEEDED, Transition.TOKEN_BUDGET_EXCEEDED):
             return "return"
         if transition == Transition.TOOL_RESULTS:
-            await log_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)
+            await audit_transition(self._audit, Transition.TOOL_RESULTS, **_audit_kwargs)
             return "continue"
         return None

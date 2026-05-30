@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from src.agent.loop.audit import log_transition
+from src.agent.loop.audit import audit_transition
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.agent.state import Transition
 
@@ -47,7 +47,7 @@ class Query:
             chat_uuid = UUID(self._chat_id)
         except (ValueError, AttributeError):
             pass
-        await log_transition(
+        await audit_transition(
             self._audit, Transition.USER_MESSAGE,
             chat_id=chat_uuid,
         )

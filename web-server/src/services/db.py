@@ -64,8 +64,12 @@ CREATE TABLE IF NOT EXISTS audit_events (
     decision VARCHAR(16),
     execution_status VARCHAR(16),
     backup_ref VARCHAR(256),
+    transition VARCHAR(32),
     error JSONB
 );
+
+-- Soft migration for existing databases
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS transition VARCHAR(32);
 
 CREATE TABLE IF NOT EXISTS llm_traces (
     id UUID PRIMARY KEY,

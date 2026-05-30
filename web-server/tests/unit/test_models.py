@@ -53,7 +53,7 @@ class TestToolApproval:
 
 
 class TestChatSession:
-    def test_session_with_title_and_transition(self):
+    def test_session_with_title(self):
         from src.models.session import ChatSession
 
         chat_id = uuid.uuid4()
@@ -62,10 +62,6 @@ class TestChatSession:
             title="CPU 诊断会话",
             messages=[],
             executed_tool_list=[],
-            turn_count=3,
-            transition="tool_results",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         assert session.title == "CPU 诊断会话"
-        assert session.turn_count == 3
-        assert session.transition == "tool_results"

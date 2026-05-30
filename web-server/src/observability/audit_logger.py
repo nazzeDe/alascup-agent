@@ -25,8 +25,8 @@ class PostgresAuditLogger(AuditLogger):
         ts = datetime.fromisoformat(event.timestamp)
         await self._db.execute(
             """INSERT INTO audit_events (timestamp, chat_id, request_id, turn_id, iteration, level, actor,
-               event, tool_name, params, model, decision, execution_status, backup_ref, error)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
+               event, tool_name, params, model, decision, execution_status, backup_ref, transition, error)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)""",
             ts,
             event.chat_id,
             event.request_id,
@@ -41,5 +41,6 @@ class PostgresAuditLogger(AuditLogger):
             event.decision,
             event.execution_status,
             event.backup_ref,
+            event.transition,
             json.dumps(event.error) if event.error else None,
         )

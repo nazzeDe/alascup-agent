@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from src.agent.loop.audit import log_transition
+from src.agent.loop.audit import audit_transition
 from src.agent.loop.events import emit_events
 from src.agent.loop.handlers.error import handle_llm_error
 from src.agent.loop.handlers.interrupt import handle_pending_approval
@@ -625,19 +625,19 @@ class TestHandleLlmError:
         assert "continue" in last_msg["content"].lower()
 
 
-# ── log_transition ─────────────────────────────────────────────────────
+# ── audit_transition ───────────────────────────────────────────────────
 
 
-class TestLogTransition:
+class TestAuditTransition:
     async def test_logs_transition_event(self):
         audit = MockAuditLogger()
-        await log_transition(audit, Transition.USER_MESSAGE)
+        await audit_transition(audit, Transition.USER_MESSAGE)
         assert len(audit.events) == 1
         assert audit.events[0].event == "LOOP_TRANSITION"
         assert audit.events[0].transition == "user_message"
 
     async def test_none_audit_logger_no_crash(self):
-        await log_transition(None, Transition.DONE)
+        await audit_transition(None, Transition.DONE)
 
 
 # ── orchestrator termination ────────────────────────────────────────────

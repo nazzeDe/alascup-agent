@@ -227,7 +227,7 @@ stateDiagram-v2
 
 ## Agent 循环：StateGraph + 编排器驱动
 
-LangGraph StateGraph 管理节点拓扑。Graph 是纯函数（无 checkpointer、无 interrupt/resume），编排器（LoopOrchestrator）通过 `ainvoke()` 调用图并驱动审批循环。SSE 连接在审批等待期间保持存活，审批决策通过 REST 传入后由编排器合并到状态中并重新调用图。
+LangGraph StateGraph 管理节点拓扑。Graph 为纯函数，编排器（LoopOrchestrator）通过 `ainvoke()` 调用图并在外部驱动审批循环。SSE 连接在审批等待期间保持存活，审批决策通过 REST 传入后由编排器合并到状态中并重新调用图。
 
 ```mermaid
 stateDiagram-v2

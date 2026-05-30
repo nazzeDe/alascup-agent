@@ -76,7 +76,7 @@ Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每
 
 关键行为：
 - `ainvoke()` 执行完整图后返回最终状态，web-server 通过 `emit_events()` 映射为 SSE 事件；think 节点内通过 contextvar 队列实时转发 reasoning/assistant 流式 token
-- Graph 是纯函数（无 checkpointer、无 interrupt/resume）。高风险 tool_call 由 `review_node` 返回 `pending_approval`，编排器（LoopOrchestrator）接管审批循环：推送 SSE 事件、等待决策、合并状态后重新调用图
+- Graph 的审批循环由编排器（LoopOrchestrator）外部接管：高风险 tool_call 由 `review_node` 返回 `pending_approval`，编排器推送 SSE 事件、等待决策、合并状态后重新调用图
 - 每轮 LLM 调用前主动检查 token 用量，超阈值时分层压缩
 - LLM 返回可恢复错误（prompt_too_long、max_output_tokens、model_unavailable、server_error）时逐层升级恢复
 
