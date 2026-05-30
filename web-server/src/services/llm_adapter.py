@@ -177,6 +177,7 @@ class LLMAdapter:
                         continue
                     data_str = line[6:]
                     if data_str == "[DONE]":
+                        await self._trace_stream(chat_id, messages, accumulated_content, accumulated, start)
                         for tc in accumulated.values():
                             yield {"event": "tool_call", "data": json.dumps(tc)}
                         yield {"event": "done", "data": "{}"}
@@ -186,8 +187,6 @@ class LLMAdapter:
                         yield event
                         if event.get("event") == "assistant":
                             accumulated_content += _extract_delta(event)
-
-        await self._trace_stream(chat_id, messages, accumulated_content, accumulated, start)
 
     async def _trace_stream(self, chat_id, messages, content, accumulated, start):
         import time as _time
