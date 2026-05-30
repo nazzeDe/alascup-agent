@@ -218,19 +218,27 @@ class LoopOrchestrator:
         while result.get("pending_approval"):
             debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
             pending = result["pending_approval"]
-            request_id = pending[0].get("request_id", str(uuid4())) if pending else str(uuid4())
+            # Process each pending tool independently — each has its own request_id.
+            all_approved: list[dict] = []
+            all_rejected: list[dict] = []
+            for tc in pending:
+                request_id = tc.get("request_id", str(uuid4()))
 
-            async for event in handle_pending_approval(
-                pending, request_id=request_id,
-                bridge=self._bridge, audit_logger=self._audit,
-                chat_id=self._chat_id,
-            ):
-                yield event
-            profiler.checkpoint("approval_events_emitted")
+                async for event in handle_pending_approval(
+                    [tc], request_id=request_id,
+                    bridge=self._bridge, audit_logger=self._audit,
+                    chat_id=self._chat_id,
+                ):
+                    yield event
+                profiler.checkpoint("approval_events_emitted")
 
-            decisions = await self._bridge.gather_decisions(request_id, len(pending))
-            debug_log("INFO", "Approval decisions collected",
-                      request_id=request_id, count=len(decisions))
+                decisions = await self._bridge.gather_decisions(request_id, 1)
+                debug_log("INFO", "Approval decisions collected",
+                          request_id=request_id, count=len(decisions))
+
+                approved, rejected = _apply_decisions([tc], decisions)
+                all_approved.extend(approved)
+                all_rejected.extend(rejected)
 
             await audit_transition(
                 self._audit, Transition.APPROVAL_GRANTED,
@@ -238,15 +246,14 @@ class LoopOrchestrator:
                 turn_id=self._turn_id, iteration=self._iteration,
             )
 
-            approved, rejected = _apply_decisions(pending, decisions)
-            await self._log_approved_tools(approved)
-            await self._log_rejected_tools(rejected)
-            await _persist_human_decisions(approved, rejected)
-            result["approved_tool_calls"] = result.get("approved_tool_calls", []) + approved
-            result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + rejected
+            await self._log_approved_tools(all_approved)
+            await self._log_rejected_tools(all_rejected)
+            await _persist_human_decisions(all_approved, all_rejected)
+            result["approved_tool_calls"] = result.get("approved_tool_calls", []) + all_approved
+            result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + all_rejected
             result["pending_approval"] = []
             result["transition"] = (
-                Transition.APPROVAL_GRANTED if approved
+                Transition.APPROVAL_GRANTED if all_approved
                 else Transition.APPROVAL_REJECTED
             )
 

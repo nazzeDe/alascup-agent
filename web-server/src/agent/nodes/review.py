@@ -93,9 +93,8 @@ async def _apply_decision(
 
 
 async def _build_pending_response(pending, approved, rejected, audit_logger, turn_id, iteration):
-    request_id = str(uuid4())
     for tc in pending:
-        tc["request_id"] = request_id
+        tc["request_id"] = str(uuid4())
     names = ",".join(t.get("function", {}).get("name", "?") for t in pending)
     debug_log("WARN", "Tools require approval — returning to orchestrator", tools=names)
     await _log_review(audit_logger, "TOOL_REQUEST_CREATED", names,
