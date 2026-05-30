@@ -1,15 +1,24 @@
 """Approval handler: yield approval_required SSE events for pending tool calls."""
 
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.agent.loop.audit import audit_transition
 from src.agent.state import Transition
 
 
+def _safe_uuid(value: str) -> UUID | None:
+    try:
+        return UUID(value)
+    except (ValueError, AttributeError):
+        return None
+
+
 async def handle_pending_approval(
     pending: list[dict], *, request_id: str,
     bridge, audit_logger, chat_id: str,
+    turn_id: UUID | None = None,
+    iteration: int | None = None,
 ):
     """Yield approval_required SSE events for each pending tool call.
 
@@ -18,7 +27,11 @@ async def handle_pending_approval(
     if bridge:
         bridge.create(request_id, chat_id)
 
-    await audit_transition(audit_logger, Transition.APPROVAL_PENDING)
+    await audit_transition(
+        audit_logger, Transition.APPROVAL_PENDING,
+        chat_id=_safe_uuid(chat_id),
+        turn_id=turn_id, iteration=iteration,
+    )
 
     if not pending:
         yield {

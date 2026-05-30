@@ -215,7 +215,10 @@ class LoopOrchestrator:
 
     async def _drain_approval_loop(self, result: dict, turn_id, iteration: int, profiler: Profiler) -> AsyncIterator[dict]:
         """Handle pending approvals until none remain. Mutates result in place."""
+        sub_it = 0
         while result.get("pending_approval"):
+            sub_it += 1
+            self._iteration = iteration + sub_it
             debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
             pending = result["pending_approval"]
             # Process each pending tool independently — each has its own request_id.
@@ -228,6 +231,7 @@ class LoopOrchestrator:
                     [tc], request_id=request_id,
                     bridge=self._bridge, audit_logger=self._audit,
                     chat_id=self._chat_id,
+                    turn_id=self._turn_id, iteration=self._iteration,
                 ):
                     yield event
                 profiler.checkpoint("approval_events_emitted")
@@ -259,7 +263,7 @@ class LoopOrchestrator:
 
             state = result
             state["_turn_id"] = turn_id
-            state["_iteration"] = iteration
+            state["_iteration"] = self._iteration
             result.update(await self._graph.ainvoke(state, self._config))
             profiler.checkpoint("graph_resume")
 
