@@ -1,6 +1,11 @@
 ARG BASE_IMAGE=ghcr.io/loong64/python:3.13.13-slim-trixie
 FROM ${BASE_IMAGE}
 
+# 编译依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY pyproject.toml ./
