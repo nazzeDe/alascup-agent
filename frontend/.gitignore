@@ -3,6 +3,7 @@ package-lock.json
 
 # dependencies (bun install)
 node_modules
+*.tar.gz
 
 # output
 out
