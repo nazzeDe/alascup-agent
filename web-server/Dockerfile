@@ -12,7 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install uv --extra-index-url https://mirrors.loong64.com/pypi/simple --no-cache-dir .
+
 
 COPY src/ src/
 

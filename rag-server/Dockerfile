@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install uv --extra-index-url https://mirrors.loong64.com/pypi/simple --no-cache-dir .
 
 COPY src/ src/
 

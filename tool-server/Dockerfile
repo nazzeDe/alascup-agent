@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends util-linux && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install uv --extra-index-url https://mirrors.loong64.com/pypi/simple --no-cache-dir .
 
 COPY src/ src/
 COPY config.json ./
