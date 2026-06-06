@@ -26,6 +26,7 @@ packages = ["src"]
 dev = [
     "lizard>=1.22.1",
     "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "radon>=6.0.1",
     "ruff>=0.15.13",

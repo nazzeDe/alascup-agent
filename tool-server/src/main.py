@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from typing import Any
@@ -19,197 +20,104 @@ from src.tools.perception import (
     get_memory_info,
     get_network_info,
     get_process_list,
-    read_logs,
-)
-from src.tools.registry import (
-    ToolMeta,
-    clear_registry,
-    list_tools,
-    register,
 )
 
-# Attach classification functions to mutable operation tools (used by
-# _register_tools to auto-populate classify_fn on ToolMeta).
-run_bash.__classify__ = classify_bash  # type: ignore[attr-defined]
-manage_service.__classify__ = classify_manage_service  # type: ignore[attr-defined]
+from collections.abc import Callable
 
-TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
-    "get_cpu_info": {
-        "type": "object",
-        "properties": {},
-    },
-    "get_memory_info": {
-        "type": "object",
-        "properties": {},
-    },
-    "get_disk_usage": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "磁盘路径", "default": "/"},
-        },
-    },
-    "get_network_info": {
-        "type": "object",
-        "properties": {},
-    },
-    "get_process_list": {
-        "type": "object",
-        "properties": {},
-    },
-    "read_logs": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "日志文件路径"},
-            "lines": {"type": "integer", "description": "返回行数", "default": 50},
-        },
-    },
-    "run_bash": {
-        "type": "object",
-        "properties": {
-            "command": {"type": "string", "description": "Shell 命令"},
-            "timeout": {"type": "integer", "description": "超时秒数"},
-        },
-    },
-    "manage_service": {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "服务名称"},
-            "action": {"type": "string", "description": "操作: status, start, stop, restart, enable, disable, list"},
-        },
-    },
-}
-
-# Unified output schema — all tools return a dict.
 _ANY_OBJECT: dict[str, Any] = {"type": "object"}
 
-PERCEPTION_TOOLS = {
-    "get_cpu_info": ("获取 CPU 型号、核心数、负载和利用率", get_cpu_info, True,
-                     {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-    "get_memory_info": ("获取物理内存和 Swap 使用量", get_memory_info, True,
-                        {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-    "get_disk_usage": ("获取磁盘使用率和空间分布", get_disk_usage, True,
-                       {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-    "get_network_info": ("获取网卡地址和 I/O 计数器", get_network_info, True,
-                         {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-    "get_process_list": ("获取运行进程列表（PID/名称/CPU/内存/状态）", get_process_list, True,
-                         {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-    "read_logs": ("读取日志文件末尾行", read_logs, True,
-                  {"is_read_only": True, "is_rollbackable": True, "mutable": False}),
-}
 
-OPERATION_TOOLS = {
-    "run_bash": ("在沙箱环境中执行 Shell 命令", run_bash, False,
-                 {"is_read_only": False, "is_rollbackable": False, "mutable": True}),
-    "manage_service": ("管理 systemd 服务", manage_service, False,
-                       {"is_read_only": False, "is_rollbackable": False, "mutable": True}),
-}
+async def create_server(config: ToolServerConfig) -> FastMCP:
+    """Create a fully configured FastMCP tool-server.
 
-
-def _register_tools(config: ToolServerConfig) -> None:
-    clear_registry()
-    for tools_dict in (PERCEPTION_TOOLS, OPERATION_TOOLS):
-        for name, (desc, fn, is_read_only, meta) in tools_dict.items():
-            classify_fn = getattr(fn, "__classify__", None)
-            register(ToolMeta(
-                name=name,
-                description=desc,
-                is_read_only=is_read_only,
-                input_schema=TOOL_SCHEMAS.get(name, {}),
-                fn=lambda c=config, f=fn, **kw: f(c, **kw),
-                classify_fn=classify_fn,
-                meta=meta,
-            ))
-
-
-def _register_classify_companions(server: FastMCP) -> None:
-    """Auto-generate companion classification tools for mutable tools.
-
-    Scans the registry for tools with a classify_fn and creates hidden
-    MCP companion tools named {tool_name}_classify. These are called by
-    the web-server review layer to dynamically determine safe/dangerous.
+    Each tool is defined exactly once via @server.tool() — there is no
+    separate internal registry.  FastMCP's own get_tool() / list_tools()
+    serve as the canonical tool directory.
     """
-
-    # Map tool name → wrapper factory that produces an explicit-param callable
-    # (fastmcp rejects **kwargs, so we must expose named parameters).
-    # Values: (Callable) -> Callable — factories producing explicit-param wrappers
-    _COMPANION_FACTORY: dict[str, Any] = {
-        "run_bash": lambda fn: lambda command="": fn(command),
-        "manage_service": lambda fn: lambda name="", action="": fn(name=name, action=action),
-    }
-
-    for tool in list_tools():
-        if tool.classify_fn is None:
-            continue
-        factory = _COMPANION_FACTORY.get(tool.name)
-        if factory is None:
-            continue
-
-        companion_name = f"{tool.name}_classify"
-        classify_fn = tool.classify_fn
-        companion_fn = factory(classify_fn)
-
-        server.tool(
-            name=companion_name,
-            description=f"Security classification companion for {tool.name}",
-            meta={"hidden": True, "is_read_only": True, "mutable": False},
-        )(companion_fn)
-
-        register(ToolMeta(
-            name=companion_name,
-            description=f"Security classification companion for {tool.name}",
-            is_read_only=True,
-            input_schema={},
-            fn=lambda c=None, f=classify_fn, **kw: f(**kw),
-            classify_fn=None,
-            hidden=True,
-            meta={"hidden": True, "is_read_only": True, "mutable": False},
-        ))
-
-
-def create_server(config: ToolServerConfig) -> FastMCP:
-    _register_tools(config)
     cache = create_cache(ttl=config.cache_ttl)
-
     server = FastMCP(name="tool-server")
 
-    # ── perception tools (explicit signatures — fastmcp rejects **kwargs) ──
-    @server.tool(name="get_cpu_info", description="获取 CPU 型号、核心数、负载和利用率", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    # classify_fn can't live in meta (FastMCP serializes meta → must be
+    # JSON-safe).  Track mutable tools locally instead.
+    _classify_fns: dict[str, Callable] = {}
+
+    # ── Perception tools (read-only system queries) ──────────────────────
+
+    @server.tool(
+        name="get_cpu_info",
+        description="获取 CPU 型号、核心数、负载和利用率",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
     def _get_cpu_info() -> dict:
         return get_cpu_info(config)
 
-    @server.tool(name="get_memory_info", description="获取物理内存和 Swap 使用量", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(
+        name="get_memory_info",
+        description="获取物理内存和 Swap 使用量",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
     def _get_memory_info() -> dict:
         return get_memory_info(config)
 
-    @server.tool(name="get_disk_usage", description="获取磁盘使用率和空间分布", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(
+        name="get_disk_usage",
+        description="获取磁盘使用率和空间分布",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
     def _get_disk_usage(path: str = "/") -> dict:
         return get_disk_usage(config, path=path)
 
-    @server.tool(name="get_network_info", description="获取网卡地址和 I/O 计数器", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(
+        name="get_network_info",
+        description="获取网卡地址和 I/O 计数器",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
     def _get_network_info() -> dict:
         return get_network_info(config)
 
-    @server.tool(name="get_process_list", description="获取运行进程列表（PID/名称/CPU/内存/状态）", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
+    @server.tool(
+        name="get_process_list",
+        description="获取运行进程列表（PID/名称/CPU/内存/状态）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
     def _get_process_list() -> dict:
         return {"processes": get_process_list(config)}
 
-    @server.tool(name="read_logs", description="读取日志文件末尾行", output_schema=_ANY_OBJECT, meta={"is_read_only": True, "is_rollbackable": True, "mutable": False})
-    def _read_logs(path: str = "", lines: int = 50) -> dict:
-        return {"lines": read_logs(config, path=path, lines=lines)}
+    # ── Operation tools (mutable — classify_fn tracked locally) ───────────
 
-    # ── operation tools ──
-    @server.tool(name="run_bash", description="在沙箱环境中执行 Shell 命令", output_schema=_ANY_OBJECT, meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
-    def _run_bash(command: str = "", timeout: int | None = None) -> dict:
+    @server.tool(
+        name="bash",
+        description="在沙箱环境中执行 Shell 命令",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": False, "is_rollbackable": False, "mutable": True},
+    )
+    def _bash(command: str = "", timeout: int | None = None) -> dict:
         return run_bash(config, command=command, timeout=timeout)
 
-    @server.tool(name="manage_service", description="管理 systemd 服务", output_schema=_ANY_OBJECT, meta={"is_read_only": False, "is_rollbackable": False, "mutable": True})
+    _classify_fns["bash"] = classify_bash
+
+    @server.tool(
+        name="manage_service",
+        description="管理 systemd 服务",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": False, "is_rollbackable": False, "mutable": True},
+    )
     def _manage_service(name: str = "", action: str = "") -> dict:
         return manage_service(config, name=name, action=action)
 
-    # ── execute_tool: secured execution dispatcher, called by web-server after approval ──
+    _classify_fns["manage_service"] = classify_manage_service
+
+    # ── execute_tool: secured dispatcher ─────────────────────────────────
+
     @server.tool(
         name="execute_tool",
         description="安全执行工具（需 APPROVED 状态 + 有效 request_id）",
+        meta={"hidden": True},
         output_schema={
             "type": "object",
             "properties": {
@@ -222,7 +130,7 @@ def create_server(config: ToolServerConfig) -> FastMCP:
             },
         },
     )
-    def execute(
+    async def execute(
         tool_name: str = "",
         chat_id: str = "",
         message_id: str = "",
@@ -230,7 +138,8 @@ def create_server(config: ToolServerConfig) -> FastMCP:
         request_id: str = "",
         approval_status: str = "PENDING",
     ) -> dict:
-        return handle_execute_tool(
+        return await handle_execute_tool(
+            server=server,
             tool_name=tool_name,
             chat_id=chat_id,
             message_id=message_id,
@@ -241,7 +150,8 @@ def create_server(config: ToolServerConfig) -> FastMCP:
             cache=cache,
         )
 
-    # ── health: lightweight liveness probe ──
+    # ── health: lightweight liveness probe ───────────────────────────────
+
     @server.tool(
         name="health",
         description="Liveness 探针，返回工具列表和节点信息",
@@ -254,13 +164,43 @@ def create_server(config: ToolServerConfig) -> FastMCP:
         },
         meta={"is_read_only": True, "is_rollbackable": False, "mutable": False},
     )
-    def health() -> dict:
-        return {"status": "healthy", "tool_count": len(list_tools())}
+    async def health() -> dict:
+        tools = await server.list_tools()
+        return {"status": "healthy", "tool_count": len(tools)}
 
-    # ── companion classification tools for mutable operation tools ──
-    _register_classify_companions(server)
+    # ── Companion classification tools for mutable tools ─────────────────
+
+    _register_classify_companions(server, _classify_fns)
 
     return server
+
+
+def _register_classify_companions(
+    server: FastMCP, classify_fns: dict[str, Callable]
+) -> None:
+    """Auto-generate hidden companion classification tools.
+
+    For each tool name in *classify_fns*, creates a hidden
+    {name}_classify companion on the same server.
+    """
+    _COMPANION_FACTORY: dict[str, Any] = {
+        "bash": lambda fn: lambda command="": fn(command),
+        "manage_service": lambda fn: lambda name="", action="": fn(name=name, action=action),
+    }
+
+    for tool_name, classify_fn in classify_fns.items():
+        factory = _COMPANION_FACTORY.get(tool_name)
+        if factory is None:
+            continue
+
+        companion_name = f"{tool_name}_classify"
+        companion_fn = factory(classify_fn)
+
+        server.tool(
+            name=companion_name,
+            description=f"Security classification companion for {tool_name}",
+            meta={"hidden": True, "is_read_only": True, "mutable": False},
+        )(companion_fn)
 
 
 def main() -> int:
@@ -270,7 +210,7 @@ def main() -> int:
 
     try:
         config = load_config()
-        server = create_server(config)
+        server = asyncio.run(create_server(config))
         server.run(transport="streamable-http", host="0.0.0.0", port=config.port)
         return 0
     except KeyboardInterrupt:
@@ -281,11 +221,17 @@ def main() -> int:
 
 
 # Lazy module-level server for CLI (fastmcp run src/main.py).
-# Created on access so that plain imports don't trigger full server init.
+_mcp: FastMCP | None = None
+
+
 def __getattr__(name: str):
     if name == "mcp":
-        return create_server(load_config())
+        global _mcp
+        if _mcp is None:
+            _mcp = asyncio.run(create_server(load_config()))
+        return _mcp
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

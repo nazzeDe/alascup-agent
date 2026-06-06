@@ -35,14 +35,20 @@ class ToolExecutor:
         Returns ``{"safe": bool}``.
         Defaults to unsafe (safe=False) on any failure — fail-closed.
         """
+        import json
+
         url = self._registry.url_for(server_name)
         async with Client(url) as client:
             result = await client.call_tool(
                 f"{tool_name}_classify", params,
             )
             content = getattr(result, "content", None)
-            if isinstance(content, dict):
-                return {"safe": content.get("safe", False)}
+            if isinstance(content, list) and content:
+                try:
+                    data = json.loads(getattr(content[0], "text", "{}"))
+                    return {"safe": data.get("safe", False)}
+                except (json.JSONDecodeError, AttributeError):
+                    return {"safe": False}
             return {"safe": False}
 
     # ── execution ───────────────────────────────────────────────────────

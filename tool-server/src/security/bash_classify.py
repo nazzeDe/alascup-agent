@@ -52,6 +52,7 @@ _ARGUMENT_TYPES: set[str] = {
     "string_content",
     "\"",  # literal double-quote delimiter in string nodes
     "'",   # literal single-quote delimiter in string nodes
+    "$",   # dollar-sign token in variable expansions
 }
 
 # Separator tokens between commands — benign.

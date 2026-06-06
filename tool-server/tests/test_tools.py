@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -90,6 +92,18 @@ class TestBashClassify:
         result = classify_bash('grep "hello world" file.txt')
         assert result["safe"] is True
 
+    def test_variable_expansion_safe(self):
+        """ls $HOME — the '$' token must be in the allowlist."""
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("ls $HOME")
+        assert result["safe"] is True
+
+    def test_echo_variable_safe(self):
+        """echo $HOME should be safe (echo is read-only)."""
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("echo $HOME")
+        assert result["safe"] is True
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ManageService Classify
@@ -138,44 +152,43 @@ class TestManageServiceClassify:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Companion Registration
+# Companion Registration (uses FastMCP's own tool list)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestCompanionRegistration:
-    def test_companion_tools_registered(self, config):
+    @pytest.mark.asyncio
+    async def test_companion_tools_registered(self, config):
         from src.main import create_server
-        from src.tools.registry import get_tool, clear_registry
-        clear_registry()
-        create_server(config)
-        assert get_tool("run_bash_classify") is not None
-        assert get_tool("manage_service_classify") is not None
+        server = await create_server(config)
+        tools = await server.list_tools()
+        names = {t.name for t in tools}
+        assert "bash_classify" in names
+        assert "manage_service_classify" in names
 
-    def test_companion_tools_hidden(self, config):
+    @pytest.mark.asyncio
+    async def test_companion_tools_hidden(self, config):
         from src.main import create_server
-        from src.tools.registry import get_tool, clear_registry
-        clear_registry()
-        create_server(config)
-        bash_classify = get_tool("run_bash_classify")
-        assert bash_classify is not None
-        assert bash_classify.meta.get("hidden") is True
+        server = await create_server(config)
+        tool = await server.get_tool("bash_classify")
+        assert tool is not None
+        assert (tool.meta or {}).get("hidden") is True
 
-    def test_no_companion_for_readonly_tools(self, config):
+    @pytest.mark.asyncio
+    async def test_no_companion_for_readonly_tools(self, config):
         from src.main import create_server
-        from src.tools.registry import get_tool, clear_registry
-        clear_registry()
-        create_server(config)
-        assert get_tool("get_cpu_info_classify") is None
+        server = await create_server(config)
+        assert await server.get_tool("get_cpu_info_classify") is None
 
-    def test_companion_not_in_main_tool_list(self, config):
+    @pytest.mark.asyncio
+    async def test_companion_not_in_main_tool_list(self, config):
         from src.main import create_server
-        from src.tools.registry import list_tools, clear_registry
-        clear_registry()
-        create_server(config)
-        tools = list_tools()
+        server = await create_server(config)
+        tools = await server.list_tools()
         companion_names = [t.name for t in tools if t.name.endswith("_classify")]
         for name in companion_names:
-            tool = [t for t in tools if t.name == name][0]
-            assert tool.meta.get("hidden") is True
+            tool = await server.get_tool(name)
+            assert tool is not None
+            assert (tool.meta or {}).get("hidden") is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -261,16 +274,6 @@ class TestPerceptionTools:
             assert "mem_mb" in p
             assert "status" in p
 
-    def test_read_logs_nonexistent(self, config):
-        from src.tools.perception.log_reader import read_logs
-        result = read_logs(config, path="/nonexistent/log/path")
-        assert result == []
-
-    def test_read_logs_empty_path(self, config):
-        from src.tools.perception.log_reader import read_logs
-        result = read_logs(config, path="")
-        assert result == []
-
     def test_get_top_dirs_success(self, config):
         from unittest.mock import patch
         from src.tools.perception.disk import get_top_dirs
@@ -288,14 +291,6 @@ class TestPerceptionTools:
         with patch("src.tools.perception.disk.subprocess.run", side_effect=FileNotFoundError):
             result = get_top_dirs(config, path="/nonexistent")
             assert result == []
-
-    def test_read_logs_success(self, config, tmp_path):
-        from src.tools.perception.log_reader import read_logs
-        log_file = tmp_path / "test.log"
-        log_file.write_text("line1\nline2\nline3\n")
-        result = read_logs(config, path=str(log_file))
-        assert len(result) == 3
-        assert result == ["line1", "line2", "line3"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -402,7 +397,7 @@ class TestHostCmd:
     def test_direct_overrides_auto_detect(self, monkeypatch):
         from src.tools.operation._host_exec import _host_cmd
         from src.config import ToolServerConfig
-        monkeypatch.setattr("os.path.exists", lambda p: True)  # pretend dockerenv exists
+        monkeypatch.setattr("os.path.exists", lambda p: True)
         cfg = ToolServerConfig(host_exec="direct")
         assert _host_cmd(["echo", "hi"], cfg) == ["echo", "hi"]
 
@@ -454,41 +449,6 @@ class TestBashWithNsenter:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Tool Registry
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestToolRegistry:
-    def test_register_and_retrieve(self, config):
-        from src.tools.registry import register, get_tool, clear_registry, ToolMeta
-        clear_registry()
-
-        def dummy(config, **kw):
-            return {"ok": True}
-
-        register(ToolMeta(
-            name="dummy",
-            description="test tool",
-            is_read_only=True,
-            input_schema={},
-            fn=dummy,
-        ))
-
-        meta = get_tool("dummy")
-        assert meta is not None
-        assert meta.name == "dummy"
-        assert meta.is_read_only is True
-
-        result = meta.fn(config)
-        assert result == {"ok": True}
-        clear_registry()
-
-    def test_get_nonexistent(self):
-        from src.tools.registry import get_tool, clear_registry
-        clear_registry()
-        assert get_tool("nonexistent") is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Cache
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -535,50 +495,59 @@ class TestCache:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Handle Execute Tool (dispatch pipeline)
+# Handle Execute Tool (dispatch pipeline, now async via FastMCP get_tool)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestHandleExecuteTool:
     rid = "550e8400-e29b-41d4-a716-446655440000"
 
-    @pytest.fixture(autouse=True)
-    def _setup_registry(self, config):
-        from src.main import _register_tools
-        _register_tools(config)
-
-    def test_security_rejects_pending(self, config, cache):
+    @pytest.mark.asyncio
+    async def test_security_rejects_pending(self, config, cache):
+        from src.main import create_server
         from src.handlers.dispatch import handle_execute_tool
-        result = handle_execute_tool(
+        server = await create_server(config)
+        result = await handle_execute_tool(
+            server=server,
             tool_name="get_cpu_info", chat_id="c1", message_id="m1",
             params={}, request_id=self.rid, approval_status="PENDING",
             config=config, cache=cache,
         )
         assert "error" in result
 
-    def test_execute_tool_not_found(self, config, cache):
+    @pytest.mark.asyncio
+    async def test_execute_tool_not_found(self, config, cache):
+        from src.main import create_server
         from src.handlers.dispatch import handle_execute_tool
-        from src.tools.registry import clear_registry
-        clear_registry()
-        result = handle_execute_tool(
+        server = await create_server(config)
+        result = await handle_execute_tool(
+            server=server,
             tool_name="nonexistent_tool", chat_id="c1", message_id="m1",
             params={}, request_id=self.rid, approval_status="APPROVED",
             config=config, cache=cache,
         )
         assert "error" in result
 
-    def test_execute_readonly_tool_without_request_id(self, config, cache):
+    @pytest.mark.asyncio
+    async def test_execute_readonly_tool_without_request_id(self, config, cache):
+        from src.main import create_server
         from src.handlers.dispatch import handle_execute_tool
-        result = handle_execute_tool(
+        server = await create_server(config)
+        result = await handle_execute_tool(
+            server=server,
             tool_name="get_cpu_info", chat_id="c1", message_id="m1",
             params={}, request_id="", approval_status="APPROVED",
             config=config, cache=cache,
         )
         assert "error" not in result
 
-    def test_cache_hit(self, config, cache):
+    @pytest.mark.asyncio
+    async def test_cache_hit(self, config, cache):
+        from src.main import create_server
         from src.handlers.dispatch import handle_execute_tool
+        server = await create_server(config)
         cache.put(self.rid, {"cached": True})
-        result = handle_execute_tool(
+        result = await handle_execute_tool(
+            server=server,
             tool_name="get_cpu_info", chat_id="c1", message_id="m1",
             params={}, request_id=self.rid, approval_status="APPROVED",
             config=config, cache=cache,
@@ -591,10 +560,25 @@ class TestHandleExecuteTool:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestServerCreation:
-    def test_create_server(self, config):
+    @pytest.mark.asyncio
+    async def test_create_server(self, config):
         from src.main import create_server
-        from src.tools.registry import clear_registry
-        clear_registry()
-        server = create_server(config)
+        server = await create_server(config)
         assert server is not None
         assert server.name == "tool-server"
+
+    @pytest.mark.asyncio
+    async def test_all_tools_registered(self, config):
+        from src.main import create_server
+        server = await create_server(config)
+        tools = await server.list_tools()
+        names = {t.name for t in tools}
+        expected = {
+            "get_cpu_info", "get_memory_info", "get_disk_usage",
+            "get_network_info", "get_process_list",
+            "bash", "manage_service",
+            "execute_tool", "health",
+            "bash_classify", "manage_service_classify",
+        }
+        missing = expected - names
+        assert not missing, f"Missing tools: {missing}"
