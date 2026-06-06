@@ -1,4 +1,3 @@
-import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -8,7 +7,8 @@ from loguru import logger
 
 from src.agent.graph import build_graph
 from src.api import api_router
-from src.config.loader import load_llm_config, load_rules_config, load_servers_config
+from src.config.loader import load_rules_config, load_servers_config
+from src.config.models import Settings
 from src.mcp_client.executor import ToolExecutor
 from src.mcp_client.registry import ServerRegistry
 from src.observability.audit_logger import PostgresAuditLogger
@@ -26,26 +26,27 @@ from src.services.session_manager import PostgresSessionManager
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
 
-def _build_services():
-    servers_path = os.environ.get("SERVERS_CONFIG", "")
-    servers_path = Path(servers_path) if servers_path else CONFIG_DIR / "servers.json"
+def _build_services(settings: Settings) -> Services:
+    """Wire all services from a unified Settings object. Pure — no env reads, no I/O.
 
-    llm_config = load_llm_config(CONFIG_DIR / "llm.json")
+    Moved from module-level scattered os.environ + JSON loader calls to a single
+    parameter that can be built from files (production) or inline (tests).
+    """
+    servers_path = Path(settings.servers_config) if settings.servers_config else CONFIG_DIR / "servers.json"
     servers = load_servers_config(servers_path)
     rules_config = load_rules_config(CONFIG_DIR / "rules.json")
 
-    dsn = os.environ.get("DATABASE_URL", "")
-    if not dsn:
-        raise RuntimeError("DATABASE_URL is required")
+    if not settings.database_url:
+        raise RuntimeError("DATABASE_URL is required (set ALASCUP_DATABASE_URL)")
 
-    db = Database(dsn)
+    db = Database(settings.database_url)
     session_mgr = PostgresSessionManager(db)
     audit_logger = PostgresAuditLogger(db)
     tracer = PostgresTracer(db)
 
     from src.services.error_recovery import ErrorRecovery
 
-    llm_adapter = LLMAdapter(llm_config, tracer=tracer)
+    llm_adapter = LLMAdapter(settings.llm_config, tracer=tracer)
 
     registry = ServerRegistry(servers)
     tool_executor = ToolExecutor(registry)
@@ -66,7 +67,10 @@ def _build_services():
         llm_adapter=llm_adapter,
         session_manager=session_mgr,
         prompt_manager=PromptManager(),
-        context_manager=ContextManager(summarizer=llm_adapter.summarize),
+        context_manager=ContextManager(
+            window_size=settings.context_window_size,
+            summarizer=llm_adapter.summarize,
+        ),
         rule_engine=rule_engine,
         tool_executor=tool_executor,
         audit_logger=audit_logger,
@@ -77,22 +81,19 @@ def _build_services():
     )
 
 
-def _configure_logging() -> None:
+def _configure_logging(level: str = "INFO") -> None:
     """Configure loguru: console INFO + rotating file DEBUG."""
     logger.remove()
 
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     log_dir = Path("logs/app")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Console: concise format, INFO level
     logger.add(
         sys.stderr,
-        level=log_level,
+        level=level.upper(),
         format="{time:HH:mm:ss} | {level:<7} | {name}:{function}:{line} - {message}",
     )
 
-    # File: detailed format, DEBUG level, daily rotation, 7-day retention
     logger.add(
         str(log_dir / "{time:YYYYMMDD}.log"),
         level="DEBUG",
@@ -103,17 +104,49 @@ def _configure_logging() -> None:
     )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    _configure_logging()
-    services = _build_services()
-    db = services.db
-    await db.connect()
-    await services.tool_executor.discover()
-    app.state.services = services
-    yield
-    await db.disconnect()
+def create_app(services: Services | None = None, settings: Settings | None = None) -> FastAPI:
+    """Build a FastAPI application instance.
+
+    Three usage modes, in order of precedence:
+
+    1. ``create_app(services=srv)`` — tests/embedding.
+       Dependencies set directly on app.state.  No lifespan, no DB connect.
+       Works with ASGITransport.
+
+    2. ``create_app(settings=s)`` — custom config, still uses lifespan.
+       App runs full lifespan (logging, DB connect, MCP discovery).
+
+    3. ``create_app()`` — production default.
+       Loads Settings.from_config_dir(CONFIG_DIR) merged with env vars.
+    """
+    if services is not None:
+        app = FastAPI(title="alascup-agent", version="0.1.0")
+        app.state.services = services
+        app.include_router(api_router)
+        return app
+
+    # ── Lifespan path (production / custom settings) ──────────────────
+    _svc: Services | None = None
+    _settings = settings
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        nonlocal _svc
+        s = _settings or Settings.from_config_dir(CONFIG_DIR)
+        _configure_logging(s.log_level)
+        _svc = _build_services(s)
+        db = _svc.db
+        await db.connect()
+        await _svc.tool_executor.discover()
+        app.state.services = _svc
+        yield
+        if db is not None:
+            await db.disconnect()
+
+    app = FastAPI(title="alascup-agent", version="0.1.0", lifespan=lifespan)
+    app.include_router(api_router)
+    return app
 
 
-app = FastAPI(title="alascup-agent", version="0.1.0", lifespan=lifespan)
-app.include_router(api_router)
+# Uvicorn entry-point: ``uvicorn src.main:app``
+app = create_app()

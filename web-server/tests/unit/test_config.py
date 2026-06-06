@@ -95,13 +95,45 @@ class TestServersConfig:
             load_servers_config(tmp_config_dir / "nonexistent.json")
 
 
-class TestWebServerConfig:
-    def test_config_creation(self):
-        from src.config.models import WebServerConfig
+class TestSettings:
+    def test_defaults(self):
+        from src.config.models import Settings
 
-        cfg = WebServerConfig(
-            context_window_size=128000,
-            tool_request_timeout_seconds=300,
-        )
+        cfg = Settings()
         assert cfg.context_window_size == 128000
         assert cfg.tool_request_timeout_seconds == 300
+        assert cfg.agent_max_iterations == 30
+        assert cfg.log_level == "INFO"
+
+    def test_llm_config_property(self):
+        from src.config.models import Settings
+
+        cfg = Settings(
+            llm_api_key="sk-test",
+            llm_api_url="https://api.example.com",
+            llm_model="test-model",
+            llm_max_tokens=4096,
+        )
+        llm = cfg.llm_config
+        assert llm.api_key == "sk-test"
+        assert llm.api_url == "https://api.example.com"
+        assert llm.model == "test-model"
+        assert llm.max_tokens == 4096
+
+    def test_env_prefix(self, monkeypatch):
+        monkeypatch.setenv("ALASCUP_DATABASE_URL", "postgresql://env/db")
+        monkeypatch.setenv("ALASCUP_LOG_LEVEL", "DEBUG")
+
+        from src.config.models import Settings
+
+        cfg = Settings()
+        assert cfg.database_url == "postgresql://env/db"
+        assert cfg.log_level == "DEBUG"
+
+    def test_kwarg_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("ALASCUP_LOG_LEVEL", "DEBUG")
+
+        from src.config.models import Settings
+
+        cfg = Settings(log_level="ERROR")
+        assert cfg.log_level == "ERROR"

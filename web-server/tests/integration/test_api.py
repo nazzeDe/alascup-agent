@@ -86,10 +86,9 @@ def _build_test_services():
 
 @pytest.fixture
 def app():
-    from src.main import app
+    from src.main import create_app
 
-    app.state.services = _build_test_services()
-    return app
+    return create_app(services=_build_test_services())
 
 
 @pytest.fixture

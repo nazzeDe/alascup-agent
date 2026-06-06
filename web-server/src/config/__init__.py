@@ -1,18 +1,18 @@
 from src.config.models import (
-    WebServerConfig,
     LLMConfig,
     RulesConfig,
     ServerEntry,
     RuleEntry,
+    Settings,
 )
 from src.config.loader import load_llm_config, load_rules_config, load_servers_config
 
 __all__ = [
-    "WebServerConfig",
     "LLMConfig",
     "RulesConfig",
     "ServerEntry",
     "RuleEntry",
+    "Settings",
     "load_llm_config",
     "load_rules_config",
     "load_servers_config",

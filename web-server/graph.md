@@ -705,7 +705,7 @@ classDiagram
     %% config
     %% ============================================================
     namespace config {
-        class WebServerConfig
+        class Settings
         class RulesConfig
         class LLMConfig
         class ServersConfig
@@ -743,10 +743,10 @@ classDiagram
     ChatSession "1" --> "*" ToolCall : contains
     PromptManager --> AgentState : injects
 
-    WebServerConfig --> LLMAdapter : injects
-    WebServerConfig --> RuleEngine : injects
-    WebServerConfig --> AuditLogger : injects
-    WebServerConfig --> Tracer : injects
+    Settings --> LLMAdapter : injects
+    Settings --> RuleEngine : injects
+    Settings --> AuditLogger : injects
+    Settings --> Tracer : injects
 ```
 
 ---
