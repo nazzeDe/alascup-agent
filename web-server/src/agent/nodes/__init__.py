@@ -8,10 +8,6 @@ _event_queue: contextvars.ContextVar = contextvars.ContextVar("event_queue", def
 # Set by Query.chat() before agent execution, read by think_node.
 _chat_id_ctx: contextvars.ContextVar = contextvars.ContextVar("chat_id_ctx", default=None)
 
-# Per-chat-turn session_manager for persisting tool calls from agent nodes.
-# Set by Query.chat() before agent execution, read by think/review/act nodes.
-_session_manager_ctx: contextvars.ContextVar = contextvars.ContextVar("session_manager_ctx", default=None)
-
 from src.agent.nodes.think import think_node, _merge_tool_block
 from src.agent.nodes.review import review_node
 from src.agent.nodes.act import act_node

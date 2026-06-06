@@ -15,7 +15,6 @@ from src.agent.loop.transitions import (
     clear_transient_fields,
     get_transition,
 )
-from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
 from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import ROLE_MAP, Transition
 from src.models.audit import AuditActor, AuditEvent, AuditLevel
@@ -74,6 +73,7 @@ class LoopOrchestrator:
         error_recovery,
         llm,
         chat_id: str,
+        lifecycle=None,
     ):
         self._graph = graph
         self._context_manager = context_manager
@@ -84,6 +84,7 @@ class LoopOrchestrator:
         self._model: str = getattr(llm, "_config", None) and getattr(llm._config, "model", "") or ""
         self._config = {}
         self._chat_id = chat_id
+        self._lifecycle = lifecycle
         # Circuit breaker: hard limits to prevent token explosion and infinite loops.
         # Industry pattern (LangGraph recursion_limit=25, Claude Code max_turns).
         # No interactive pause — just stop and report. User can re-submit if needed.
@@ -248,7 +249,16 @@ class LoopOrchestrator:
 
             await self._audit_human_approved(all_approved)
             await self._audit_human_rejected(all_rejected)
-            await _persist_human_decisions(all_approved, all_rejected)
+            if self._lifecycle is not None:
+                chat_id = UUID(self._chat_id) if self._chat_id else None
+                for tc in all_approved:
+                    await self._lifecycle.update(chat_id, tc.get("call_id"),
+                                                  approval_status=ApprovalStatus.APPROVED,
+                                                  execution_status=ExecutionStatus.RUNNING)
+                for tc in all_rejected:
+                    await self._lifecycle.update(chat_id, tc.get("call_id"),
+                                                  approval_status=ApprovalStatus.REJECTED,
+                                                  execution_status=ExecutionStatus.FAILED)
             result["approved_tool_calls"] = result.get("approved_tool_calls", []) + all_approved
             result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + all_rejected
             result["pending_approval"] = []
@@ -478,30 +488,3 @@ def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
             "content": f"[{name}] execution_status=REJECTED\nerror=Tool was rejected by human or policy. Do NOT retry this exact call — propose an alternative approach.",
         })
     state["messages"] = state.get("messages", []) + messages
-
-
-async def _persist_human_decisions(approved: list[dict], rejected: list[dict]) -> None:
-    """UPDATE tool_call rows after human approval/rejection."""
-    session_mgr = _session_manager_ctx.get()
-    if session_mgr is None:
-        return
-    chat_id_str = _chat_id_ctx.get()
-    if not chat_id_str:
-        return
-    chat_id = UUID(chat_id_str)
-    for tc in approved:
-        call_id = tc.get("call_id")
-        if call_id:
-            await session_mgr.update_tool_call(
-                call_id, chat_id,
-                approval_status=ApprovalStatus.APPROVED,
-                execution_status=ExecutionStatus.RUNNING,
-            )
-    for tc in rejected:
-        call_id = tc.get("call_id")
-        if call_id:
-            await session_mgr.update_tool_call(
-                call_id, chat_id,
-                approval_status=ApprovalStatus.REJECTED,
-                execution_status=ExecutionStatus.FAILED,
-            )

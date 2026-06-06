@@ -21,7 +21,7 @@ from loguru import logger
 
 from src.agent.loop.audit import audit_transition
 from src.agent.loop.orchestrator import LoopOrchestrator
-from src.agent.nodes import _event_queue, _chat_id_ctx, _session_manager_ctx
+from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.state import Transition
 from src.models.audit import AuditActor
 from src.models.message import Message, MessageType
@@ -41,6 +41,7 @@ class Query:
         audit_logger=None,
         error_recovery=None,
         chat_id=None,
+        lifecycle=None,
     ):
         self._llm = llm
         self._graph = graph
@@ -52,6 +53,7 @@ class Query:
         self._audit = audit_logger
         self._error_recovery = error_recovery
         self._chat_id = str(chat_id) if chat_id else str(uuid4())
+        self._lifecycle = lifecycle
 
     async def chat(self, user_message: str, *, chat_id: str | None = None):
         """Run a full chat turn: session management, persistence, agent execution, streaming.
@@ -106,7 +108,7 @@ class Query:
         queue: asyncio.Queue = asyncio.Queue()
         token = _event_queue.set(queue)
         chat_id_token = _chat_id_ctx.set(str(chat_id_uuid))
-        session_token = _session_manager_ctx.set(self._session_manager)
+        # session_manager is now passed explicitly via lifecycle / partial — no ContextVar needed
 
         # ── 5. Streaming + Agent execution ─────────────────────────────
         feature = f"chat_turn:{str(chat_id_uuid)}"
@@ -183,7 +185,6 @@ class Query:
             # ── 6. Cleanup ─────────────────────────────────────────────
             _event_queue.reset(token)
             _chat_id_ctx.reset(chat_id_token)
-            _session_manager_ctx.reset(session_token)
             agent_task.cancel()
             drain_task.cancel()
             for t in (agent_task, drain_task):
@@ -259,4 +260,5 @@ class Query:
             error_recovery=self._error_recovery,
             llm=self._llm,
             chat_id=self._chat_id,
+            lifecycle=self._lifecycle,
         )

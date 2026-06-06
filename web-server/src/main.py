@@ -19,6 +19,7 @@ from src.services.context_manager import ContextManager
 from src.services.db import Database
 from src.services.llm_adapter import LLMAdapter
 from src.services.container import Services
+from src.services.tool_lifecycle import ToolCallLifecycle
 from src.services.prompt_manager import PromptManager
 from src.services.session_manager import PostgresSessionManager
 
@@ -50,11 +51,14 @@ def _build_services():
     tool_executor = ToolExecutor(registry)
 
     rule_engine = RuleEngine(rules_config)
+
+    lifecycle = ToolCallLifecycle(session_mgr)
     graph = build_graph(
         llm=llm_adapter,
         executor=tool_executor,
         rule_engine=rule_engine,
         audit_logger=audit_logger,
+        lifecycle=lifecycle,
     )
 
     return Services(
@@ -69,6 +73,7 @@ def _build_services():
         approval_bridge=ApprovalBridge(),
         graph=graph,
         error_recovery=ErrorRecovery(),
+        lifecycle=lifecycle,
     )
 
 

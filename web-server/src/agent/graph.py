@@ -14,7 +14,7 @@ from src.agent.nodes import (
 from src.agent.state import AgentState
 
 
-def build_graph(*, llm, executor, rule_engine, audit_logger) -> CompiledStateGraph:
+def build_graph(*, llm, executor, rule_engine, audit_logger, lifecycle=None) -> CompiledStateGraph:
     """Build ReAct graph: think → review → act → observe → END.
 
     After think: has tool_call → review, has approved_tool_calls → act, none → END.
@@ -22,12 +22,12 @@ def build_graph(*, llm, executor, rule_engine, audit_logger) -> CompiledStateGra
     """
     graph = StateGraph(AgentState)
 
-    graph.add_node("think", partial(think_node, llm=llm, executor=executor))
+    graph.add_node("think", partial(think_node, llm=llm, executor=executor, lifecycle=lifecycle))
     graph.add_node(
         "review",
-        partial(review_node, executor=executor, rule_engine=rule_engine, audit_logger=audit_logger),
+        partial(review_node, executor=executor, rule_engine=rule_engine, audit_logger=audit_logger, lifecycle=lifecycle),
     )
-    graph.add_node("act", partial(act_node, executor=executor, audit_logger=audit_logger))
+    graph.add_node("act", partial(act_node, executor=executor, audit_logger=audit_logger, lifecycle=lifecycle))
     graph.add_node("observe", observe_node)
 
     graph.set_entry_point("think")

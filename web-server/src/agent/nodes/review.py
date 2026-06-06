@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from loguru import logger
 
 from src.agent.loop.audit import _safe_uuid
-from src.agent.nodes import _chat_id_ctx, _session_manager_ctx
+from src.agent.nodes import _chat_id_ctx
 from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import Transition
 from src.models.audit import AuditActor, AuditEvent, AuditLevel
@@ -12,7 +12,7 @@ from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 
-async def review_node(state, *, executor, rule_engine, audit_logger):
+async def review_node(state, *, executor, rule_engine, audit_logger, lifecycle=None):
     """Review all tool_calls: classify mutable tools → rule match → decide.
 
     Returns pending_approval when human decision is needed — the orchestrator
@@ -32,7 +32,7 @@ async def review_node(state, *, executor, rule_engine, audit_logger):
         name, is_read_only, is_rollbackable, args = await _classify_tool_call(tc, executor)
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
         await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending,
-                              turn_id=turn_id, iteration=iteration, args=args, model=model)
+                              turn_id=turn_id, iteration=iteration, args=args, model=model, lifecycle=lifecycle)
 
     tool_names = [t.get("function", {}).get("name", "?") for t in tool_calls]
     debug_log("DEBUG", "Review done",
@@ -76,6 +76,7 @@ async def _apply_decision(
     iteration=None,
     args: dict | None = None,
     model: str | None = None,
+    lifecycle=None,
 ) -> None:
     chat_id = _safe_uuid(_chat_id_ctx.get())
     if decision == "REJECT":
@@ -84,7 +85,10 @@ async def _apply_decision(
                               turn_id=turn_id, iteration=iteration,
                               chat_id=chat_id, request_id=_safe_uuid(tc.get("request_id", "")),
                               params=args, model=model)
-        await _persist_review_decision(tc, ApprovalStatus.REJECTED, ExecutionStatus.FAILED)
+        if lifecycle is not None:
+            chat_id_str = _chat_id_ctx.get()
+            cid = UUID(chat_id_str) if chat_id_str else None
+            await lifecycle.update(cid, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
@@ -93,7 +97,10 @@ async def _apply_decision(
                               turn_id=turn_id, iteration=iteration,
                               chat_id=chat_id, request_id=_safe_uuid(tc["request_id"]),
                               params=args, model=model)
-        await _persist_review_decision(tc, ApprovalStatus.APPROVED, ExecutionStatus.RUNNING)
+        if lifecycle is not None:
+            chat_id_str = _chat_id_ctx.get()
+            cid = UUID(chat_id_str) if chat_id_str else None
+            await lifecycle.update(cid, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)
@@ -151,25 +158,3 @@ async def _audit_review_decision(audit_logger, event: str, tool_name: str, level
         iteration=iteration,
         **{k: v for k, v in kwargs.items() if v is not None},
     ))
-
-
-async def _persist_review_decision(
-    tc: dict,
-    approval_status: ApprovalStatus,
-    execution_status: ExecutionStatus,
-) -> None:
-    """UPDATE tool_call row after rule_engine classification."""
-    session_mgr = _session_manager_ctx.get()
-    if session_mgr is None:
-        return
-    call_id = tc.get("call_id")
-    if call_id is None:
-        return
-    chat_id_str = _chat_id_ctx.get()
-    if not chat_id_str:
-        return
-    await session_mgr.update_tool_call(
-        call_id, UUID(chat_id_str),
-        approval_status=approval_status,
-        execution_status=execution_status,
-    )

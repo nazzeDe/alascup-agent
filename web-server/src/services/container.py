@@ -56,6 +56,7 @@ class Services:
     graph: CompiledStateGraph
     error_recovery: ErrorRecovery | None = None
     db: Any | None = None
+    lifecycle: Any | None = None  # ToolCallLifecycle
 
 
 def _services(request: Request) -> Services:
@@ -107,3 +108,7 @@ def graph(request: Request) -> CompiledStateGraph:
 
 def db(request: Request):
     return _services(request).db
+
+
+def lifecycle(request: Request):
+    return _services(request).lifecycle

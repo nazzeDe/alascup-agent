@@ -9,6 +9,7 @@ from src.services.container import (
     context_manager,
     error_recovery,
     graph,
+    lifecycle,
     llm_adapter,
     prompt_manager,
     session_manager,
@@ -37,6 +38,7 @@ async def chat_turn(
     bridge=Depends(approval_bridge),
     graph_dep=Depends(graph),
     error_rec=Depends(error_recovery),
+    lifecycle_dep=Depends(lifecycle),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
     agent = Query(
@@ -49,6 +51,7 @@ async def chat_turn(
         pending_approvals=bridge,
         audit_logger=audit_logger,
         error_recovery=error_rec,
+        lifecycle=lifecycle_dep,
     )
 
     async def stream():

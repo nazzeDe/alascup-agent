@@ -1,19 +1,17 @@
 import json
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from loguru import logger
 
-from src.agent.nodes import _event_queue, _chat_id_ctx, _session_manager_ctx
+from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.nodes._message_format import _format_tools, _messages
 from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
 from src.agent.state import Transition
-from src.models.tool import ApprovalStatus, ExecutionStatus, ServerName, ToolCall
 from src.observability.debug_log import log as debug_log
 from src.tools import start_feature, complete_feature
 
 
-async def think_node(state, *, llm, executor=None):
+async def think_node(state, *, llm, executor=None, lifecycle=None):
     """Stream LLM, return assistant text, pending tool_calls, and streaming results.
 
     AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
@@ -57,7 +55,7 @@ async def think_node(state, *, llm, executor=None):
 
     return await _build_think_result(
         accumulated_text, accumulated_reasoning, tool_call_blocks,
-        executor, available_tools, llm=llm,
+        executor, available_tools, llm=llm, lifecycle=lifecycle,
     )
 
 
@@ -109,7 +107,7 @@ async def _forward_to_queue(queue, data_str: str) -> None:
         await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
 
 
-async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools, llm=None) -> dict:
+async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools, llm=None, lifecycle=None) -> dict:
     """Assemble the final state dict from accumulated stream data."""
     result: dict = {}
 
@@ -126,97 +124,15 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
 
     # Persist discovered tool calls to database.
     llm_trace_id = getattr(llm, "_last_trace_id", None) if llm else None
-    await _persist_discovered_tools(pending_tool_calls, pre_executed, llm_trace_id)
+    if lifecycle is not None:
+        chat_id_str = _chat_id_ctx.get()
+        chat_id = UUID(chat_id_str) if chat_id_str else None
+        await lifecycle.register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
 
     result["tool_calls"] = pending_tool_calls
     result["streaming_tool_results"] = pre_executed
     result["transition"] = Transition.DONE if not (pending_tool_calls or pre_executed) else None
     return result
-
-
-async def _persist_discovered_tools(
-    pending: list[dict],
-    pre_executed: list[dict],
-    llm_trace_id: UUID | None,
-) -> None:
-    """INSERT all discovered tool calls to DB. Stores returned UUID as call_id on each dict."""
-    session_mgr = _session_manager_ctx.get()
-    if session_mgr is None:
-        return
-    chat_id_str = _chat_id_ctx.get()
-    if not chat_id_str:
-        return
-    chat_id = UUID(chat_id_str)
-    now = datetime.now(timezone.utc)
-
-    for tc in pending:
-        fn = tc.get("function", {})
-        name = fn.get("name", "")
-        args_str = fn.get("arguments", "{}")
-        try:
-            params = json.loads(args_str) if isinstance(args_str, str) else args_str
-        except json.JSONDecodeError:
-            params = {}
-        tc_id_str = tc.get("id", str(uuid4()))
-        try:
-            msg_id = UUID(tc_id_str)
-        except (ValueError, AttributeError):
-            msg_id = uuid4()
-        server_name = tc.get("server_name", "tool-server")
-
-        call = ToolCall(
-            name=name,
-            server=ServerName(server_name) if server_name in {"tool-server", "rag-server"} else ServerName.TOOL_SERVER,
-            description="",
-            is_read_only=bool(tc.get("is_read_only", False)),
-            is_rollbackable=bool(tc.get("is_rollbackable", False)),
-            params_schema={},
-            chat_id=chat_id,
-            message_id=msg_id,
-            params=params,
-            request_id=None,
-            approval_status=ApprovalStatus.PENDING,
-            execution_status=ExecutionStatus.PENDING_APPROVAL,
-            llm_trace_id=llm_trace_id,
-            timestamp=now.isoformat(),
-        )
-        call_id = await session_mgr.add_tool_call(chat_id, call)
-        tc["call_id"] = call_id
-
-    for pe in pre_executed:
-        tc_id_str = pe.get("tool_call_id", str(uuid4()))
-        try:
-            msg_id = UUID(tc_id_str)
-        except (ValueError, AttributeError):
-            msg_id = uuid4()
-        result = pe.get("result", {})
-        exec_status_str = result.get("execution_status", "SUCCEEDED")
-
-        call = ToolCall(
-            name=pe.get("tool_name", ""),
-            server=ServerName.TOOL_SERVER,
-            description="",
-            is_read_only=True,
-            is_rollbackable=False,
-            params_schema={},
-            chat_id=chat_id,
-            message_id=msg_id,
-            params={},
-            request_id=None,
-            approval_status=ApprovalStatus.APPROVED,
-            execution_status=ExecutionStatus(exec_status_str) if exec_status_str in {"SUCCEEDED", "FAILED", "RUNNING", "PENDING_APPROVAL"} else ExecutionStatus.SUCCEEDED,
-            error=result.get("error"),
-            llm_trace_id=llm_trace_id,
-            timestamp=now.isoformat(),
-        )
-        pe_call_id = await session_mgr.add_tool_call(chat_id, call)
-        pe["call_id"] = pe_call_id
-        # Pre-executed tools are already done; mark executed_at.
-        await session_mgr.update_tool_call(
-            pe_call_id, chat_id,
-            execution_status=call.execution_status,
-            error=call.error,
-        )
 
 
 def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict]) -> dict | None:
