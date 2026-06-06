@@ -159,20 +159,18 @@ class TestEmitEvents:
         assert len(events) == 1
         assert events[0]["event"] == "tool_result"
 
-    def test_assistant_with_reasoning_emits_reasoning_event(self):
-        """Assistant message with reasoning_content → reasoning event emitted before assistant."""
+    def test_assistant_with_reasoning_emits_only_assistant_event(self):
+        """Reasoning is streamed in real-time via _forward_to_queue; emit_events only emits content."""
         state = {
             "messages": [
                 {"role": "assistant", "content": "CPU normal.", "reasoning_content": "Let me check the CPU usage first."},
             ]
         }
         events = emit_events(state)
-        assert len(events) == 2
-        assert events[0]["event"] == "reasoning"
+        assert len(events) == 1
+        assert events[0]["event"] == "assistant"
         data0 = json.loads(events[0]["data"])
-        assert "Let me check" in data0["delta"]
-        assert data0["done"] is True
-        assert events[1]["event"] == "assistant"
+        assert data0["delta"] == "CPU normal."
 
     def test_assistant_without_reasoning_skips_reasoning_event(self):
         """No reasoning_content → no reasoning event."""

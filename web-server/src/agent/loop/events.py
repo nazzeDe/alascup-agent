@@ -37,11 +37,11 @@ def _emit_assistant_messages(state: dict, chat_id: str, skip_count: int, events:
 
     logger.debug("EMIT_EVENTS: total_msgs={t} assistant_msgs={a} skip={s}",
                  t=len(state.get("messages", [])), a=len(deduped), s=skip_count)
+    # Reasoning tokens are streamed in real-time via _forward_to_queue →
+    # drain_queue.  _emit_assistant_messages only emits the content delta;
+    # the frontend receives `thinking_done` to close the reasoning bubble.
     for m in deduped[skip_count:]:
         msg_id = m.get("id") or str(uuid4()) if isinstance(m, dict) else str(getattr(m, "id", uuid4()))
-        rc = _msg_reasoning(m)
-        if rc:
-            events.append({"event": "reasoning", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": rc, "done": True})})
         delta = _msg_content(m)
         if delta:
             events.append({"event": "assistant", "data": _json_dumps({"chat_id": chat_id, "message_id": msg_id, "delta": delta})})

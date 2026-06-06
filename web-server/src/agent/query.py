@@ -123,6 +123,7 @@ class Query:
             while True:
                 item = await queue.get()
                 if item.get("event") == "thinking_done":
+                    await event_queue.put(("item", item))
                     break
                 await event_queue.put(("item", item))
 
