@@ -20,8 +20,7 @@ from src.agent.state import ROLE_MAP, Transition
 from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
-from src.observability.profiler import Profiler, write_profile
-from src.tools import start_feature, complete_feature
+from src.observability.timing import FeatureTimeTracker, write_profile, start_feature, complete_feature, profiler_enabled
 
 
 def _is_assistant(m) -> bool:
@@ -29,12 +28,12 @@ def _is_assistant(m) -> bool:
     return ROLE_MAP.get(r, r) == "assistant"
 
 
-def _finalize_iteration(profiler: Profiler, loop_feature: str) -> None:
+def _finalize_iteration(profiler: FeatureTimeTracker, loop_feature: str) -> None:
     _log_profile(profiler)
     complete_feature(loop_feature)
 
 
-def _log_profile(profiler: Profiler) -> None:
+def _log_profile(profiler: FeatureTimeTracker) -> None:
     report = profiler.report()
     if report:
         write_profile(report)
@@ -106,16 +105,12 @@ class LoopOrchestrator:
         debug_log("INFO", "Loop start", chat_id=str(self._chat_id),
                   msg_count=len(state.get("messages", [])), assistant_skip=emitted_assistant_count)
 
-        profiler = Profiler()
-        profiler.activate()
+        profiler = FeatureTimeTracker(profile_enabled=profiler_enabled())
 
-        try:
-            async for event in self._run_loop(state, turn_id, emitted_assistant_count, profiler):
-                yield event
-        finally:
-            profiler.deactivate()
+        async for event in self._run_loop(state, turn_id, emitted_assistant_count, profiler):
+            yield event
 
-    async def _run_loop(self, state: dict, turn_id, emitted_assistant_count: int, profiler: Profiler) -> AsyncIterator[dict]:
+    async def _run_loop(self, state: dict, turn_id, emitted_assistant_count: int, profiler: FeatureTimeTracker) -> AsyncIterator[dict]:
         """Core ReAct loop — extracted from run() to keep run() as a thin wrapper."""
         it = 0
 
@@ -208,7 +203,7 @@ class LoopOrchestrator:
             debug_log("DEBUG", "Transition → CONTINUE", chat_id=str(self._chat_id))
             _finalize_iteration(profiler, loop_feature)
 
-    async def _drain_approval_loop(self, result: dict, turn_id, iteration: int, profiler: Profiler) -> AsyncIterator[dict]:
+    async def _drain_approval_loop(self, result: dict, turn_id, iteration: int, profiler: FeatureTimeTracker) -> AsyncIterator[dict]:
         """Handle pending approvals until none remain. Mutates result in place."""
         sub_it = 0
         while result.get("pending_approval"):
@@ -317,14 +312,14 @@ class LoopOrchestrator:
                 decision="REJECTED",
             ))
 
-    def _exit_events(self, profiler: Profiler, loop_feature: str, action: str) -> list[dict]:
+    def _exit_events(self, profiler: FeatureTimeTracker, loop_feature: str, action: str) -> list[dict]:
         """Finalize loop and yield completion events."""
         _finalize_iteration(profiler, loop_feature)
         if action == "return":
             return [{"event": "done", "data": "{}"}]
         return []
 
-    async def _emit_sse(self, state: dict, counter: list[int], profiler: Profiler):
+    async def _emit_sse(self, state: dict, counter: list[int], profiler: FeatureTimeTracker):
         """Emit SSE events. counter[0] is skip_assistant_count, updated in place."""
         evs = emit_events(state, chat_id=self._chat_id, skip_assistant_count=counter[0])
         for ev in evs:

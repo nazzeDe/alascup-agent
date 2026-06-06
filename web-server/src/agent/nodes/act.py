@@ -8,7 +8,7 @@ from src.agent.nodes import _chat_id_ctx
 from src.agent.nodes._tool_dispatch import _parse_args, _execute_with_error_handling
 from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.tool import ExecutionStatus
-from src.tools import start_feature, complete_feature
+from src.observability.timing import start_feature, complete_feature
 
 
 async def act_node(state, *, executor, audit_logger=None, lifecycle=None):

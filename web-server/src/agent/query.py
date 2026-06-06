@@ -25,7 +25,7 @@ from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.state import Transition
 from src.models.audit import AuditActor
 from src.models.message import Message, MessageType
-from src.tools import start_feature, complete_feature, summarize_feature_durations
+from src.observability.timing import start_feature, complete_feature, summarize_feature_durations
 
 
 class Query:

@@ -8,7 +8,7 @@ from src.agent.nodes._message_format import _format_tools, _messages
 from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
 from src.agent.state import Transition
 from src.observability.debug_log import log as debug_log
-from src.tools import start_feature, complete_feature
+from src.observability.timing import start_feature, complete_feature
 
 
 async def think_node(state, *, llm, executor=None, lifecycle=None):

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from src.services.container import db as db_dep, tool_executor
-from src.tools.feature_time_tracker import get_tracker
+from src.observability.timing import get_tracker
 
 router = APIRouter()
 
