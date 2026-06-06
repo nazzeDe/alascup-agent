@@ -1,0 +1,19 @@
+// oomkill.bt — OOM killer 事件追踪 (30秒窗口后退出)
+// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "totalpages":N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":30}\n");
+}
+
+tracepoint:oom:mark_victim
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"totalpages\":%ld}\n",
+        nsecs, pid, comm, args->totalpages);
+}
+
+interval:s:30
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

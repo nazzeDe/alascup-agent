@@ -20,6 +20,17 @@ from src.tools.perception import (
     get_network_info,
     get_process_list,
 )
+from src.tools.perception.ebpf import (
+    init_subscriptions,
+    watch_process_exec,
+    watch_process_exit,
+    watch_tcp_connections,
+    trace_syscall_stats,
+    trace_slow_syscalls,
+    trace_tcp_drops,
+    trace_io_latency,
+    trace_oom_events,
+)
 
 from collections.abc import Callable
 
@@ -138,6 +149,89 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
             cache=cache,
         )
 
+    # ── eBPF tools (read-only, bpftrace-based system observability) ───────
+
+    _sub_mgr = init_subscriptions()
+
+    @server.tool(
+        name="watch_process_exec",
+        description="实时进程启动事件流（基于 eBPF 的持续跟踪）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    def _watch_process_exec() -> dict:
+        return watch_process_exec()
+
+    @server.tool(
+        name="watch_process_exit",
+        description="实时进程退出事件流（PID + 退出码，基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    def _watch_process_exit() -> dict:
+        return watch_process_exit()
+
+    @server.tool(
+        name="watch_tcp_connections",
+        description="实时 TCP 连接追踪（基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    def _watch_tcp_connections() -> dict:
+        return watch_tcp_connections()
+
+    @server.tool(
+        name="trace_syscall_stats",
+        description="采集系统调用频率分布（按进程分组，基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _trace_syscall_stats(duration: int = 5) -> dict:
+        return await trace_syscall_stats(duration=duration)
+
+    @server.tool(
+        name="trace_slow_syscalls",
+        description="检测延迟超过 100μs 的慢系统调用（基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _trace_slow_syscalls(duration: int = 5) -> dict:
+        return await trace_slow_syscalls(duration=duration)
+
+    @server.tool(
+        name="trace_tcp_drops",
+        description="诊断 TCP 丢包事件（基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _trace_tcp_drops(duration: int = 10) -> dict:
+        return await trace_tcp_drops(duration=duration)
+
+    @server.tool(
+        name="trace_io_latency",
+        description="采集磁盘 I/O 延迟分布（基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _trace_io_latency(duration: int = 10) -> dict:
+        return await trace_io_latency(duration=duration)
+
+    @server.tool(
+        name="trace_oom_events",
+        description="捕获 OOM killer 进程杀死事件（基于 eBPF）",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _trace_oom_events(duration: int = 30) -> dict:
+        return await trace_oom_events(duration=duration)
+
+    # ── Start eBPF subscription daemons after tools are registered ────────
+
+    # 在后台任务中启动持续探针（execsnoop, proc_exit, tcpconn）
+    _startup_task = asyncio.ensure_future(_start_ebpf_subscriptions(_sub_mgr))
+    # 注册关闭钩子
+    _register_shutdown_hook(server, _sub_mgr)
+
     # ── health: lightweight liveness probe ───────────────────────────────
 
     @server.tool(
@@ -161,6 +255,22 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
     _register_classify_companions(server, _classify_fns)
 
     return server
+
+
+async def _start_ebpf_subscriptions(sub_mgr) -> None:
+    """在后台启动 ebpf 持续订阅 daemon。"""
+    try:
+        await sub_mgr.start_all()
+    except Exception:
+        logger.opt(exception=True).warning("eBPF subscription startup failed (non-fatal)")
+
+
+def _register_shutdown_hook(server: FastMCP, sub_mgr) -> None:
+    """注册 server 关闭时停止 ebpf daemon。"""
+    async def _on_shutdown():
+        await sub_mgr.shutdown()
+        logger.info("eBPF subscriptions stopped")
+    server.on_shutdown(_on_shutdown)
 
 
 def _register_classify_companions(

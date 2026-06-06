@@ -3,8 +3,11 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-# util-linux provides nsenter for host command execution
-RUN apt-get update && apt-get install -y --no-install-recommends util-linux && rm -rf /var/lib/apt/lists/*
+# util-linux provides nsenter; bpftrace provides dynamic kernel tracing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    util-linux \
+    bpftrace && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
 RUN pip install uv --extra-index-url https://mirrors.loong64.com/pypi/simple --no-cache-dir .

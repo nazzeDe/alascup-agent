@@ -1,0 +1,27 @@
+// biolatency.bt — 磁盘 I/O 延迟 (10秒窗口后退出)
+// 输出: { "event": "start|done" }, { "latency_ns":N, "sector":N, "rwbs":"..." }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":10}\n");
+}
+
+kprobe:blk_account_io_start
+{
+    @io_start[arg0] = nsecs;
+}
+
+kprobe:blk_account_io_done
+/@io_start[arg0]/
+{
+    $lat = nsecs - @io_start[arg0];
+    printf("{\"latency_ns\":%ld,\"sector\":%lld,\"rwbs\":\"%s\"}\n",
+        $lat, arg1, str(arg2));
+    delete(@io_start[arg0]);
+}
+
+interval:s:10
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

@@ -88,6 +88,7 @@ services:
       - /var/log:/host/var/log:ro,Z
       - /proc:/host/proc:ro,Z
       - /sys:/host/sys:ro,Z
+      - /sys/kernel/btf:/sys/kernel/btf:ro,Z
       - ./logs/tool-server:/app/logs:Z
     read_only: true
     tmpfs:
@@ -108,6 +109,8 @@ services:
       - SYS_ADMIN       # systemctl start/stop/restart/daemon-reload（注释即禁用）
       # --- 内核诊断 ---
       - SYSLOG          # dmesg
+      - BPF             # bpftrace 等 BPF 程序加载
+      - PERFMON         # perf_event_open 访问
     pid: "host"
     pids_limit: 512
     mem_limit: 768m

@@ -1,0 +1,8 @@
+// proc_exit.bt — 追踪进程退出事件 (持续模式)
+// 输出: timestamp_ns, pid, comm, exit_code
+
+tracepoint:sched:sched_process_exit
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"exit_code\":%ld}\n",
+        nsecs, pid, comm, args->exit_code);
+}

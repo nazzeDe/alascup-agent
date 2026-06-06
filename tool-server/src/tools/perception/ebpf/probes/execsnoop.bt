@@ -1,0 +1,8 @@
+// execsnoop.bt — 追踪进程执行事件 (持续模式)
+// 输出: timestamp_ns, pid, comm, uid
+
+tracepoint:syscalls:sys_enter_execve
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"uid\":%d}\n",
+        nsecs, pid, comm, uid);
+}
