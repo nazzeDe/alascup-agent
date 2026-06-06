@@ -3,7 +3,7 @@
 web-server
 
 ```
-cd web-server && ALASCUP_DEBUG=DEBUG DATABASE_URL=postgresql://nazze:1115@localhost:5432/alascup_agent SERVERS_CONFIG=config/servers.dev.json uv run uvicorn src.main:app  --port 11450
+cd web-server && ALASCUP_DEBUG=DEBUG ALASCUP_DATABASE_URL=postgresql://nazze:1115@localhost:5432/alascup_agent ALASCUP_SERVERS_CONFIG=config/servers.dev.json uv run uvicorn src.main:app --port 11450
 ```
 
 tool-server
