@@ -2,23 +2,21 @@
 
 import json
 import os
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 from typing import AsyncIterator
 
 from loguru import logger
 
+from src.agent.loop.approval import ApprovalHandler
 from src.agent.loop.audit import audit_transition, _safe_uuid
 from src.agent.loop.events import emit_events
-from src.agent.loop.handlers import handle_pending_approval, handle_llm_error
+from src.agent.loop.handlers import handle_llm_error
 from src.agent.loop.transitions import (
     clear_transient_fields,
     get_transition,
 )
-from src.agent.nodes._tool_dispatch import _parse_args
 from src.agent.state import ROLE_MAP, Transition
-from src.models.audit import AuditActor, AuditEvent, AuditLevel
-from src.models.tool import ApprovalStatus, ExecutionStatus
+from src.models.audit import AuditActor
 from src.observability.debug_log import log as debug_log
 from src.observability.timing import FeatureTimeTracker, write_profile, start_feature, complete_feature, profiler_enabled
 
@@ -39,18 +37,6 @@ def _log_profile(profiler: FeatureTimeTracker) -> None:
         write_profile(report)
 
 
-def _apply_decisions(pending: list[dict], decisions: list[str]) -> tuple[list[dict], list[dict]]:
-    """Split pending tool calls into approved and rejected based on decisions."""
-    approved = []
-    rejected = []
-    for i, tc in enumerate(pending):
-        decision = decisions[i] if i < len(decisions) else "EXPIRED"
-        if decision == "APPROVED":
-            tc["approval_status"] = "APPROVED"
-            approved.append(tc)
-        else:
-            rejected.append(tc)
-    return approved, rejected
 
 
 class LoopOrchestrator:
@@ -84,6 +70,7 @@ class LoopOrchestrator:
         self._config = {}
         self._chat_id = chat_id
         self._lifecycle = lifecycle
+        self._approval = ApprovalHandler(graph=graph, bridge=bridge, audit_logger=audit_logger, lifecycle=lifecycle)
         # Circuit breaker: hard limits to prevent token explosion and infinite loops.
         # Industry pattern (LangGraph recursion_limit=25, Claude Code max_turns).
         # No interactive pause — just stop and report. User can re-submit if needed.
@@ -164,7 +151,8 @@ class LoopOrchestrator:
                          r=get_transition(result))
 
             # 3. Approval flow — orchestrator-owned, no interrupt/resume
-            async for event in self._drain_approval_loop(result, turn_id, it, profiler):
+            result["_chat_id"] = self._chat_id
+            async for event in self._approval.resolve(result, profiler=profiler):
                 yield event
             state = result
             logger.debug("approval_loop_exited pending_approval={p} transition={r}",
@@ -202,115 +190,6 @@ class LoopOrchestrator:
                 return
             debug_log("DEBUG", "Transition → CONTINUE", chat_id=str(self._chat_id))
             _finalize_iteration(profiler, loop_feature)
-
-    async def _drain_approval_loop(self, result: dict, turn_id, iteration: int, profiler: FeatureTimeTracker) -> AsyncIterator[dict]:
-        """Handle pending approvals until none remain. Mutates result in place."""
-        sub_it = 0
-        while result.get("pending_approval"):
-            sub_it += 1
-            self._iteration = iteration + sub_it
-            debug_log("INFO", "Approval required — SSE stays connected", chat_id=str(self._chat_id))
-            pending = result["pending_approval"]
-            # Process each pending tool independently — each has its own request_id.
-            all_approved: list[dict] = []
-            all_rejected: list[dict] = []
-            for tc in pending:
-                request_id = tc.get("request_id", str(uuid4()))
-
-                async for event in handle_pending_approval(
-                    [tc], request_id=request_id,
-                    bridge=self._bridge, audit_logger=self._audit,
-                    chat_id=self._chat_id,
-                    turn_id=self._turn_id, iteration=self._iteration,
-                    model=self._model,
-                ):
-                    yield event
-                profiler.checkpoint("approval_events_emitted")
-
-                decisions = await self._bridge.gather_decisions(request_id, 1)
-                debug_log("INFO", "Approval decisions collected",
-                          request_id=request_id, count=len(decisions))
-
-                approved, rejected = _apply_decisions([tc], decisions)
-                all_approved.extend(approved)
-                all_rejected.extend(rejected)
-
-            await audit_transition(
-                self._audit, Transition.APPROVAL_GRANTED,
-                chat_id=_safe_uuid(self._chat_id),
-                turn_id=self._turn_id, iteration=self._iteration,
-                actor=AuditActor.POLICY, model=self._model,
-            )
-
-            await self._audit_human_approved(all_approved)
-            await self._audit_human_rejected(all_rejected)
-            if self._lifecycle is not None:
-                chat_id = UUID(self._chat_id) if self._chat_id else None
-                for tc in all_approved:
-                    await self._lifecycle.update(chat_id, tc.get("call_id"),
-                                                  approval_status=ApprovalStatus.APPROVED,
-                                                  execution_status=ExecutionStatus.RUNNING)
-                for tc in all_rejected:
-                    await self._lifecycle.update(chat_id, tc.get("call_id"),
-                                                  approval_status=ApprovalStatus.REJECTED,
-                                                  execution_status=ExecutionStatus.FAILED)
-            result["approved_tool_calls"] = result.get("approved_tool_calls", []) + all_approved
-            result["rejected_tool_calls"] = result.get("rejected_tool_calls", []) + all_rejected
-            result["pending_approval"] = []
-            result["transition"] = (
-                Transition.APPROVAL_GRANTED if all_approved
-                else Transition.APPROVAL_REJECTED
-            )
-
-            # Append rejected tool feedback to messages so LLM can adjust.
-            _inject_rejection_messages(result, all_rejected)
-
-            result["_turn_id"] = turn_id
-            result["_iteration"] = self._iteration
-            result.update(await self._graph.ainvoke(result, self._config))
-            profiler.checkpoint("graph_resume")
-
-    async def _audit_human_approved(self, approved: list[dict]) -> None:
-        if not self._audit:
-            return
-        for tc in approved:
-            fn = tc.get("function", {})
-            args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
-            await self._audit.log(AuditEvent(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                chat_id=_safe_uuid(self._chat_id),
-                request_id=_safe_uuid(tc.get("request_id", "")),
-                turn_id=self._turn_id,
-                iteration=self._iteration,
-                level=AuditLevel.INFO,
-                actor=AuditActor.POLICY.value,
-                event="TOOL_APPROVED",
-                tool_name=fn.get("name"),
-                params=args,
-                model=self._model,
-                decision="APPROVED",
-            ))
-
-    async def _audit_human_rejected(self, rejected: list[dict]) -> None:
-        if not self._audit:
-            return
-        for tc in rejected:
-            fn = tc.get("function", {})
-            args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
-            await self._audit.log(AuditEvent(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                chat_id=_safe_uuid(self._chat_id),
-                request_id=_safe_uuid(tc.get("request_id", "")),
-                turn_id=self._turn_id,
-                iteration=self._iteration,
-                level=AuditLevel.WARN,
-                actor=AuditActor.POLICY.value,
-                event="TOOL_REJECTED",
-                tool_name=fn.get("name"),
-                params=args,
-                model=self._model,
-                decision="REJECTED",
-            ))
 
     def _exit_events(self, profiler: FeatureTimeTracker, loop_feature: str, action: str) -> list[dict]:
         """Finalize loop and yield completion events."""
@@ -467,19 +346,3 @@ class LoopOrchestrator:
             return "continue"
         return None
 
-
-def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
-    """Append tool-role rejection messages so LLM can propose alternatives."""
-    if not rejected:
-        return
-    messages: list[dict] = []
-    for tc in rejected:
-        fn = tc.get("function", {})
-        name = fn.get("name", "unknown")
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tc.get("id", "rejected"),
-            "name": name,
-            "content": f"[{name}] execution_status=REJECTED\nerror=Tool was rejected by human or policy. Do NOT retry this exact call — propose an alternative approach.",
-        })
-    state["messages"] = state.get("messages", []) + messages
