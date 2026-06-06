@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 _ENV_TO_FIELD: dict[str, str] = {
     "TOOLSERVER_PROC_PATH": "proc_path",
-    "TOOLSERVER_LOG_PATH": "log_path",
     "TOOLSERVER_SANDBOX_ROOT": "sandbox_root",
     "TOOLSERVER_CACHE_TTL": "cache_ttl",
     "TOOLSERVER_BASH_TIMEOUT": "bash_timeout",
@@ -18,7 +17,6 @@ _ENV_TO_FIELD: dict[str, str] = {
 
 class ToolServerConfig(BaseModel):
     proc_path: str = "/proc"
-    log_path: str = "/var/log"
     sandbox_root: str = "/tmp/tool-server-sandbox"
     cache_ttl: int = 600
     bash_timeout: int = 30

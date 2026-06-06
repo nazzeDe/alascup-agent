@@ -106,52 +106,6 @@ class TestBashClassify:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ManageService Classify
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestManageServiceClassify:
-    def test_status_is_safe(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="status")
-        assert result["safe"] is True
-
-    def test_is_active_is_safe(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="is-active")
-        assert result["safe"] is True
-
-    def test_list_is_safe(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="list")
-        assert result["safe"] is True
-
-    def test_restart_is_dangerous(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="restart")
-        assert result["safe"] is False
-
-    def test_stop_is_dangerous(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="stop")
-        assert result["safe"] is False
-
-    def test_start_is_dangerous(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="start")
-        assert result["safe"] is False
-
-    def test_enable_is_dangerous(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="enable")
-        assert result["safe"] is False
-
-    def test_empty_action(self):
-        from src.security.operation_classify import classify_manage_service
-        result = classify_manage_service(action="")
-        assert result["safe"] is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # Companion Registration (uses FastMCP's own tool list)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -163,7 +117,6 @@ class TestCompanionRegistration:
         tools = await server.list_tools()
         names = {t.name for t in tools}
         assert "bash_classify" in names
-        assert "manage_service_classify" in names
 
     @pytest.mark.asyncio
     async def test_companion_tools_hidden(self, config):
@@ -274,24 +227,6 @@ class TestPerceptionTools:
             assert "mem_mb" in p
             assert "status" in p
 
-    def test_get_top_dirs_success(self, config):
-        from unittest.mock import patch
-        from src.tools.perception.disk import get_top_dirs
-        with patch("src.tools.perception.disk.subprocess.run") as mock_run:
-            mock_run.return_value.stdout = "100\t/tmp/dir1\n\n200\t/tmp/dir2\n"
-            mock_run.return_value.returncode = 0
-            result = get_top_dirs(config, path="/tmp")
-            assert len(result) == 2
-            assert result[0]["path"] == "/tmp/dir2"
-            assert result[0]["size_mb"] == 200
-
-    def test_get_top_dirs_failure(self, config):
-        from unittest.mock import patch
-        from src.tools.perception.disk import get_top_dirs
-        with patch("src.tools.perception.disk.subprocess.run", side_effect=FileNotFoundError):
-            result = get_top_dirs(config, path="/nonexistent")
-            assert result == []
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Operation Tools
@@ -315,16 +250,6 @@ class TestOperationTools:
         result = run_bash(sandbox, command="sleep 10", timeout=1)
         assert result["execution_status"] == "FAILED"
 
-    def test_manage_service_no_args(self, config):
-        from src.tools.operation.systemd import manage_service
-        result = manage_service(config, name="", action="")
-        assert result["execution_status"] == "FAILED"
-
-    def test_manage_service_status(self, config):
-        from src.tools.operation.systemd import manage_service
-        result = manage_service(config, name="nonexistent-service-xyz", action="status")
-        assert "execution_status" in result
-
     def test_bash_file_not_found(self, sandbox):
         from unittest.mock import patch
         from src.tools.operation.bash import run_bash
@@ -333,42 +258,6 @@ class TestOperationTools:
             assert result["execution_status"] == "FAILED"
             assert "bash not found" in result["stderr"]
 
-    def test_manage_service_list_action(self, config):
-        from unittest.mock import patch
-        from src.tools.operation.systemd import manage_service
-        with patch("src.tools.operation.systemd.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "unit1\nunit2"
-            result = manage_service(config, name="_", action="list")
-            assert result["execution_status"] == "SUCCEEDED"
-            mock_run.assert_called_once()
-            assert mock_run.call_args[0][0] == ["systemctl", "list"]
-
-    def test_manage_service_timeout(self, config):
-        from unittest.mock import patch
-        import subprocess
-        from src.tools.operation.systemd import manage_service
-        with patch("src.tools.operation.systemd.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired(cmd=["systemctl"], timeout=30)):
-            result = manage_service(config, name="nginx", action="status")
-            assert result["execution_status"] == "FAILED"
-            assert "timed out" in result["stderr"]
-
-    def test_manage_service_file_not_found(self, config):
-        from unittest.mock import patch
-        from src.tools.operation.systemd import manage_service
-        with patch("src.tools.operation.systemd.subprocess.run", side_effect=FileNotFoundError):
-            result = manage_service(config, name="nginx", action="status")
-            assert result["execution_status"] == "FAILED"
-            assert "systemctl not found" in result["stderr"]
-
-    def test_manage_service_generic_exception(self, config):
-        from unittest.mock import patch
-        from src.tools.operation.systemd import manage_service
-        with patch("src.tools.operation.systemd.subprocess.run", side_effect=RuntimeError("boom")):
-            result = manage_service(config, name="nginx", action="status")
-            assert result["execution_status"] == "FAILED"
-            assert "boom" in result["stderr"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -434,18 +323,6 @@ class TestBashWithNsenter:
             run_bash(ns_config, command="whoami", timeout=5)
             assert mock_run.call_args[1].get("cwd") is None
 
-    def test_manage_service_uses_nsenter(self):
-        from unittest.mock import patch
-        from src.tools.operation.systemd import manage_service
-        from src.config import ToolServerConfig
-        ns_config = ToolServerConfig(host_exec="nsenter")
-        with patch("src.tools.operation.systemd.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "active"
-            result = manage_service(ns_config, name="nginx", action="status")
-            assert result["execution_status"] == "SUCCEEDED"
-            cmd = mock_run.call_args[0][0]
-            assert cmd[:6] == ["nsenter", "-t", "1", "-a", "--", "systemctl"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -576,9 +453,8 @@ class TestServerCreation:
         expected = {
             "get_cpu_info", "get_memory_info", "get_disk_usage",
             "get_network_info", "get_process_list",
-            "bash", "manage_service",
-            "execute_tool", "health",
-            "bash_classify", "manage_service_classify",
+            "bash", "execute_tool", "health",
+            "bash_classify",
         }
         missing = expected - names
         assert not missing, f"Missing tools: {missing}"

@@ -12,8 +12,7 @@ from src.cache import create_cache
 from src.config import ToolServerConfig, load_config
 from src.handlers import handle_execute_tool
 from src.security.bash_classify import classify_bash
-from src.security.operation_classify import classify_manage_service
-from src.tools.operation import manage_service, run_bash
+from src.tools.operation import run_bash
 from src.tools.perception import (
     get_cpu_info,
     get_disk_usage,
@@ -101,17 +100,6 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
 
     _classify_fns["bash"] = classify_bash
 
-    @server.tool(
-        name="manage_service",
-        description="管理 systemd 服务",
-        output_schema=_ANY_OBJECT,
-        meta={"is_read_only": False, "is_rollbackable": False, "mutable": True},
-    )
-    def _manage_service(name: str = "", action: str = "") -> dict:
-        return manage_service(config, name=name, action=action)
-
-    _classify_fns["manage_service"] = classify_manage_service
-
     # ── execute_tool: secured dispatcher ─────────────────────────────────
 
     @server.tool(
@@ -185,7 +173,6 @@ def _register_classify_companions(
     """
     _COMPANION_FACTORY: dict[str, Any] = {
         "bash": lambda fn: lambda command="": fn(command),
-        "manage_service": lambda fn: lambda name="", action="": fn(name=name, action=action),
     }
 
     for tool_name, classify_fn in classify_fns.items():
