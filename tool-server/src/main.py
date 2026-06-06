@@ -150,7 +150,7 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
                 "tool_count": {"type": "integer"},
             },
         },
-        meta={"is_read_only": True, "is_rollbackable": False, "mutable": False},
+        meta={"is_read_only": True, "is_rollbackable": False, "mutable": False, "hidden": True},
     )
     async def health() -> dict:
         tools = await server.list_tools()
