@@ -321,6 +321,95 @@ describe('useSessionManager', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/sessions/abc-123')
   })
 
+  // --- Error/edge-case handling ---
+
+  it('on_error resets agentPhase to idle and sets isStreaming to false', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    expect(state.isStreaming.value).toBe(true)
+    expect(state.agentPhase.value).toBe('thinking')
+
+    // Simulate SSE error event
+    capturedCallbacks.on_error({ code: 'AGENT_CRASH', message: 'boom' })
+
+    expect(state.isStreaming.value).toBe(false)
+    expect(state.agentPhase.value).toBe('idle')
+    expect(state.connectionError.value).toEqual({ code: 'AGENT_CRASH', message: 'boom' })
+  })
+
+  it('connectFn resolving cleanly (no done event) cleans up streaming state', async () => {
+    const mockConnect = vi.fn()
+
+    // Promise resolves — simulates clean SSE close without done event
+    mockConnect.mockResolvedValue(undefined)
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    expect(state.isStreaming.value).toBe(true)
+    expect(state.agentPhase.value).toBe('thinking')
+
+    // Wait for the promise resolution to propagate
+    await vi.waitFor(() => {
+      expect(state.isStreaming.value).toBe(false)
+    })
+    expect(state.agentPhase.value).toBe('idle')
+  })
+
+  it('connectFn rejecting (AbortError) leaves agentPhase as is (abort already handled)', async () => {
+    const mockConnect = vi.fn()
+
+    mockConnect.mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    await vi.waitFor(() => {
+      expect(state.isStreaming.value).toBe(false)
+    })
+    // AbortError should not set connectionError
+    expect(state.connectionError.value).toBeNull()
+  })
+
+  it('on_reasoning with done=true updates agentPhase from thinking', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    expect(state.agentPhase.value).toBe('thinking')
+
+    // Simulate reasoning stream ending
+    capturedCallbacks.on_reasoning({ delta: 'final thought', done: true })
+
+    // Phase should transition out of thinking after reasoning completes
+    expect(state.agentPhase.value).not.toBe('thinking')
+  })
+
+  // --- Bug 7: loadHistory null check ---
   it('loadHistory treats empty string chatId as real session, not null', async () => {
     // Bug: !chatId.value treats "" as falsy, same as null.
     // The original === null check only matched null, letting "" through as a valid id.

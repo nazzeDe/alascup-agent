@@ -476,6 +476,114 @@ class TestQueryErrorRecovery:
         assert "error_exit" in transitions
 
 
+class TestAgentCrashSendsDone:
+    """AGENT_CRASH 路径必须发送 SSE done 事件，防止前端永久卡死在 Thinking 状态。"""
+
+    @pytest.fixture
+    def _now_iso(self):
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+
+    @pytest.fixture
+    def _mock_session_mgr(self, _now_iso):
+        import uuid as _uuid
+        from src.models.session import ChatSession
+
+        class MockSessionMgr:
+            async def create_session(self):
+                return ChatSession(
+                    id=_uuid.uuid4(),
+                    title=None,
+                    messages=[],
+                    executed_tool_list=[],
+                    timestamp=_now_iso,
+                )
+            async def get_session(self, chat_id):
+                return ChatSession(
+                    id=chat_id, title=None, messages=[],
+                    executed_tool_list=[], timestamp=_now_iso,
+                )
+            async def add_message(self, chat_id, msg): pass
+            async def set_title(self, chat_id, title): pass
+            async def list_sessions(self): return []
+            async def delete_session(self, chat_id): pass
+            async def add_tool_call(self, chat_id, call): return _uuid.uuid4()
+            async def update_tool_call(self, tid, cid, **kw): pass
+
+        return MockSessionMgr()
+
+    @pytest.fixture
+    def _mock_prompt_mgr(self):
+        class MockPromptMgr:
+            def build_system_prompt(self):
+                return "You are a helpful assistant."
+        return MockPromptMgr()
+
+    @pytest.fixture
+    def _mock_tool_exec(self):
+        class MockToolExec:
+            def list_tools(self):
+                return []
+        return MockToolExec()
+
+    async def test_chat_agent_crash_yields_error_then_done(
+        self, llm, executor, rule_engine, audit, context_manager, bridge,
+        _mock_session_mgr, _mock_prompt_mgr, _mock_tool_exec,
+    ):
+        """当 LLM 抛出异常导致 agent 崩溃时，SSE 流必须以 done 事件结尾。"""
+        from src.agent.graph import build_graph
+
+        class RaisingLLM:
+            async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+                raise RuntimeError("simulated LLM crash")
+                yield  # unreachable
+
+        q = Query(
+            llm=RaisingLLM(),
+            graph=build_graph(llm=RaisingLLM(), executor=executor,
+                              rule_engine=rule_engine, audit_logger=audit),
+            context_manager=context_manager,
+            session_manager=_mock_session_mgr,
+            prompt_manager=_mock_prompt_mgr,
+            tool_executor=_mock_tool_exec,
+            pending_approvals=bridge,
+            audit_logger=audit,
+        )
+
+        events = await _collect(q.chat("test message"))
+
+        event_types = [e[0] for e in events]
+        assert "error" in event_types, f"Expected error event, got: {event_types}"
+        assert event_types[-1] == "done", f"Expected final done event, got: {event_types}"
+
+    async def test_chat_normal_path_ends_with_done(
+        self, llm, executor, rule_engine, audit, context_manager, bridge,
+        _mock_session_mgr, _mock_prompt_mgr, _mock_tool_exec,
+    ):
+        """正常路径也必须以 done 结尾（回归测试）。"""
+        from src.agent.graph import build_graph
+
+        llm.responses = [{"content": "Hello!", "tool_calls": None}]
+
+        q = Query(
+            llm=llm,
+            graph=build_graph(llm=llm, executor=executor,
+                              rule_engine=rule_engine, audit_logger=audit),
+            context_manager=context_manager,
+            session_manager=_mock_session_mgr,
+            prompt_manager=_mock_prompt_mgr,
+            tool_executor=_mock_tool_exec,
+            pending_approvals=bridge,
+            audit_logger=audit,
+        )
+
+        events = await _collect(q.chat("hi"))
+
+        event_types = [e[0] for e in events]
+        assert "assistant" in event_types
+        assert event_types[-1] == "done", f"Expected final done event, got: {event_types}"
+
+
 class TestQueryFullChainAudit:
     """AL-001: 全链路审计事件链完整性。"""
 

@@ -47,7 +47,7 @@ async def run_on_demand(
 
     effective_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUTS.get(script_name, _DEFAULT_TIMEOUT_FALLBACK)
 
-    cmd = ["bpftrace", "--unsafe", "--format=json", str(script_path)]
+    cmd = ["bpftrace", "--unsafe", "-f", "json", str(script_path)]
     env = {f"BPFTRACE_ARG_{k.upper()}": v for k, v in (args or {}).items()}
 
     logger.debug("bpftrace start script={} timeout={}s", script_name, effective_timeout)

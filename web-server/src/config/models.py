@@ -93,7 +93,8 @@ class Settings(BaseSettings):
             llm_summary_model=llm.summary_model,
             llm_fallback_model=llm.fallback_model,
             llm_max_tokens=llm.max_tokens,
-            servers_config=str(config_dir / "servers.json"),
+            # servers_config intentionally omitted — let env var ALASCUP_SERVERS_CONFIG
+            # override, or fall back to CONFIG_DIR / "servers.json" in _build_services.
         )
 
     @property

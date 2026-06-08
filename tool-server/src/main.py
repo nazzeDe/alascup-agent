@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 import sys
 from typing import Any
 
@@ -43,9 +44,33 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
     Each tool is defined exactly once via @server.tool() — there is no
     separate internal registry.  FastMCP's own get_tool() / list_tools()
     serve as the canonical tool directory.
+
+    The eBPF subscription lifecycle (start on boot, stop on shutdown) is
+    managed through FastMCP's ``lifespan`` parameter instead of the removed
+    ``on_shutdown`` callback.
     """
     cache = create_cache(ttl=config.cache_ttl)
-    server = FastMCP(name="tool-server")
+    _sub_mgr = init_subscriptions()
+
+    @asynccontextmanager
+    async def _lifespan(server: FastMCP):
+        """Start eBPF subscription daemons on boot, stop on shutdown."""
+        _startup_task = asyncio.ensure_future(_start_ebpf_subscriptions(_sub_mgr))
+        try:
+            yield
+        finally:
+            _startup_task.cancel()
+            try:
+                await _startup_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            await _sub_mgr.shutdown()
+            logger.info("eBPF subscriptions stopped")
+
+    server = FastMCP(
+        name="tool-server",
+        lifespan=_lifespan,
+    )
 
     # classify_fn can't live in meta (FastMCP serializes meta → must be
     # JSON-safe).  Track mutable tools locally instead.
@@ -151,8 +176,6 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
 
     # ── eBPF tools (read-only, bpftrace-based system observability) ───────
 
-    _sub_mgr = init_subscriptions()
-
     @server.tool(
         name="watch_process_exec",
         description="实时进程启动事件流（基于 eBPF 的持续跟踪）",
@@ -226,12 +249,6 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
         return await trace_oom_events(duration=duration)
 
     # ── Start eBPF subscription daemons after tools are registered ────────
-
-    # 在后台任务中启动持续探针（execsnoop, proc_exit, tcpconn）
-    _startup_task = asyncio.ensure_future(_start_ebpf_subscriptions(_sub_mgr))
-    # 注册关闭钩子
-    _register_shutdown_hook(server, _sub_mgr)
-
     # ── health: lightweight liveness probe ───────────────────────────────
 
     @server.tool(
@@ -265,17 +282,7 @@ async def _start_ebpf_subscriptions(sub_mgr) -> None:
         logger.opt(exception=True).warning("eBPF subscription startup failed (non-fatal)")
 
 
-def _register_shutdown_hook(server: FastMCP, sub_mgr) -> None:
-    """注册 server 关闭时停止 ebpf daemon。"""
-    async def _on_shutdown():
-        await sub_mgr.shutdown()
-        logger.info("eBPF subscriptions stopped")
-    server.on_shutdown(_on_shutdown)
-
-
-def _register_classify_companions(
-    server: FastMCP, classify_fns: dict[str, Callable]
-) -> None:
+def _register_classify_companions(server: FastMCP, classify_fns: dict[str, Callable]) -> None:
     """Auto-generate hidden companion classification tools.
 
     For each tool name in *classify_fns*, creates a hidden

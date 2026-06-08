@@ -237,6 +237,7 @@ export function useSessionManager(deps?: ManagerDeps) {
               currentActivity.value = delta.length > 50 ? '…' + delta.slice(-50) : delta
             }
             if (data.done) {
+              agentPhase.value = 'responding'
               const msgId = data.message_id ?? ''
               const existing = msgId ? reasonings.value.find(r => r.message_id === msgId) : undefined
               if (existing) {
@@ -403,6 +404,7 @@ export function useSessionManager(deps?: ManagerDeps) {
 
           on_error(data: any) {
             isStreaming.value = false
+            agentPhase.value = 'idle'
             connectionError.value = {
               code: data.code || 'UNKNOWN',
               message: data.message || String(data),
@@ -411,7 +413,12 @@ export function useSessionManager(deps?: ManagerDeps) {
         },
         abortController.signal,
         (sid: string) => { if (isNewChat) newChatId = sid },
-      ).catch((err: unknown) => {
+      ).then(() => {
+        if (isStreaming.value) {
+          isStreaming.value = false
+          agentPhase.value = 'idle'
+        }
+      }).catch((err: unknown) => {
         isStreaming.value = false
         if (err instanceof DOMException && err.name === 'AbortError') return
         connectionError.value = {

@@ -121,12 +121,18 @@ class Query:
         event_queue: asyncio.Queue = asyncio.Queue(maxsize=128)
 
         async def drain_queue():
-            """Forward reasoning and assistant streaming events in real-time."""
+            """Forward reasoning and assistant streaming events in real-time.
+
+            Runs until cancelled by the outer finally block.  Does NOT break
+            on thinking_done — the orchestrator may invoke the graph multiple
+            times (e.g. after tool approval), producing multiple think cycles.
+
+            Normalizes events to always carry a ``data`` field (SSE convention).
+            """
             while True:
                 item = await queue.get()
-                if item.get("event") == "thinking_done":
-                    await event_queue.put(("item", item))
-                    break
+                if "data" not in item:
+                    item["data"] = "{}"
                 await event_queue.put(("item", item))
 
         async def run_agent():
@@ -141,6 +147,7 @@ class Query:
                     "data": json.dumps({"code": "AGENT_CRASH", "message": str(exc)}, default=str),
                 }
                 await event_queue.put(("agent", error_event))
+                await event_queue.put(("agent", {"event": "done", "data": "{}"}))
             finally:
                 await event_queue.put(("done", None))
 
@@ -183,8 +190,14 @@ class Query:
             }
         finally:
             # ── 6. Cleanup ─────────────────────────────────────────────
-            _event_queue.reset(token)
-            _chat_id_ctx.reset(chat_id_token)
+            try:
+                _event_queue.reset(token)
+            except ValueError:
+                pass  # Token was created in a different Context (async generator GC)
+            try:
+                _chat_id_ctx.reset(chat_id_token)
+            except ValueError:
+                pass
             agent_task.cancel()
             drain_task.cancel()
             for t in (agent_task, drain_task):

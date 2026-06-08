@@ -32,7 +32,9 @@ class BpftraceDaemon:
         self._proc: asyncio.subprocess.Process | None = None
         self._buffer: asyncio.Queue[dict] = asyncio.Queue(maxsize=buffer_size)
         self._consume_task: asyncio.Task[None] | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
+        self._permanent_failure: bool = False
 
     async def start(self) -> None:
         """启动子进程及其消费者协程。"""
@@ -40,19 +42,22 @@ class BpftraceDaemon:
             logger.error("bpftrace_daemon script_not_found path={}", self._script_path)
             return
         logger.info("bpftrace_daemon starting script={}", self._script_name)
-        await self._spawn()
-        self._watchdog_task = asyncio.create_task(self._watchdog())
+        await self._spawn(start_watchdog=True)
 
-    async def _spawn(self) -> None:
+    async def _spawn(self, start_watchdog: bool = False) -> None:
         """创建 bpftrace 子进程。"""
-        cmd = ["bpftrace", "--unsafe", "--format=json", str(self._script_path)]
+        cmd = ["bpftrace", "--unsafe", "-f", "json", str(self._script_path)]
         self._proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         assert self._proc.stdout is not None
+        assert self._proc.stderr is not None
         self._consume_task = asyncio.create_task(self._consume())
+        self._stderr_task = asyncio.create_task(self._collect_stderr())
+        if start_watchdog:
+            self._watchdog_task = asyncio.create_task(self._watchdog())
 
     async def _consume(self) -> None:
         """逐行消费 stdout，JSON 解析后入队。"""
@@ -68,22 +73,45 @@ class BpftraceDaemon:
             except json.JSONDecodeError:
                 continue
 
+    async def _collect_stderr(self) -> None:
+        """收集 stderr 输出，进程退出时记录错误信息。"""
+        assert self._proc is not None and self._proc.stderr is not None
+        stderr_data = await self._proc.stderr.read()
+        text = stderr_data.decode(errors="replace").strip()
+        if text:
+            logger.warning("bpftrace_daemon stderr script={} msg={}", self._script_name, text)
+            self._permanent_failure = _is_permission_error(text)
+
     async def _watchdog(self) -> None:
         """检测子进程退出，自动重启。"""
         assert self._proc is not None
         returncode = await self._proc.wait()
-        logger.warning(
-            "bpftrace_daemon exited script={} returncode={} restart_in={}s",
-            self._script_name, returncode, self._restart_delay,
-        )
+
         # 取消消费者
         if self._consume_task:
             self._consume_task.cancel()
+        # 等待 stderr 收集完成
+        if self._stderr_task:
+            try:
+                await asyncio.wait_for(self._stderr_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                self._stderr_task.cancel()
+
+        logger.warning(
+            "bpftrace_daemon exited script={} returncode={} permanent_failure={} "
+            "restart_in={}s",
+            self._script_name, returncode, self._permanent_failure, self._restart_delay,
+        )
+
+        if self._permanent_failure:
+            logger.warning(
+                "bpftrace_daemon permanent_failure script={} - not retrying",
+                self._script_name,
+            )
+            return
 
         await asyncio.sleep(self._restart_delay)
-        await self._spawn()
-        # 重新启动 watchdog
-        self._watchdog_task = asyncio.create_task(self._watchdog())
+        await self._spawn(start_watchdog=True)
 
     def drain(self) -> list[dict]:
         """非阻塞清空缓冲区，返回所有等待事件。"""
@@ -101,6 +129,8 @@ class BpftraceDaemon:
             self._watchdog_task.cancel()
         if self._consume_task:
             self._consume_task.cancel()
+        if self._stderr_task:
+            self._stderr_task.cancel()
         if self._proc and self._proc.returncode is None:
             self._proc.terminate()
             try:
@@ -108,6 +138,27 @@ class BpftraceDaemon:
             except asyncio.TimeoutError:
                 self._proc.kill()
                 await self._proc.wait()
+
+    @property
+    def permanent_failure(self) -> bool:
+        """是否因权限等永久性错误而停止。"""
+        return self._permanent_failure
+
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+
+def _is_permission_error(text: str) -> bool:
+    """检查 stderr 是否包含权限类错误（永久性失败，不应重试）。"""
+    text_lower = text.lower()
+    keywords = [
+        "cap_dac_read_search",
+        "cap_bpf",
+        "permission denied",
+        "operation not permitted",
+        "not permitted",
+    ]
+    return any(k in text_lower for k in keywords)
 
 
 class SubscriptionManager:
