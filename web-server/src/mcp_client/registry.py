@@ -1,5 +1,7 @@
 """ServerRegistry — MCP server discovery, tool cache, and URL routing."""
 
+import asyncio
+
 from loguru import logger
 
 from fastmcp import Client
@@ -35,20 +37,37 @@ class ServerRegistry:
     async def discover(self) -> list[dict]:
         """Connect to every configured server, fetch tools, populate cache.
 
-        Unavailable servers are skipped with a warning.
+        Connection failures are retried with backoff delays [1, 5, 10]s
+        before skipping.  Unavailable servers are logged with a warning.
+
         Tools with ``meta.hidden=True`` (companion classification tools) are
         stripped from the public tool list.
         """
         all_tools: list[dict] = []
         for entry in self._servers.values():
-            try:
-                server_tools = await self._fetch_tools(entry)
-            except (ConnectionError, ConnectionRefusedError, OSError, RuntimeError) as exc:
+            last_exc: Exception | None = None
+            for delay in (1, 5, 10):
+                try:
+                    server_tools = await self._fetch_tools(entry)
+                except (ConnectionError, ConnectionRefusedError, OSError, RuntimeError) as exc:
+                    last_exc = exc
+                    logger.warning(
+                        "Server {name} ({url}) unreachable, retry in {delay}s: {err}",
+                        name=entry.name,
+                        url=entry.url,
+                        delay=delay,
+                        err=exc,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    last_exc = None
+                    break
+            if last_exc is not None:
                 logger.warning(
-                    "Server {name} ({url}) unavailable, skipping: {err}",
+                    "Server {name} ({url}) unavailable, skipping after retries: {err}",
                     name=entry.name,
                     url=entry.url,
-                    err=exc,
+                    err=last_exc,
                 )
                 continue
             all_tools.extend(server_tools)

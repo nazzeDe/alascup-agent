@@ -23,6 +23,11 @@ class ToolExecutor:
         """Connect to all configured MCP servers and populate the tool cache."""
         await self._registry.discover()
 
+    async def refresh_server(self, server_name: str) -> list[dict]:
+        """Re-discover a single server and return its tools."""
+        await self._registry.refresh(server_name)
+        return self._registry.list_tools()
+
     def list_tools(self) -> list[dict]:
         """Return the cached tool list from all connected servers."""
         return self._registry.list_tools()
