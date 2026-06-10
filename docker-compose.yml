@@ -119,34 +119,5 @@ services:
     expose:
       - "11451"
 
-  # 运维经验库
-  rag-server:
-    platform: linux/loong64
-    build:
-      context: ./rag-server
-    container_name: rag-server
-    restart: unless-stopped
-    working_dir: /app
-    environment:
-      - EMBEDDING_API_BASE
-      - EMBEDDING_API_KEY
-    volumes:
-      - rag-data:/app/data:Z
-      - ./logs/rag-server:/app/logs:Z
-    read_only: true
-    tmpfs:
-      - /tmp:size=128m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 128
-    mem_limit: 512m
-    cpus: "0.50"
-    network_mode: bridge
-    expose:
-      - "11452"
-
 volumes:
-  rag-data:
   pgdata:
