@@ -12,6 +12,7 @@ async approval model:
 
 from __future__ import annotations
 
+from typing import Protocol, AsyncIterator
 from uuid import UUID, uuid4
 
 from loguru import logger
@@ -20,6 +21,14 @@ from src.agent.loop.audit import audit_transition
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.agent.state import Transition
 from src.models.audit import AuditActor
+
+
+class AgentRunner(Protocol):
+    """Protocol for agent execution — SSEStream depends on this, not Query."""
+    async def run(self, messages: list[dict], available_tools: list,
+                  system: str | None = None, *, _event_queue=None,
+                  _chat_id: str | None = None) -> AsyncIterator[dict]:
+        ...
 
 
 class Query:

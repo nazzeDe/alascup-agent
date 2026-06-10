@@ -244,8 +244,10 @@ class TestToolExecutorClassifyCompanion:
 
         registry = FakeRegistry()
 
+        text_block = MagicMock()
+        text_block.text = '{"safe": false}'
         mock_result = MagicMock()
-        mock_result.content = {"safe": False}
+        mock_result.content = [text_block]
 
         mock_client = MagicMock()
         mock_client.call_tool = AsyncMock(return_value=mock_result)
@@ -269,8 +271,12 @@ class TestToolExecutorClassifyCompanion:
 
         registry = FakeRegistry()
 
+        # MCP call_tool returns content as a list of ContentBlock objects
+        # with .text containing a JSON string.
+        text_block = MagicMock()
+        text_block.text = '{"safe": true}'
         mock_result = MagicMock()
-        mock_result.content = {"safe": True}
+        mock_result.content = [text_block]
 
         mock_client = MagicMock()
         mock_client.call_tool = AsyncMock(return_value=mock_result)

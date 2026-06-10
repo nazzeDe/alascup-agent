@@ -89,10 +89,8 @@ async def _apply_decision(
                               turn_id=turn_id, iteration=iteration,
                               chat_id=chat_id, request_id=_safe_uuid(tc.get("request_id", "")),
                               params=args, model=model)
-        if lifecycle is not None:
-            chat_id_str = chat_id
-            cid = UUID(chat_id_str) if chat_id_str else None
-            await lifecycle.update(cid, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
+        if lifecycle is not None and chat_id is not None:
+            await lifecycle.update(chat_id, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
@@ -101,10 +99,8 @@ async def _apply_decision(
                               turn_id=turn_id, iteration=iteration,
                               chat_id=chat_id, request_id=_safe_uuid(tc["request_id"]),
                               params=args, model=model)
-        if lifecycle is not None:
-            chat_id_str = chat_id
-            cid = UUID(chat_id_str) if chat_id_str else None
-            await lifecycle.update(cid, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
+        if lifecycle is not None and chat_id is not None:
+            await lifecycle.update(chat_id, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)

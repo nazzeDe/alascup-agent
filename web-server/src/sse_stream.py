@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 from loguru import logger
 
+from src.agent.query import AgentRunner
 from src.models.message import Message, MessageType
 
 
@@ -49,7 +50,7 @@ class SSEStream:
         chat_id: str | None,
         session_manager,
         prompt_manager,
-        query,
+        query: AgentRunner,
         tool_executor,
         disconnect_check=None,
     ):

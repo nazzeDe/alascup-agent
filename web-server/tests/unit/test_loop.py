@@ -1025,3 +1025,126 @@ class TestCircuitBreaker:
         result = await orch._check_token_ceiling(state)
         assert result is False
 
+
+# ── EmissionTracker (Slice 2) ────────────────────────────────────────────
+
+
+class TestEmissionTracker:
+    """Slice 2: EmissionTracker 管理 SSE 发射簿记，与 agent state 分离."""
+
+    def test_initial_state(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        assert tracker.assistant_count == 0
+        assert tracker.emitted_result_ids == set()
+
+    def test_record_assistant_emitted(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        tracker.record_assistant_emitted()
+        assert tracker.assistant_count == 1
+        tracker.record_assistant_emitted()
+        tracker.record_assistant_emitted()
+        assert tracker.assistant_count == 3
+
+    def test_mark_tool_results_emitted_adds_ids(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        results = [
+            {"tool_call_id": "tc-1", "tool_name": "get_cpu"},
+            {"tool_call_id": "tc-2", "tool_name": "get_mem"},
+        ]
+        tracker.mark_tool_results_emitted(results)
+        assert tracker.emitted_result_ids == {"tc-1", "tc-2"}
+
+    def test_mark_tool_results_idempotent(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        tracker.mark_tool_results_emitted([{"tool_call_id": "tc-1"}])
+        tracker.mark_tool_results_emitted([{"tool_call_id": "tc-1"}])
+        assert tracker.emitted_result_ids == {"tc-1"}
+
+    def test_get_new_tool_results_filters_emitted(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        tracker.mark_tool_results_emitted([{"tool_call_id": "tc-1"}])
+        all_results = [
+            {"tool_call_id": "tc-1", "tool_name": "get_cpu", "result": {}},
+            {"tool_call_id": "tc-2", "tool_name": "get_mem", "result": {}},
+        ]
+        new = tracker.get_new_tool_results(all_results)
+        assert len(new) == 1
+        assert new[0]["tool_call_id"] == "tc-2"
+
+    def test_get_new_tool_results_all_new_when_nothing_emitted(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        all_results = [
+            {"tool_call_id": "tc-1", "result": {}},
+            {"tool_call_id": "tc-2", "result": {}},
+        ]
+        new = tracker.get_new_tool_results(all_results)
+        assert len(new) == 2
+
+    def test_get_new_tool_results_handles_missing_id(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        results = [{"tool_name": "no_id_tool", "result": {}}]
+        new = tracker.get_new_tool_results(results)
+        # Missing tool_call_id → treated as new (not in emitted set)
+        assert len(new) == 1
+
+    def test_advance_iteration_resets_emitted_ids(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        tracker.mark_tool_results_emitted([{"tool_call_id": "tc-1"}])
+        tracker.advance_iteration()
+        assert tracker.emitted_result_ids == set()
+        # assistant_count NOT reset — persists across iterations
+
+    def test_assistant_count_survives_advance_iteration(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        tracker.record_assistant_emitted()
+        tracker.record_assistant_emitted()
+        tracker.advance_iteration()
+        assert tracker.assistant_count == 2  # persists across iterations
+
+    def test_emit_events_uses_tracker_for_tool_results(self):
+        """emit_events reads new tool results from tracker, not _emitted_results."""
+        from src.agent.loop.emission import EmissionTracker
+        from src.agent.loop.events import emit_events
+
+        tracker = EmissionTracker()
+        state = {
+            "tool_results": [
+                {"tool_call_id": "tc-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+            ],
+            "streaming_tool_results": [
+                {"tool_call_id": "tc-2", "tool_name": "get_uptime", "result": {"execution_status": "SUCCEEDED"}},
+            ],
+        }
+        events = emit_events(state, tracker=tracker, chat_id="c1")
+        # All tool_results emitted (nothing pre-marked)
+        tool_result_events = [e for e in events if e["event"] == "tool_result"]
+        assert len(tool_result_events) == 2
+
+    def test_emit_events_skips_already_emitted_tool_results(self):
+        """Pre-emitted results are skipped by emit_events via tracker."""
+        from src.agent.loop.emission import EmissionTracker
+        from src.agent.loop.events import emit_events
+
+        tracker = EmissionTracker()
+        tracker.mark_tool_results_emitted([{"tool_call_id": "tc-1"}])
+        state = {
+            "tool_results": [
+                {"tool_call_id": "tc-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+                {"tool_call_id": "tc-2", "tool_name": "get_mem", "result": {"execution_status": "SUCCEEDED"}},
+            ],
+        }
+        events = emit_events(state, tracker=tracker, chat_id="c1")
+        tool_result_events = [e for e in events if e["event"] == "tool_result"]
+        assert len(tool_result_events) == 1
+        data = json.loads(tool_result_events[0]["data"])
+        assert data["tool_name"] == "get_mem"
+

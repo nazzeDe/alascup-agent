@@ -7,9 +7,10 @@ from src.agent.nodes import (
     route_after_think,
 )
 from src.agent.graph import build_graph
-from src.agent.query import Query
+from src.agent.query import AgentRunner, Query
 
 __all__ = [
+    "AgentRunner",
     "AgentState",
     "Transition",
     "think_node",

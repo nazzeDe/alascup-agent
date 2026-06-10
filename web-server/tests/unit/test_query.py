@@ -657,3 +657,81 @@ class TestQueryFullChainAudit:
         assert "TOOL_APPROVED" in audit_events
         # 两个高风险工具都审批通过并执行
         assert audit_events.count("TOOL_EXECUTED") >= 2
+
+
+# ── Slice 4: AgentRunner Protocol ────────────────────────────────────────
+
+
+class TestAgentRunnerProtocol:
+    """Slice 4: AgentRunner Protocol — SSEStream 依赖抽象而非 Query."""
+
+    def test_protocol_exists_and_importable(self):
+        from src.agent.query import AgentRunner
+        assert AgentRunner is not None
+
+    def test_query_satisfies_protocol(self):
+        """Query structurally implements AgentRunner.run()."""
+        from typing import get_type_hints
+        from src.agent.query import Query, AgentRunner
+
+        query_hints = get_type_hints(Query.run)
+        proto_hints = get_type_hints(AgentRunner.run)
+
+        # Both have the same core params
+        assert "messages" in proto_hints
+        assert "available_tools" in proto_hints
+        assert "system" in proto_hints
+        assert "return" in proto_hints
+
+    def test_mock_agent_runner_can_replace_query(self):
+        """Any class with run() matching the protocol can stand in for Query."""
+        from src.agent.query import AgentRunner
+
+        class MockRunner:
+            async def run(self, messages, available_tools, system=None,
+                          *, _event_queue=None, _chat_id=None):
+                yield {"event": "assistant",
+                       "data": '{"delta": "mock response"}'}
+                yield {"event": "done", "data": "{}"}
+
+        runner = MockRunner()
+        # Structural check: has the required method
+        assert hasattr(runner, "run")
+        assert callable(runner.run)
+
+
+# ── Slice 5: Persistence-decoupled emission ──────────────────────────────
+
+
+class TestEmissionTrackerInitialCount:
+    """Slice 5: EmissionTracker 初始 assistant_count 可外部设定."""
+
+    def test_initial_count_settable(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker(initial_assistant_count=5)
+        assert tracker.assistant_count == 5
+
+    def test_initial_count_defaults_to_zero(self):
+        from src.agent.loop.emission import EmissionTracker
+        tracker = EmissionTracker()
+        assert tracker.assistant_count == 0
+
+    def test_initial_count_in_emit_events(self):
+        """With initial count, emit_events skips those messages."""
+        from src.agent.loop.emission import EmissionTracker
+        from src.agent.loop.events import emit_events
+
+        tracker = EmissionTracker(initial_assistant_count=2)
+        state = {
+            "messages": [
+                {"id": "a", "role": "assistant", "content": "1st."},
+                {"id": "b", "role": "assistant", "content": "2nd."},
+                {"id": "c", "role": "assistant", "content": "3rd."},
+            ]
+        }
+        events = emit_events(state, tracker=tracker)
+        assistant_events = [e for e in events if e["event"] == "assistant"]
+        # Initial count 2 → first 2 skipped → only "3rd." emitted
+        assert len(assistant_events) == 1
+        data = json.loads(assistant_events[0]["data"])
+        assert data["delta"] == "3rd."

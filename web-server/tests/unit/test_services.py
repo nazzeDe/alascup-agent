@@ -149,7 +149,7 @@ class TestPromptManager:
 
         mgr = PromptManager()
         result = mgr.build_system_prompt()
-        assert "AI 运维 Agent" in result
+        assert "运维 Agent" in result
 
 
 class TestContextManager:

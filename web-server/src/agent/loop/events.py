@@ -8,17 +8,27 @@ from loguru import logger
 from src.agent.state import ROLE_MAP
 
 
-def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0) -> list[dict]:
+def emit_events(state: dict, chat_id: str = "", skip_assistant_count: int = 0, tracker=None) -> list[dict]:
     """Convert agent state into SSE events for streaming to client.
 
     Only emits assistant messages beyond ``skip_assistant_count`` to
     avoid re-sending messages that were already emitted in prior loop
     iterations.
+
+    When ``skip_assistant_count`` is 0 and ``tracker`` (EmissionTracker) is
+    provided, the tracker's ``assistant_count`` is used as skip count.
+    Tool results are also filtered through the tracker to avoid re-emitting
+    results already seen in prior iterations.
+    When ``tracker`` is None (backward compatible), the legacy
+    ``_emitted_results`` / ``streaming_tool_results`` path is used.
     """
     events: list[dict] = []
-    _emit_assistant_messages(state, chat_id, skip_assistant_count, events)
+    skip = skip_assistant_count
+    if skip == 0 and tracker is not None:
+        skip = getattr(tracker, "assistant_count", 0)
+    _emit_assistant_messages(state, chat_id, skip, events)
     _emit_tool_calls(state, chat_id, events)
-    _emit_tool_results(state, chat_id, events)
+    _emit_tool_results(state, chat_id, events, tracker=tracker)
     return events
 
 
@@ -67,8 +77,36 @@ def _emit_tool_calls(state: dict, chat_id: str, events: list[dict]) -> None:
         })})
 
 
-def _emit_tool_results(state: dict, chat_id: str, events: list[dict]) -> None:
-    """Emit tool results and streaming pre-executed results."""
+def _emit_tool_results(state: dict, chat_id: str, events: list[dict], tracker=None) -> None:
+    """Emit tool results and streaming pre-executed results.
+
+    When tracker is provided, filters results through tracker to avoid
+    re-emitting across iterations. Also marks emitted results so they
+    are skipped on subsequent calls.
+    """
+    if tracker is not None:
+        # Tracker path: filter tool_results and streaming_tool_results
+        tool_results = state.get("tool_results") or []
+        streaming = state.get("streaming_tool_results") or []
+        all_results = list(tool_results) + list(streaming)
+        new_results = tracker.get_new_tool_results(all_results)
+
+        for r in new_results:
+            # Emit tool_call announcement for streaming results
+            if r in streaming:
+                events.append({"event": "tool_call", "data": _json_dumps({
+                    "chat_id": chat_id,
+                    "message_id": r.get("tool_call_id") or str(uuid4()),
+                    "tool_name": r.get("tool_name", ""),
+                    "params": {},
+                    "is_read_only": r.get("is_read_only", False),
+                })})
+            events.append(_build_tool_result_event(r, chat_id))
+
+        tracker.mark_tool_results_emitted(new_results)
+        return
+
+    # Legacy path (tracker=None): backward compatible
     for r in state.get("tool_results") or []:
         events.append(_build_tool_result_event(r, chat_id))
 
