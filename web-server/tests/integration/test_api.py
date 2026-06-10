@@ -119,14 +119,14 @@ class TestSessionsEndpoint:
     async def test_create_session(self, client):
         response = await client.post("/api/sessions")
         assert response.status_code == 201
-        assert "id" in response.json()
+        assert "chat_id" in response.json()
 
 
 class TestChatTurnSSE:
     @pytest.mark.asyncio
     async def test_chat_turn_returns_sse(self, client):
         r = await client.post("/api/sessions")
-        chat_id = r.json()["id"]
+        chat_id = r.json()["chat_id"]
 
         url = "/api/chat"
         async with client.stream(
@@ -148,9 +148,84 @@ class TestChatTurnSSE:
     @pytest.mark.asyncio
     async def test_chat_turn_missing_message(self, client):
         r = await client.post("/api/sessions")
-        chat_id = r.json()["id"]
+        chat_id = r.json()["chat_id"]
         response = await client.post("/api/chat", json={"chat_id": chat_id})
         assert response.status_code == 422
+
+
+class TestChatTurnSSEIntegration:
+    """SSEStream 集成：session_init 第一事件，done 结尾，chat_id 是 UUID。"""
+
+    @pytest.mark.asyncio
+    async def test_first_event_is_session_init_with_uuid(self, client):
+        """POST /api/chat → 第一 SSE 事件是 session_init，chat_id 是 UUID。"""
+        import json as _json
+        from uuid import UUID
+
+        r = await client.post("/api/sessions")
+        chat_id = r.json()["chat_id"]
+
+        session_init_data = None
+        async with client.stream(
+            "POST",
+            "/api/chat",
+            json={"message": "hello", "chat_id": chat_id},
+        ) as response:
+            assert response.status_code == 200
+            current_event = None
+            async for line in response.aiter_lines():
+                if line.startswith("event: "):
+                    current_event = line.split(": ", 1)[1]
+                if line.startswith("data: ") and current_event == "session_init":
+                    session_init_data = _json.loads(line[6:])
+                    break
+                if line == "event: done":
+                    break
+
+        assert session_init_data is not None, "First event must be session_init"
+        assert "chat_id" in session_init_data
+        cid = session_init_data["chat_id"]
+        assert cid != "new", f"chat_id should be a real UUID, not '{cid}'"
+        UUID(cid)  # raises ValueError if not valid UUID
+        assert cid == chat_id
+
+    @pytest.mark.asyncio
+    async def test_event_sequence_ends_with_done(self, client):
+        """POST /api/chat → 最后 SSE 事件是 done。"""
+        r = await client.post("/api/sessions")
+        chat_id = r.json()["chat_id"]
+
+        last_event = None
+        async with client.stream(
+            "POST",
+            "/api/chat",
+            json={"message": "test", "chat_id": chat_id},
+        ) as response:
+            assert response.status_code == 200
+            async for line in response.aiter_lines():
+                if line.startswith("event: "):
+                    last_event = line.split(": ", 1)[1]
+
+        assert last_event == "done", f"Last SSE event must be 'done', got '{last_event}'"
+
+    @pytest.mark.asyncio
+    async def test_no_x_session_id_header(self, client):
+        """POST /api/chat → 不再设置 X-Session-ID header（改用 session_init 事件）。"""
+        r = await client.post("/api/sessions")
+        chat_id = r.json()["chat_id"]
+
+        async with client.stream(
+            "POST",
+            "/api/chat",
+            json={"message": "hi", "chat_id": chat_id},
+        ) as response:
+            assert response.status_code == 200
+            # X-Session-ID should NOT be set
+            assert response.headers.get("X-Session-ID") is None
+            # Drain the stream
+            async for line in response.aiter_lines():
+                if line == "event: done":
+                    break
 
 
 class TestSessionLifecycle:
@@ -162,7 +237,7 @@ class TestSessionLifecycle:
         # 1. 创建会话
         r = await client.post("/api/sessions")
         assert r.status_code == 201
-        chat_id = r.json()["id"]
+        chat_id = r.json()["chat_id"]
 
         # 2. 发送消息
         async with client.stream(
@@ -186,10 +261,13 @@ class TestSessionLifecycle:
 
     @pytest.mark.asyncio
     async def test_new_chat_creates_session_with_header(self, client):
-        """发送消息 → 响应头含 X-Session-ID。"""
-        r = await client.post("/api/sessions")
-        chat_id = r.json()["id"]
+        """发送消息 → 第一事件 session_init 含真实 chat_id。"""
+        import json as _json
 
+        r = await client.post("/api/sessions")
+        chat_id = r.json()["chat_id"]
+
+        first_event = None
         async with client.stream(
             "POST",
             "/api/chat",
@@ -199,10 +277,21 @@ class TestSessionLifecycle:
             },
         ) as response:
             assert response.status_code == 200
-            assert response.headers.get("X-Session-ID") == chat_id
+            data_line = None
             async for line in response.aiter_lines():
+                if line.startswith("event: "):
+                    event_type = line.split(": ", 1)[1]
+                    if event_type == "session_init" and first_event is None:
+                        first_event = event_type
+                if line.startswith("data: ") and first_event == "session_init" and data_line is None:
+                    data_line = line[6:]
+                    break
                 if line == "event: done":
                     break
+
+        assert first_event == "session_init"
+        data = _json.loads(data_line)
+        assert data["chat_id"] == chat_id
 
         # 确认会话已创建且含消息
         r = await client.get(f"/api/sessions/{chat_id}")
@@ -214,7 +303,7 @@ class TestSessionLifecycle:
         """同一 chat_id 追加消息——历史被加载。"""
         # 创建会话 + 第一轮
         r = await client.post("/api/sessions")
-        chat_id = r.json()["id"]
+        chat_id = r.json()["chat_id"]
 
         async with client.stream(
             "POST",

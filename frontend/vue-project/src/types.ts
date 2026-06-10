@@ -87,6 +87,10 @@ export interface ToolApprovalRequiredEvent {
   reason: string;
 }
 
+export interface SessionInitEvent {
+  chat_id: string;
+}
+
 export interface ErrorEvent {
   code: string;
   message: string;
@@ -102,6 +106,7 @@ export type SSEEventType =
   | "tool_call"
   | "tool_result"
   | "tool_approval_required"
+  | "session_init"
   | "error"
   | "done";
 
@@ -111,6 +116,7 @@ export interface SSECallbacks {
   on_tool_call?: (data: ToolCallEvent) => void;
   on_tool_result?: (data: ToolResultEvent) => void;
   on_tool_approval_required?: (data: ToolApprovalRequiredEvent) => void;
+  on_session_init?: (data: SessionInitEvent) => void;
   on_error?: (data: ErrorEvent) => void;
   on_done?: (data: DoneEvent) => void;
 }

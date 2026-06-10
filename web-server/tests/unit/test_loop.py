@@ -85,7 +85,7 @@ class TestEmitEvents:
         """streaming_tool_result → tool_call + tool_result pair."""
         state = {
             "streaming_tool_results": [
-                {"tool_call_id": "st-1", "tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED"}},
+                {"tool_call_id": "st-1", "tool_name": "get_cpu", "is_read_only": True, "result": {"execution_status": "SUCCEEDED"}},
             ]
         }
         events = emit_events(state, chat_id="c1")
@@ -232,6 +232,41 @@ class TestEmitEvents:
         events = emit_events(state)
         data = json.loads(events[1]["data"])
         assert data["execution_time_ms"] == 45
+
+    def test_emitted_results_respects_is_read_only(self):
+        """_emitted_results → is_read_only from result dict, not hardcoded."""
+        state = {
+            "_emitted_results": [
+                {"tool_call_id": "er-1", "tool_name": "get_cpu", "is_read_only": True, "result": {"execution_status": "SUCCEEDED"}},
+                {"tool_call_id": "er-2", "tool_name": "rm_file", "is_read_only": False, "result": {"execution_status": "SUCCEEDED"}},
+            ]
+        }
+        events = emit_events(state, chat_id="c1")
+        # _emitted_results: tool_call + tool_result per entry → 4 events
+        assert len(events) == 4
+        # First pair: read-only tool
+        assert events[0]["event"] == "tool_call"
+        data0 = json.loads(events[0]["data"])
+        assert data0["is_read_only"] is True
+        assert data0["tool_name"] == "get_cpu"
+        assert data0["message_id"] == "er-1"
+        # Second pair: mutable tool
+        assert events[2]["event"] == "tool_call"
+        data2 = json.loads(events[2]["data"])
+        assert data2["is_read_only"] is False
+        assert data2["tool_name"] == "rm_file"
+        assert data2["message_id"] == "er-2"
+
+    def test_emitted_results_missing_is_read_only_defaults_false(self):
+        """When _emitted_results entry lacks is_read_only, default to False."""
+        state = {
+            "_emitted_results": [
+                {"tool_call_id": "er-1", "tool_name": "old_tool", "result": {"execution_status": "SUCCEEDED"}},
+            ]
+        }
+        events = emit_events(state)
+        data = json.loads(events[0]["data"])
+        assert data["is_read_only"] is False
 
 
 # ── clear_transient_fields ─────────────────────────────────────────────

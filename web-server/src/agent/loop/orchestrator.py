@@ -5,6 +5,7 @@ import os
 from uuid import uuid4
 from typing import AsyncIterator
 
+from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
 from src.agent.loop.approval import ApprovalHandler
@@ -78,13 +79,23 @@ class LoopOrchestrator:
         ws = getattr(self._context_manager, "window_size", 128000)
         self._token_ceiling = int(ws * float(os.getenv("AGENT_TOKEN_CEILING_RATIO", "0.95")))
 
-    async def run(self, initial_state: dict) -> AsyncIterator[dict]:
+    async def run(self, initial_state: dict, *, _event_queue=None, _chat_id: str | None = None) -> AsyncIterator[dict]:
         """Execute ReAct loop, yielding all events on one SSE connection."""
 
         turn_id = uuid4()
         self._turn_id = turn_id
         self._iteration = 0
         state = dict(initial_state)
+
+        # Construct RunnableConfig for graph nodes.
+        # Explicit params from Query.run() / SSEStream take precedence;
+        # nodes read config first, then fall back to ContextVar.
+        self._config = {
+            "configurable": {
+                "_event_queue": _event_queue,
+                "_chat_id": _chat_id or self._chat_id,
+            }
+        }
 
         emitted_assistant_count = sum(
             1 for m in state.get("messages", []) if _is_assistant(m)
@@ -152,7 +163,7 @@ class LoopOrchestrator:
 
             # 3. Approval flow — orchestrator-owned, no interrupt/resume
             result["_chat_id"] = self._chat_id
-            async for event in self._approval.resolve(result, profiler=profiler):
+            async for event in self._approval.resolve(result, profiler=profiler, config=self._config):
                 yield event
             state = result
             logger.debug("approval_loop_exited pending_approval={p} transition={r}",
@@ -178,6 +189,7 @@ class LoopOrchestrator:
             logger.debug("emit_sse msgs={m} skip={s}", m=len(state.get("messages", [])), s=counter[0])
             async for event in self._emit_sse(state, counter, profiler):
                 yield event
+            emitted_assistant_count = counter[0]
 
             # 6-7. Clear + transition
             clear_transient_fields(state)

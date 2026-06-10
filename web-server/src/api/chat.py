@@ -15,6 +15,7 @@ from src.services.container import (
     session_manager,
     tool_executor,
 )
+from src.sse_stream import SSEStream
 
 router = APIRouter()
 
@@ -41,7 +42,7 @@ async def chat_turn(
     lifecycle_dep=Depends(lifecycle),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
-    agent = Query(
+    query = Query(
         llm=llm,
         graph=graph_dep,
         context_manager=context_mgr,
@@ -54,11 +55,14 @@ async def chat_turn(
         lifecycle=lifecycle_dep,
     )
 
-    async def stream():
-        async for event in agent.chat(body.message, chat_id=body.chat_id):
-            if await request.is_disconnected():
-                break
-            yield event
+    stream = SSEStream(
+        user_message=body.message,
+        chat_id=body.chat_id,
+        session_manager=session_mgr,
+        prompt_manager=prompt_mgr,
+        query=query,
+        tool_executor=executor,
+        disconnect_check=lambda: request.is_disconnected(),
+    )
 
-    chat_id = body.chat_id or "new"
-    return EventSourceResponse(stream(), headers={"X-Session-ID": chat_id})
+    return EventSourceResponse(stream)

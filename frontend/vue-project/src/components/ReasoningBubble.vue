@@ -20,10 +20,10 @@ const label = computed(() => {
 <template>
   <div class="reasoning-bubble my-1" style="max-width: 520px">
     <div
-      class="reasoning-toggle d-flex align-items-center small text-muted"
+      class="reasoning-toggle d-flex align-items-center small"
       role="button"
+      style="color: #4b5563; cursor: pointer; user-select: none"
       @click="expanded = !expanded"
-      style="cursor: pointer; user-select: none"
     >
       <span class="me-1">{{ expanded ? '▼' : '▶' }}</span>
       <span v-if="isStreaming" class="pulse-dot me-1" style="width:6px;height:6px"></span>

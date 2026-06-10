@@ -79,7 +79,7 @@ def _emit_tool_results(state: dict, chat_id: str, events: list[dict]) -> None:
             "message_id": sr.get("tool_call_id") or str(uuid4()),
             "tool_name": sr.get("tool_name", ""),
             "params": {},
-            "is_read_only": True,
+            "is_read_only": sr.get("is_read_only", False),
         })})
         events.append(_build_tool_result_event(sr, chat_id))
 

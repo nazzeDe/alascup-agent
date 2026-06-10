@@ -532,6 +532,7 @@ class TestAgentCrashSendsDone:
     ):
         """当 LLM 抛出异常导致 agent 崩溃时，SSE 流必须以 done 事件结尾。"""
         from src.agent.graph import build_graph
+        from src.sse_stream import SSEStream
 
         class RaisingLLM:
             async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
@@ -543,14 +544,19 @@ class TestAgentCrashSendsDone:
             graph=build_graph(llm=RaisingLLM(), executor=executor,
                               rule_engine=rule_engine, audit_logger=audit),
             context_manager=context_manager,
-            session_manager=_mock_session_mgr,
-            prompt_manager=_mock_prompt_mgr,
-            tool_executor=_mock_tool_exec,
             pending_approvals=bridge,
             audit_logger=audit,
         )
 
-        events = await _collect(q.chat("test message"))
+        stream = SSEStream(
+            user_message="test message",
+            chat_id=None,
+            session_manager=_mock_session_mgr,
+            prompt_manager=_mock_prompt_mgr,
+            query=q,
+            tool_executor=_mock_tool_exec,
+        )
+        events = await _collect(stream)
 
         event_types = [e[0] for e in events]
         assert "error" in event_types, f"Expected error event, got: {event_types}"
@@ -562,6 +568,7 @@ class TestAgentCrashSendsDone:
     ):
         """正常路径也必须以 done 结尾（回归测试）。"""
         from src.agent.graph import build_graph
+        from src.sse_stream import SSEStream
 
         llm.responses = [{"content": "Hello!", "tool_calls": None}]
 
@@ -570,14 +577,19 @@ class TestAgentCrashSendsDone:
             graph=build_graph(llm=llm, executor=executor,
                               rule_engine=rule_engine, audit_logger=audit),
             context_manager=context_manager,
-            session_manager=_mock_session_mgr,
-            prompt_manager=_mock_prompt_mgr,
-            tool_executor=_mock_tool_exec,
             pending_approvals=bridge,
             audit_logger=audit,
         )
 
-        events = await _collect(q.chat("hi"))
+        stream = SSEStream(
+            user_message="hi",
+            chat_id=None,
+            session_manager=_mock_session_mgr,
+            prompt_manager=_mock_prompt_mgr,
+            query=q,
+            tool_executor=_mock_tool_exec,
+        )
+        events = await _collect(stream)
 
         event_types = [e[0] for e in events]
         assert "assistant" in event_types

@@ -153,19 +153,18 @@ async function handle_reject(requestId: string, message?: string) {
             @reject="handle_reject"
           />
         </template>
+        <!-- Phase status during streaming — appears at end of message flow -->
+        <div v-if="_isStreaming && _phaseLabel" class="d-flex justify-content-end pe-3 mb-1">
+          <small class="phase-label-text">
+            <span class="pulse-dot d-inline-block me-1" style="width:6px;height:6px;vertical-align:middle"></span>{{ _phaseLabel }}
+          </small>
+        </div>
       </template>
     </div>
 
     <!-- Scroll-to-bottom floating button -->
     <div v-if="user_scrolled_up && _isStreaming" class="scroll-bottom-btn" @click="user_scrolled_up = false; check_auto_scroll()">
       ↓
-    </div>
-
-    <!-- Streaming status bar -->
-    <div v-if="_isStreaming" class="streaming-status d-flex align-items-center px-3 py-2 border-top">
-      <div class="pulse-dot me-2"></div>
-      <span class="small text-muted flex-grow-1">{{ _phaseLabel || 'AI is responding…' }}</span>
-      <button class="btn btn-outline-danger btn-sm btn-stop" @click="state?.abort()">Stop</button>
     </div>
 
     <!-- Connection error banner -->
@@ -187,13 +186,59 @@ async function handle_reject(requestId: string, message?: string) {
         ></textarea>
         <button
           v-if="state"
-          class="btn btn-primary btn-send"
-          :disabled="_isStreaming || !_draftInput.trim()"
-          @click="send"
+          class="btn-send-btn"
+          :class="{ 'btn-stop-btn': _isStreaming }"
+          :disabled="!_isStreaming && !_draftInput.trim()"
+          @click="_isStreaming ? state?.abort() : send()"
+          :title="_isStreaming ? 'Stop generating' : 'Send message'"
         >
-          Send
+          <svg v-if="_isStreaming" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/>
+          </svg>
+          <svg v-else width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M2 8L14 2L8 14L7 9L2 8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
         </button>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ── Phase status label above AI bubble ── */
+.phase-label-text {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+/* ── Round send/stop button ── */
+.btn-send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50% !important;
+  border: none;
+  background: #0d6efd;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.btn-send-btn:hover:not(:disabled) {
+  background: #0b5ed7;
+  transform: scale(1.05);
+}
+.btn-send-btn:disabled {
+  background: #dee2e6;
+  color: #adb5bd;
+  cursor: not-allowed;
+}
+.btn-stop-btn {
+  background: #dc3545;
+}
+.btn-stop-btn:hover:not(:disabled) {
+  background: #bb2d3b;
+}
+</style>

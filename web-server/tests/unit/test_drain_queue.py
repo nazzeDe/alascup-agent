@@ -345,8 +345,16 @@ class TestDrainQueueIntegration:
         events: list[tuple] = []
 
         async def collect_and_approve():
-            gen = agent.chat("restart the service")
-            async for e in gen:
+            from src.sse_stream import SSEStream
+            stream = SSEStream(
+                user_message="restart the service",
+                chat_id=None,
+                session_manager=mock_services["session_manager"],
+                prompt_manager=mock_services["prompt_manager"],
+                query=agent,
+                tool_executor=executor,
+            )
+            async for e in stream:
                 ev_data = e.get("data", "{}")
                 parsed = json.loads(ev_data) if isinstance(ev_data, str) else ev_data
                 events.append((e["event"], parsed))

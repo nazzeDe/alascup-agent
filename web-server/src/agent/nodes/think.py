@@ -1,9 +1,9 @@
 import json
 from uuid import UUID, uuid4
 
+from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
-from src.agent.nodes import _event_queue, _chat_id_ctx
 from src.agent.nodes._message_format import _format_tools, _messages
 from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
 from src.agent.state import Transition
@@ -11,7 +11,7 @@ from src.observability.debug_log import log as debug_log
 from src.observability.timing import start_feature, complete_feature
 
 
-async def think_node(state, *, llm, executor=None, lifecycle=None):
+async def think_node(state, config: RunnableConfig = None, *, llm, executor=None, lifecycle=None):
     """Stream LLM, return assistant text, pending tool_calls, and streaming results.
 
     AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
@@ -37,8 +37,9 @@ async def think_node(state, *, llm, executor=None, lifecycle=None):
     accumulated_text: list[str] = []
     accumulated_reasoning: list[str] = []
     tool_call_blocks: list[dict] = []
-    queue = _event_queue.get()
-    chat_id = _chat_id_ctx.get()
+    configurable = config.get("configurable", {}) if config else {}
+    queue = configurable.get("_event_queue")
+    chat_id = configurable.get("_chat_id")
     feature = f"llm_call:{chat_id}"
     start_feature(feature)
     debug_log("DEBUG", "LLM call start", chat_id=str(chat_id), tools=len(tools))
@@ -56,6 +57,7 @@ async def think_node(state, *, llm, executor=None, lifecycle=None):
     return await _build_think_result(
         accumulated_text, accumulated_reasoning, tool_call_blocks,
         executor, available_tools, llm=llm, lifecycle=lifecycle,
+        configurable=configurable,
     )
 
 
@@ -107,7 +109,7 @@ async def _forward_to_queue(queue, data_str: str) -> None:
         await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
 
 
-async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools, llm=None, lifecycle=None) -> dict:
+async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools, llm=None, lifecycle=None, configurable=None) -> dict:
     """Assemble the final state dict from accumulated stream data."""
     result: dict = {}
 
@@ -125,7 +127,7 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
     # Persist discovered tool calls to database.
     llm_trace_id = getattr(llm, "_last_trace_id", None) if llm else None
     if lifecycle is not None:
-        chat_id_str = _chat_id_ctx.get()
+        chat_id_str = (configurable or {}).get("_chat_id")
         chat_id = UUID(chat_id_str) if chat_id_str else None
         await lifecycle.register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
 

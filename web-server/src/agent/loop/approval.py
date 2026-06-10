@@ -53,7 +53,7 @@ class ApprovalHandler:
         self._audit = audit_logger
         self._lifecycle = lifecycle
 
-    async def resolve(self, result: dict, *, profiler=None) -> AsyncIterator[dict]:
+    async def resolve(self, result: dict, *, profiler=None, config=None) -> AsyncIterator[dict]:
         """Process result's pending_approval, yield SSE events, mutate result in place.
 
         Reads from result: _chat_id, _turn_id, _iteration, _model (set by orchestrator
@@ -134,7 +134,7 @@ class ApprovalHandler:
 
             result["_turn_id"] = turn_id
             result["_iteration"] = iteration
-            result.update(await self._graph.ainvoke(result, {}))
+            result.update(await self._graph.ainvoke(result, config or {}))
             if profiler:
                 profiler.checkpoint("graph_resume")
 

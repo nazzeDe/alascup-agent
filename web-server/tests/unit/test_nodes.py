@@ -549,12 +549,12 @@ class TestMergeToolBlock:
 
 
 class TestReasoningStreaming:
-    """B2a: think_node streams reasoning tokens via contextvar side-channel."""
+    """B2a: think_node streams reasoning tokens via RunnableConfig side-channel."""
 
     async def test_streams_reasoning_to_queue(self):
         """reasoning_content in assistant events → pushed to queue as reasoning events."""
         import asyncio
-        from src.agent.nodes import _event_queue
+        from langchain_core.runnables.config import RunnableConfig
 
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "Let me", "reasoning_content": "Let me"})},
@@ -562,10 +562,9 @@ class TestReasoningStreaming:
             {"event": "done", "data": "{}"},
         ])
         queue = asyncio.Queue()
-        token = _event_queue.set(queue)
+        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
 
-        result = await think_node(_state(), llm=llm)
-        _event_queue.reset(token)
+        result = await think_node(_state(), config, llm=llm)
 
         assert result["messages"][0]["reasoning_content"] == "Let me check"
         items = []
@@ -588,7 +587,7 @@ class TestReasoningStreaming:
     async def test_content_streamed_to_queue_without_message_id(self):
         """Content chunks are forwarded to queue as plain deltas (no message_id)."""
         import asyncio
-        from src.agent.nodes import _event_queue
+        from langchain_core.runnables.config import RunnableConfig
 
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
@@ -596,10 +595,9 @@ class TestReasoningStreaming:
             {"event": "done", "data": "{}"},
         ])
         queue = asyncio.Queue()
-        token = _event_queue.set(queue)
+        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
 
-        result = await think_node(_state(), llm=llm)
-        _event_queue.reset(token)
+        result = await think_node(_state(), config, llm=llm)
 
         assert result["messages"][0]["content"] == "Hello world"
         items = []
@@ -615,17 +613,16 @@ class TestReasoningStreaming:
     async def test_no_reasoning_no_queue_events(self):
         """When there's no reasoning_content, only content + thinking_done pushed to queue."""
         import asyncio
-        from src.agent.nodes import _event_queue
+        from langchain_core.runnables.config import RunnableConfig
 
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "CPU normal."})},
             {"event": "done", "data": "{}"},
         ])
         queue = asyncio.Queue()
-        token = _event_queue.set(queue)
+        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
 
-        await think_node(_state(), llm=llm)
-        _event_queue.reset(token)
+        await think_node(_state(), config, llm=llm)
 
         items = []
         while not queue.empty():
@@ -635,3 +632,28 @@ class TestReasoningStreaming:
         assert items[0]["event"] == "assistant"
         assert "CPU normal." in items[0]["data"]
         assert items[1]["event"] == "thinking_done"
+
+    async def test_reasoning_streamed_via_runnable_config(self):
+        """think_node 从 RunnableConfig 读取 _event_queue 并推送流式事件（Config 优先于 ContextVar）。"""
+        import asyncio
+        from langchain_core.runnables.config import RunnableConfig
+
+        llm = MockLLM([
+            {"event": "assistant", "data": json.dumps({"delta": "Hello", "reasoning_content": "thinking"})},
+            {"event": "done", "data": "{}"},
+        ])
+        queue = asyncio.Queue()
+        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
+
+        result = await think_node(_state(), config, llm=llm)
+
+        assert result["messages"][0]["content"] == "Hello"
+        assert result["messages"][0]["reasoning_content"] == "thinking"
+
+        items = []
+        while not queue.empty():
+            items.append(queue.get_nowait())
+        # reasoning → assistant → thinking_done
+        assert len(items) >= 3
+        assert items[0]["event"] == "reasoning"
+        assert items[-1]["event"] == "thinking_done"

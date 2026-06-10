@@ -38,7 +38,7 @@ export interface ReasoningEntry {
   timestamp: string
 }
 
-export type AgentPhase = 'idle' | 'thinking' | 'calling_tool' | 'awaiting_approval' | 'responding' | 'done'
+export type AgentPhase = 'idle' | 'thinking' | 'calling_tool' | 'waiting_for_tool' | 'awaiting_approval' | 'responding' | 'done'
 
 export interface SessionState {
   chatId: string | null
@@ -49,7 +49,6 @@ export interface SessionState {
   draftInput: Ref<string>
   approvalEvent: Ref<ApprovalEvent | null>
   agentPhase: Ref<AgentPhase>
-  currentActivity: Ref<string>
   phaseLabel: ComputedRef<string>
   isLoadingHistory: Ref<boolean>
   connectionError: Ref<ErrorInfo | null>
@@ -176,33 +175,27 @@ export function useSessionManager(deps?: ManagerDeps) {
     const draftInput: Ref<string> = ref('')
     const approvalEvent: Ref<ApprovalEvent | null> = ref(null)
     const agentPhase: Ref<AgentPhase> = ref('idle')
-    const currentActivity: Ref<string> = ref('')
     const isLoadingHistory: Ref<boolean> = ref(false)
     const connectionError: Ref<ErrorInfo | null> = ref(null)
     let abortController: AbortController | null = null
+    let _toolTimeout: ReturnType<typeof setTimeout> | null = null
 
     const phaseLabel = computed(() => {
-      const detail = currentActivity.value
       switch (agentPhase.value) {
-        case 'thinking':
-          return detail ? `Thinking: ${detail}` : 'Thinking…'
-        case 'calling_tool':
-          return detail ? `Calling: ${detail}` : 'Calling tool…'
-        case 'awaiting_approval':
-          return detail ? `Approval needed: ${detail}` : 'Awaiting approval…'
-        case 'responding':
-          return 'Responding…'
+        case 'thinking': return '正在思考…'
+        case 'responding': return '正在回复…'
+        case 'calling_tool': return '正在调用工具…'
+        case 'waiting_for_tool': return '等待工具调用结果'
+        case 'awaiting_approval': return '等待审批…'
         case 'done':
         case 'idle':
-        default:
-          return ''
+        default: return ''
       }
     })
 
     function sendMessage(text: string): void {
       const isNewChat = chatId.value === null
       approvalEvent.value = null
-      currentActivity.value = ''
       connectionError.value = null
 
       const userMsg: Message = {
@@ -231,11 +224,12 @@ export function useSessionManager(deps?: ManagerDeps) {
       connectFn(
         { chat_id: chatId.value ?? undefined, message: text },
         {
+          on_session_init(data: any) {
+            if (isNewChat) newChatId = data.chat_id
+          },
+
           on_reasoning(data: any) {
             const delta = data.delta
-            if (delta) {
-              currentActivity.value = delta.length > 50 ? '…' + delta.slice(-50) : delta
-            }
             if (data.done) {
               agentPhase.value = 'responding'
               const msgId = data.message_id ?? ''
@@ -285,7 +279,6 @@ export function useSessionManager(deps?: ManagerDeps) {
               reasoningBuffer = ''
             }
             agentPhase.value = 'responding'
-            currentActivity.value = ''
 
             if (data.message_id) {
               // Formal message from emit_events (has message_id).
@@ -340,7 +333,6 @@ export function useSessionManager(deps?: ManagerDeps) {
 
           on_tool_call(data: any) {
             agentPhase.value = 'calling_tool'
-            currentActivity.value = data.tool_name
 
             const tc: ToolCallInfo = {
               message_id: data.message_id,
@@ -355,9 +347,18 @@ export function useSessionManager(deps?: ManagerDeps) {
             const updated = new Map(toolCalls.value)
             updated.set(data.message_id, tc)
             toolCalls.value = updated
+
+            if (_toolTimeout) clearTimeout(_toolTimeout)
+            _toolTimeout = setTimeout(() => {
+              if (agentPhase.value === 'calling_tool') {
+                agentPhase.value = 'waiting_for_tool'
+              }
+            }, 800)
           },
 
           on_tool_result(data: any) {
+            agentPhase.value = 'thinking'
+            if (_toolTimeout) { clearTimeout(_toolTimeout); _toolTimeout = null }
             const existing = toolCalls.value.get(data.message_id)
             if (existing) {
               const updated = new Map(toolCalls.value)
@@ -382,12 +383,10 @@ export function useSessionManager(deps?: ManagerDeps) {
               message: '',
             }
             agentPhase.value = 'awaiting_approval'
-            currentActivity.value = data.tool_name
           },
 
           on_done(_data: any) {
             agentPhase.value = 'done'
-            currentActivity.value = ''
             isStreaming.value = false
             connectionError.value = null
             if (isNewChat && newChatId) {
@@ -432,7 +431,6 @@ export function useSessionManager(deps?: ManagerDeps) {
       abortController?.abort()
       isStreaming.value = false
       agentPhase.value = 'idle'
-      currentActivity.value = ''
       reasonings.value = reasonings.value.map(r => ({ ...r, done: true }))
     }
 
@@ -446,7 +444,6 @@ export function useSessionManager(deps?: ManagerDeps) {
         if (res.ok && approvalEvent.value) {
           approvalEvent.value = { ...approvalEvent.value, status: 'approved', message: message || '' }
           agentPhase.value = 'thinking'
-          currentActivity.value = 'Processing…'
         } else if (!res.ok) {
           connectionError.value = { code: 'APPROVAL_FAILED', message: `Server returned ${res.status}` }
         }
@@ -465,7 +462,6 @@ export function useSessionManager(deps?: ManagerDeps) {
         if (res.ok && approvalEvent.value) {
           approvalEvent.value = { ...approvalEvent.value, status: 'rejected', message: message || '' }
           agentPhase.value = 'thinking'
-          currentActivity.value = 'Processing…'
         } else if (!res.ok) {
           connectionError.value = { code: 'APPROVAL_FAILED', message: `Server returned ${res.status}` }
         }
@@ -478,7 +474,6 @@ export function useSessionManager(deps?: ManagerDeps) {
       isLoadingHistory.value = true
       approvalEvent.value = null
       agentPhase.value = 'idle'
-      currentActivity.value = ''
       connectionError.value = null
 
       if (chatId.value === null) {
@@ -523,7 +518,6 @@ export function useSessionManager(deps?: ManagerDeps) {
       draftInput,
       approvalEvent,
       agentPhase,
-      currentActivity,
       phaseLabel,
       isLoadingHistory,
       connectionError,
