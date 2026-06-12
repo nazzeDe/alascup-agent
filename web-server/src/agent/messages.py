@@ -29,7 +29,7 @@ def _from_dict(m: dict) -> dict:
     if "id" in m:
         result["id"] = m["id"]
     if "tool_calls" in m:
-        result["tool_calls"] = m["tool_calls"]
+        result["tool_calls"] = [_tc_normalize(tc) for tc in m["tool_calls"]]
     if "tool_call_id" in m:
         result["tool_call_id"] = m["tool_call_id"]
     if "name" in m:

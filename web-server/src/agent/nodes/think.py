@@ -55,7 +55,7 @@ async def _stream_llm(
             _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
             return None
         if result is not None:
-            _log_stream_error(result, chat_id)
+            _log_stream_error(result, messages, chat_id)
             complete_feature(feature, status="error")
             return result
         if event["event"] == "assistant":
@@ -74,10 +74,20 @@ def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
                   text_len=len("".join(accumulated_text)))
 
 
-def _log_stream_error(result, chat_id):
+def _log_stream_error(result, messages, chat_id):
     debug_log("WARN", "LLM call error", chat_id=str(chat_id), code=result.get("code", "?"))
     logger.debug("think_node LLM error: code={code} msg={msg}",
                  code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
+    # Log message structure to diagnose format issues (e.g. missing type field)
+    msg_shapes = []
+    for i, m in enumerate(messages):
+        shape = {"idx": i, "role": m.get("role", "?"), "keys": sorted(m.keys())}
+        tcs = m.get("tool_calls")
+        if tcs:
+            shape["tc_count"] = len(tcs)
+            shape["tc_keys"] = [sorted(tc.keys()) for tc in tcs]
+        msg_shapes.append(shape)
+    logger.debug("think_node message shapes: {shapes}", shapes=json.dumps(msg_shapes, default=str))
 
 
 def _record_stream_chunks(data_str: str, stream_chunks: list[tuple]) -> None:
@@ -157,6 +167,7 @@ def _merge_tool_block(blocks: list[dict], chunk: dict) -> None:
     if name:
         blocks.append({
             "id": chunk.get("id") or str(uuid4()),
+            "type": "function",
             "function": {"name": name, "arguments": args_chunk},
         })
     elif args_chunk and blocks:
@@ -164,5 +175,6 @@ def _merge_tool_block(blocks: list[dict], chunk: dict) -> None:
     elif args_chunk:
         blocks.append({
             "id": chunk.get("id") or str(uuid4()),
+            "type": "function",
             "function": {"name": "", "arguments": args_chunk},
         })

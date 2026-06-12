@@ -278,7 +278,9 @@ class AgentLoop:
                     break
 
                 # Emit ToolCallStarted for approved tools BEFORE execution
+                logger.debug("runner emit_tools_started(approval) count={}", len(scratch.approved_tool_calls))
                 emitter.emit_tools_started(scratch.approved_tool_calls)
+                logger.debug("runner emit_tools_started(approval) done")
 
                 # Re-enter cycle to execute approved/rejected tool decisions
                 for _ in range(25):
@@ -360,12 +362,16 @@ class AgentLoop:
                 result_sources = (
                     scratch._emitted_results or scratch.streaming_tool_results
                 )
+                logger.debug("runner emit_tools_finished(approval) count={}", len(result_sources))
                 emitter.emit_tools_finished(result_sources)
+                logger.debug("runner emit_tools_finished(approval) done")
                 # Prevent re-emission
                 scratch._emitted_results = []
                 state["_emitted_results"] = []
 
                 if not scratch.pending_approval:
+                    logger.debug("runner approval loop exit: pending_approval={}",
+                                 bool(scratch.pending_approval))
                     break
 
             # 4. Error recovery
@@ -402,6 +408,7 @@ class AgentLoop:
             profiler.checkpoint("handle_transition")
             logger.debug("transition route={r}", r=action)
             if action not in ("continue",):
+                logger.debug("runner _run_loop exiting: transition={}", get_transition(scratch))
                 _finalize_iteration(profiler, loop_feature)
                 return
             debug_log(

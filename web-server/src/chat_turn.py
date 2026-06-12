@@ -145,6 +145,9 @@ class ChatTurn:
                         if orch_task.done() and not channel.is_closed():
                             channel.close()
                         # Drain
+                        logger.debug("ChatTurn drain start: orch_done={} channel_closed={}",
+                                     orch_task.done(), channel.is_closed())
+                        drained_count = 0
                         while True:
                             ev = channel.receive()
                             try:
@@ -152,10 +155,13 @@ class ChatTurn:
                             except asyncio.TimeoutError:
                                 break
                             if ev is None:
+                                logger.debug("ChatTurn exiting: received None sentinel")
                                 break
+                            drained_count += 1
                             if isinstance(ev, AssistantDelta):
                                 collected_text.append(ev.delta)
                             yield ev
+                        logger.debug("ChatTurn drain done: drained_events={}", drained_count)
                         break
                     continue
 
@@ -180,10 +186,8 @@ class ChatTurn:
                         )
                         await self._session_manager.add_message(chat_id_uuid, assistant_msg)
 
-                logger.debug("ChatTurn yielding: type={} id={}", type(event).__name__, id(event))
-                if isinstance(event, (ToolCallStarted, ToolCallFinished)):
-                    logger.debug("ChatTurn tool event: type={} call_id={}", type(event).__name__,
-                                 event.call_id if hasattr(event, 'call_id') else '?')
+                cid = getattr(event, 'call_id', 'N/A')
+                logger.debug("ChatTurn yielding: type={} call_id={}", type(event).__name__, cid)
 
                 yield event
 

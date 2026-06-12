@@ -52,6 +52,27 @@ class TestLLMErrorClassification:
 
         assert classify_error(200, "") is None
 
+    def test_classify_400_message_format_error(self):
+        """400 with missing field error → prompt_too_long (recoverable)."""
+        from src.services.llm_adapter import classify_error
+
+        error_type = classify_error(400, "messages[1]: missing field 'type'")
+        assert error_type == "prompt_too_long"
+
+    def test_classify_400_content_filter(self):
+        """400 content filter rejection → prompt_too_long (recoverable via compress)."""
+        from src.services.llm_adapter import classify_error
+
+        error_type = classify_error(400, "content filter triggered")
+        assert error_type == "prompt_too_long"
+
+    def test_classify_400_max_tokens_params(self):
+        """400 with max_tokens in params → unknown (params issue, not recoverable)."""
+        from src.services.llm_adapter import classify_error
+
+        error_type = classify_error(400, "max_tokens must be positive")
+        assert error_type == "unknown"
+
 
 class TestErrorRecovery:
     def test_prompt_too_long_compress_recovery(self):

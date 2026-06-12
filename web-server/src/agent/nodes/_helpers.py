@@ -24,7 +24,7 @@ def _messages(state) -> list[dict]:
             rc = entry.get("reasoning_content", "")
             if rc:
                 msg["reasoning_content"] = rc
-        elif entry["role"] == "tool":
+        elif entry["role"] in ("tool", "tool_result"):
             tc_id = entry.get("tool_call_id", "")
             if tc_id:
                 msg["tool_call_id"] = tc_id

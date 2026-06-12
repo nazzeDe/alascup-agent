@@ -34,6 +34,9 @@ def classify_error(
             return "unknown"
         if any(kw in lower for kw in ("too large", "too long", "context", "token")):
             return "prompt_too_long"
+        # All other 400/413 errors (message format, content filter, etc.)
+        # → treat as compressible to attempt recovery
+        return "prompt_too_long"
 
     if mapped := _STATUS_ERROR_MAP.get(status_code):
         return mapped

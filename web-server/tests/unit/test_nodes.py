@@ -407,6 +407,22 @@ class TestMessagesConversion:
         assert "tool_calls" in result[0]
         assert result[0]["tool_calls"][0]["id"] == "tc1"
 
+    def test_normalizes_tool_calls_type_field(self):
+        """Tool calls without type=function get normalized (DeepSeek/OpenAI API requirement)."""
+        state = {
+            "messages": [
+                {"role": "assistant", "content": "Let me check.",
+                 "tool_calls": [
+                     {"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                     {"id": "tc2", "function": {"name": "get_mem", "arguments": "{}"}},
+                 ]},
+            ]
+        }
+        result = _messages(state)
+        tcs = result[0]["tool_calls"]
+        for tc in tcs:
+            assert tc["type"] == "function", f"tool_call {tc['id']} missing type=function"
+
     def test_preserves_tool_call_id_on_tool(self):
         """Tool messages must carry tool_call_id for the LLM to associate with tool_calls."""
         state = {
@@ -443,6 +459,27 @@ class TestMessagesConversion:
         state = {"messages": [{"role": "ai", "content": "hello there"}]}
         result = _messages(state)
         assert result[0]["role"] == "assistant"
+
+    def test_maps_tool_result_to_tool(self):
+        """tool_result role (from DB history) → tool for LLM API."""
+        state = {"messages": [
+            {"role": "tool_result", "content": "[get_cpu] SUCCEEDED",
+             "tool_call_id": "tc1", "name": "get_cpu"},
+        ]}
+        result = _messages(state)
+        assert result[0]["role"] == "tool"
+        assert result[0]["tool_call_id"] == "tc1"
+        assert result[0]["name"] == "get_cpu"
+
+    def test_maps_tool_call_to_assistant(self):
+        """tool_call role → assistant for LLM API."""
+        state = {"messages": [
+            {"role": "tool_call", "content": "",
+             "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
+        ]}
+        result = _messages(state)
+        assert result[0]["role"] == "assistant"
+        assert "tool_calls" in result[0]
 
 
 class TestMessagesConversionWithLangGraphObjects:
@@ -547,6 +584,23 @@ class TestMergeToolBlock:
         _merge_tool_block(blocks, chunk)
         assert len(blocks) == 1
         assert blocks[0]["function"]["arguments"] == '{"unit":"percent"}'
+
+    def test_new_block_has_type_function(self):
+        """Every tool_call block must have type=function (DeepSeek/OpenAI API requirement)."""
+        blocks: list[dict] = []
+        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
+        _merge_tool_block(blocks, chunk)
+        assert blocks[0]["type"] == "function"
+
+    def test_arguments_only_block_has_type_function(self):
+        """Arguments-only chunk that creates a new block must also have type=function."""
+        blocks: list[dict] = []
+        chunk = {"function": {"name": "", "arguments": '{"cmd":"ls"}'}}
+        _merge_tool_block(blocks, chunk)
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "function"
+        assert blocks[0]["function"]["name"] == ""
+        assert blocks[0]["function"]["arguments"] == '{"cmd":"ls"}'
 
 
 class TestReasoningStreaming:

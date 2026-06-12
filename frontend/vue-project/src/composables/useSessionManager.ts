@@ -77,6 +77,14 @@ function realSSEConnect(body: Record<string, unknown>, callbacks: SSECallbacks, 
       if (!msg.event || !msg.data) return
       try {
         const parsed = JSON.parse(msg.data)
+        // Debug: trace received SSE events
+        if (msg.event === 'tool_call' || msg.event === 'tool_result') {
+          console.log('[SSE] recv', msg.event, (parsed as any).call_id, (parsed as any).execution_status || (parsed as any).tool_name)
+        } else if (msg.event === 'done') {
+          console.log('[SSE] recv', msg.event)
+        } else if (msg.event === 'error') {
+          console.log('[SSE] recv', msg.event, (parsed as any).code)
+        }
         const cb = callbacks[`on_${msg.event}` as keyof SSECallbacks]
         cb?.(parsed as never)
       } catch { /* malformed event, skip */ }
@@ -108,6 +116,21 @@ export function useSessionManager(deps?: ManagerDeps) {
 
   function createDraft(): void {
     activeChatId.value = null
+    // Pre-create session on backend so it appears in sidebar immediately
+    fetch('/api/sessions', { method: 'POST' })
+      .then(resp => resp.ok ? resp.json() : null)
+      .then(data => {
+        if (data?.chat_id) {
+          activeChatId.value = data.chat_id
+          sessions.value = [{
+            chat_id: data.chat_id,
+            messages: [],
+            executed_tool_list: [],
+            timestamp: new Date().toISOString(),
+          }, ...sessions.value]
+        }
+      })
+      .catch(() => { /* fallback: session created on first sendMessage */ })
   }
 
   function get(chatId: string | null): SessionState {
@@ -286,6 +309,7 @@ export function useSessionManager(deps?: ManagerDeps) {
           },
 
           on_tool_call(data: any) {
+            console.log('[SSE] on_tool_call', data.call_id, data.tool_name, 'is_read_only:', data.is_read_only)
             agentPhase.value = 'calling_tool'
 
             const tc: ToolCallInfo = {
@@ -311,9 +335,13 @@ export function useSessionManager(deps?: ManagerDeps) {
           },
 
           on_tool_result(data: any) {
+            console.log('[SSE] on_tool_result', data.call_id, data.execution_status)
             agentPhase.value = 'thinking'
             if (_toolTimeout) { clearTimeout(_toolTimeout); _toolTimeout = null }
             const existing = toolCalls.value.get(data.call_id)
+            if (!existing) {
+              console.warn('[SSE] on_tool_result: unknown call_id', data.call_id)
+            }
             if (existing) {
               const updated = new Map(toolCalls.value)
               updated.set(data.call_id, {
@@ -340,14 +368,25 @@ export function useSessionManager(deps?: ManagerDeps) {
           },
 
           on_done(_data: any) {
+            // Debug: identify tools that never received a tool_result
+            const runningTools = [...toolCalls.value.values()].filter(tc => tc.execution_status === 'RUNNING')
+            if (runningTools.length > 0) {
+              console.warn('[SSE] on_done: force-failing RUNNING tools:', runningTools.map(tc => `${tc.call_id}(${tc.tool_name})`))
+            } else {
+              console.log('[SSE] on_done: no RUNNING tools, clean exit')
+            }
             agentPhase.value = 'done'
             isStreaming.value = false
-            connectionError.value = null
+            // Keep connectionError if set by preceding on_error (Bug 2: done after error)
+            if (!connectionError.value) {
+              connectionError.value = null
+            }
             // Clean up any RUNNING tools that never finished (Bug 3: guard
             // against backend bugs that leave tool calls in RUNNING state).
             const updated = new Map(toolCalls.value)
             for (const [id, tc] of updated) {
               if (tc.execution_status === 'RUNNING') {
+                console.warn('[SSE] on_done: force-failing', id, tc.tool_name)
                 updated.set(id, {
                   ...tc,
                   execution_status: 'FAILED',

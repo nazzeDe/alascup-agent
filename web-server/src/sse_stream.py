@@ -3,6 +3,8 @@
 import asyncio
 import json
 
+from loguru import logger
+
 from src.agent.events import (
     ApprovalRequired,
     AssistantDelta,
@@ -54,6 +56,7 @@ class SSEStream:
                 if await self._is_disconnected():
                     break
         finally:
+            logger.debug("SSEStream.__aiter__ yielding done event")
             yield {"event": "done", "data": "{}"}
 
     def _to_wire(self, event: DomainEvent) -> dict | None:
@@ -69,6 +72,8 @@ class SSEStream:
         elif isinstance(event, AssistantDone):
             return {"event": "assistant_done", "data": "{}"}
         elif isinstance(event, ToolCallStarted):
+            logger.debug("SSEStream.to_wire ToolCallStarted call_id={} tool={}",
+                         event.call_id, event.tool_name)
             return {"event": "tool_call", "data": json.dumps({
                 "call_id": event.call_id,
                 "tool_name": event.tool_name,
@@ -77,6 +82,8 @@ class SSEStream:
                 "server": event.server,
             })}
         elif isinstance(event, ToolCallFinished):
+            logger.debug("SSEStream.to_wire ToolCallFinished call_id={} status={}",
+                         event.call_id, event.execution_status)
             data: dict = {
                 "call_id": event.call_id,
                 "execution_status": event.execution_status,
@@ -97,5 +104,6 @@ class SSEStream:
                 "reason": event.reason,
             })}
         elif isinstance(event, TurnFailed):
+            logger.debug("sse_stream TurnFailed code={code} msg={msg}", code=event.code, msg=event.message)
             return {"event": "error", "data": json.dumps({"code": event.code, "message": event.message})}
         return None

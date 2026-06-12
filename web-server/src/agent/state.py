@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypedDict
 
-ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool"}
+ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool", "tool_result": "tool", "tool_call": "assistant"}
 
 
 class Transition(StrEnum):

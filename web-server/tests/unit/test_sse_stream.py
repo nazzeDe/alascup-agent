@@ -490,6 +490,146 @@ class TestSSEStreamApproval:
         assert events[-1]["event"] == "done", f"Last event: {events[-1]['event']}"
 
 
+class TestSSEStreamApprovalEventOrdering:
+    """Verify tool events appear before done, and all tools are resolved."""
+
+    async def test_tool_finished_before_done_in_approval_flow(
+        self, llm, executor, context_manager, audit, bridge, rule_engine,
+        session_manager, prompt_manager,
+    ):
+        """Tool call and tool result events must appear before the done event."""
+        class RiskyExecutor(MockExecutor):
+            def list_tools(self):
+                return [
+                    {"name": "restart_service", "server_name": "tool-server",
+                     "mutable": False, "is_read_only": False},
+                ]
+
+            async def classify(self, tool_name, params, server_name=""):
+                return {"is_read_only": False, "is_rollbackable": True}
+
+            async def execute_parallel(self, calls: list[dict]) -> list[dict]:
+                for c in calls:
+                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+                return [{"tool_call_id": c.get("call_id", ""), "result": {
+                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+                }} for c in calls]
+
+        risky = RiskyExecutor()
+        llm.responses = [
+            {"content": "", "tool_calls": [
+                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
+            ]},
+            {"content": "Done.", "tool_calls": None},
+        ]
+
+        stream = _build_stream("restart", None, session_manager, prompt_manager,
+                               llm, risky, context_manager, audit, bridge, rule_engine)
+
+        events: list[dict] = []
+        async for e in stream:
+            events.append(e)
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
+
+        event_types = [e["event"] for e in events]
+
+        # Find indices
+        try:
+            done_idx = event_types.index("done")
+        except ValueError:
+            done_idx = None
+
+        # Find last tool_call and last tool_result
+        last_tool_call_idx = None
+        last_tool_result_idx = None
+        for i, et in enumerate(event_types):
+            if et == "tool_call":
+                last_tool_call_idx = i
+            elif et == "tool_result":
+                last_tool_result_idx = i
+
+        assert last_tool_call_idx is not None, "Expected at least one tool_call event"
+        assert last_tool_result_idx is not None, "Expected at least one tool_result event"
+        assert done_idx is not None, "Expected a done event"
+
+        assert last_tool_call_idx < done_idx, (
+            f"Last tool_call at index {last_tool_call_idx} must be before done at index {done_idx}"
+        )
+        assert last_tool_result_idx < done_idx, (
+            f"Last tool_result at index {last_tool_result_idx} must be before done at index {done_idx}"
+        )
+        assert done_idx == len(event_types) - 1, (
+            f"Done must be the very last event, got {event_types[-1]} at index {done_idx}"
+        )
+
+    async def test_all_tools_resolved_before_stream_close(
+        self, llm, executor, context_manager, audit, bridge, rule_engine,
+        session_manager, prompt_manager,
+    ):
+        """Every tool_call event must have a corresponding tool_result with matching call_id."""
+        class RiskyExecutor(MockExecutor):
+            def list_tools(self):
+                return [
+                    {"name": "restart_service", "server_name": "tool-server",
+                     "mutable": False, "is_read_only": False},
+                ]
+
+            async def classify(self, tool_name, params, server_name=""):
+                return {"is_read_only": False, "is_rollbackable": True}
+
+            async def execute_parallel(self, calls: list[dict]) -> list[dict]:
+                for c in calls:
+                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+                return [{"tool_call_id": c.get("call_id", ""), "result": {
+                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+                }} for c in calls]
+
+        risky = RiskyExecutor()
+        llm.responses = [
+            {"content": "", "tool_calls": [
+                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
+            ]},
+            {"content": "Done.", "tool_calls": None},
+        ]
+
+        stream = _build_stream("restart", None, session_manager, prompt_manager,
+                               llm, risky, context_manager, audit, bridge, rule_engine)
+
+        events: list[dict] = []
+        async for e in stream:
+            events.append(e)
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "APPROVED")
+
+        # Collect all tool_call and tool_result call_ids
+        tool_call_ids: set[str] = set()
+        tool_result_ids: set[str] = set()
+
+        for e in events:
+            if e["event"] == "tool_call":
+                data = json.loads(e["data"])
+                tool_call_ids.add(data["call_id"])
+            elif e["event"] == "tool_result":
+                data = json.loads(e["data"])
+                tool_result_ids.add(data["call_id"])
+
+        # Every tool_call must have a matching tool_result
+        missing_results = tool_call_ids - tool_result_ids
+        assert not missing_results, (
+            f"Tool calls without results: {missing_results}. "
+            f"call_ids: {tool_call_ids}, result_ids: {tool_result_ids}"
+        )
+
+        # No orphaned tool_results
+        orphaned = tool_result_ids - tool_call_ids
+        assert not orphaned, (
+            f"Tool results without matching calls: {orphaned}"
+        )
+
+
 class TestSSEStreamStreamingBehavior:
     """Verify that reasoning events and thinking_done are properly forwarded."""
 

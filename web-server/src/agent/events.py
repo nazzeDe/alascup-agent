@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
+from loguru import logger
+
 
 @dataclass(frozen=True)
 class TurnStarted:
@@ -74,6 +76,7 @@ class EventChannel:
     def __init__(self):
         self._queue: asyncio.Queue = asyncio.Queue()
         self._closed = False
+        self._instance_id = id(self)
 
     async def send(self, event: DomainEvent) -> None:
         if not self._closed:
@@ -83,22 +86,41 @@ class EventChannel:
         """Non-async send for use in sync contexts (e.g., node return path)."""
         if not self._closed:
             self._queue.put_nowait(event)
+            logger.debug("EventChannel.send_nowait id={} event={} closed={} qsize={}",
+                         self._instance_id, type(event).__name__, self._closed, self._queue.qsize())
+            if isinstance(event, (ToolCallStarted, ToolCallFinished)):
+                logger.debug("EventChannel.send_nowait id={} event={} call_id={} execution_status={}",
+                             self._instance_id, type(event).__name__,
+                             event.call_id,
+                             getattr(event, 'execution_status', 'N/A'))
+        else:
+            logger.debug("EventChannel.send_nowait DROPPED id={} event={}",
+                         self._instance_id, type(event).__name__)
 
     async def receive(self) -> DomainEvent | None:
         """Receive next event. Returns None only after channel is closed AND queue drained."""
         if self._closed:
             # Try non-blocking drain first
             try:
-                return self._queue.get_nowait()
+                event = self._queue.get_nowait()
+                logger.debug("EventChannel.receive(drain) id={} event={} qsize={}",
+                             self._instance_id, type(event).__name__ if event else 'None', self._queue.qsize())
+                return event
             except asyncio.QueueEmpty:
                 return None
         try:
-            return await self._queue.get()
-        except Exception:
+            event = await self._queue.get()
+            logger.debug("EventChannel.receive(await) id={} event={} qsize={}",
+                         self._instance_id, type(event).__name__ if event else 'None', self._queue.qsize())
+            return event
+        except Exception as exc:
+            logger.error("EventChannel.receive ERROR id={} exc={}", self._instance_id, exc)
             return None
 
     def close(self) -> None:
         """Close the channel. Subsequent sends are no-ops, receive returns None."""
+        logger.debug("EventChannel.close id={} was_closed={} qsize={}",
+                     self._instance_id, self._closed, self._queue.qsize())
         self._closed = True
         # Put sentinel to unblock any waiting receive
         try:

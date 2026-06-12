@@ -16,17 +16,45 @@ describe('useSessionManager', () => {
 
   // --- Tracer bullet 1: createDraft ---
 
-  it('createDraft sets activeChatId to null without HTTP request', async () => {
+  it('createDraft sets activeChatId to null and sends POST /api/sessions', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ chat_id: 'draft-123' }) })
+
     const manager = await freshManager()
     mockFetch.mockClear()
 
     manager.createDraft()
 
     expect(manager.activeChatId.value).toBeNull()
-    expect(mockFetch).not.toHaveBeenCalled()
+    expect(mockFetch).toHaveBeenCalledWith('/api/sessions', { method: 'POST' })
+  })
+
+  it('createDraft updates activeChatId when backend returns chat_id', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ chat_id: 'new-session-x' }) })
+
+    const manager = await freshManager()
+    manager.createDraft()
+
+    // Kick microtask queue so .then() runs
+    await vi.waitFor(() => {
+      expect(manager.activeChatId.value).toBe('new-session-x')
+    })
+    expect(manager.sessions.value).toHaveLength(1)
+    expect(manager.sessions.value[0]!.chat_id).toBe('new-session-x')
+  })
+
+  it('createDraft keeps null on fetch error (graceful fallback)', async () => {
+    mockFetch.mockRejectedValue(new Error('network down'))
+
+    const manager = await freshManager()
+    manager.createDraft()
+
+    expect(manager.activeChatId.value).toBeNull()
+    // No crash — works
   })
 
   it('get(null) returns a draft SessionState after createDraft', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ chat_id: 'draft-1' }) })
+
     const manager = await freshManager()
     manager.createDraft()
 
@@ -39,6 +67,8 @@ describe('useSessionManager', () => {
   })
 
   it('get returns the same SessionState for the same chatId', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ chat_id: 'draft-2' }) })
+
     const manager = await freshManager()
     manager.createDraft()
 
@@ -62,7 +92,8 @@ describe('useSessionManager', () => {
     })
 
     const manager = await freshManager({ _connect: mockConnect })
-    mockFetch.mockClear()
+    // createDraft will call fetch — mock it
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ chat_id: 'draft-pre' }) })
 
     manager.createDraft()
     const state = manager.get(null)
@@ -350,6 +381,53 @@ describe('useSessionManager', () => {
     expect(state.connectionError.value).toEqual({ code: 'AGENT_CRASH', message: 'boom' })
   })
 
+  it('on_done preserves connectionError set by preceding on_error', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    // Simulate error then done (SSE stream always emits done in finally)
+    capturedCallbacks.on_error({ code: 400, message: 'messages[1]: missing field type' })
+    capturedCallbacks.on_done({})
+
+    expect(state.isStreaming.value).toBe(false)
+    expect(state.agentPhase.value).toBe('done')
+    // connectionError MUST survive the on_done that follows on_error
+    expect(state.connectionError.value).toEqual({ code: 400, message: 'messages[1]: missing field type' })
+  })
+
+  it('on_done clears connectionError when no preceding error', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    capturedCallbacks.on_session_init({ chat_id: 's1' })
+    capturedCallbacks.on_assistant({ delta: 'OK' })
+    capturedCallbacks.on_done({})
+
+    expect(state.isStreaming.value).toBe(false)
+    expect(state.agentPhase.value).toBe('done')
+    expect(state.connectionError.value).toBeNull()
+  })
+
   it('connectFn resolving cleanly (no done event) cleans up streaming state', async () => {
     const mockConnect = vi.fn()
 
@@ -561,6 +639,76 @@ describe('useSessionManager', () => {
 
     expect(state.reasonings.value[0]!.done).toBe(true)
     expect(state.agentPhase.value).toBe('responding')
+  })
+
+  // --- Bug 3: on_done force-fail tools that never received tool_result ---
+
+  it('on_done does not force-fail tools that already received tool_result', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    // Fire tool_call, then tool_result (SUCCEEDED), then done
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-1',
+      tool_name: 'read_file',
+      params: { path: '/tmp/test' },
+      is_read_only: true,
+      server: 'filesystem',
+    })
+
+    capturedCallbacks.on_tool_result({
+      call_id: 'tc-1',
+      execution_status: 'SUCCEEDED',
+      output: { content: 'hello' },
+      execution_time_ms: 100,
+    })
+
+    capturedCallbacks.on_done({})
+
+    const tc = state.toolCalls.value.get('tc-1')
+    expect(tc!.execution_status).toBe('SUCCEEDED')
+    expect(tc!.error).toBeUndefined()
+    expect(state.agentPhase.value).toBe('done')
+  })
+
+  it('on_done force-fails tools that never received tool_result', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    // Fire tool_call then done (skip tool_result)
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-1',
+      tool_name: 'write_file',
+      params: { path: '/tmp/out' },
+      is_read_only: false,
+      server: 'filesystem',
+    })
+
+    capturedCallbacks.on_done({})
+
+    const tc = state.toolCalls.value.get('tc-1')
+    expect(tc!.execution_status).toBe('FAILED')
+    expect(tc!.error).toEqual({ message: 'Connection closed before tool completed' })
   })
 
   // --- Bug 7: loadHistory null check ---
