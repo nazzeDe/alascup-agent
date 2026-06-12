@@ -1,23 +1,24 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ToolCallInfo } from '@/domain/models'
 
 const props = defineProps<{
   tool_call: ToolCallInfo
 }>()
 
-const status_label = {
+const status_label = computed(() => ({
   RUNNING: 'Running…',
   SUCCEEDED: 'Done',
   FAILED: 'Failed',
   PENDING_APPROVAL: 'Pending',
-}[props.tool_call.execution_status] ?? props.tool_call.execution_status
+}[props.tool_call.execution_status] ?? props.tool_call.execution_status))
 
-const status_class = {
+const status_class = computed(() => ({
   RUNNING: 'text-warning',
   SUCCEEDED: 'text-success',
   FAILED: 'text-danger',
   PENDING_APPROVAL: 'text-muted',
-}[props.tool_call.execution_status] ?? 'text-muted'
+}[props.tool_call.execution_status] ?? 'text-muted'))
 
 const elapsed = props.tool_call.execution_time_ms
   ? `${(props.tool_call.execution_time_ms / 1000).toFixed(1)}s`
