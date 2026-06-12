@@ -1,7 +1,9 @@
 import json
+from uuid import uuid4
 
 import pytest
 
+from src.agent.events import EventChannel
 from src.agent.nodes import (
     act_node,
     observe_node,
@@ -10,6 +12,7 @@ from src.agent.nodes import (
     _merge_tool_block,
 )
 from src.agent.state import AgentState, Transition
+from src.agent.turn_context import TurnContext
 
 
 class MockLLM:
@@ -38,10 +41,10 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result["transition"] == Transition.DONE
-        assert len(result["messages"]) == 1
-        assert result["messages"][0]["role"] == "assistant"
-        assert "CPU" in result["messages"][0]["content"]
+        assert result.is_done is True
+        assert result.assistant_message is not None
+        assert result.assistant_message["role"] == "assistant"
+        assert "CPU" in result.assistant_message["content"]
 
     async def test_text_accumulates_multiple_deltas(self):
         """多个 text delta 拼接成完整 assistant 消息。"""
@@ -52,8 +55,8 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result["messages"][0]["content"] == "Hello World"
-        assert result["transition"] == Transition.DONE
+        assert result.assistant_message["content"] == "Hello World"
+        assert result.is_done is True
 
     async def test_tool_call_only_no_text(self):
         """LLM 只产出 tool_call，无文本 → 返回 tool_calls 列表。"""
@@ -65,9 +68,9 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result["transition"] is None  # 不设 transition——由后续节点决定
-        assert len(result["tool_calls"]) == 1
-        assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
+        assert result.is_done is False  # 不设 transition——由后续节点决定
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["function"]["name"] == "get_cpu"
 
     async def test_text_and_tool_calls_combined(self):
         """LLM 先输出文本，再调工具 → 文本和 tool_calls 同时返回。"""
@@ -80,10 +83,10 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result["messages"][0]["role"] == "assistant"
-        assert result["messages"][0]["content"] == "Let me check."
-        assert len(result["tool_calls"]) == 1
-        assert result["transition"] is None  # 有 tool_call，不应设 DONE
+        assert result.assistant_message["role"] == "assistant"
+        assert result.assistant_message["content"] == "Let me check."
+        assert len(result.tool_calls) == 1
+        assert result.is_done is False  # 有 tool_call，不应设 DONE
 
     async def test_multiple_tool_calls_accumulated(self):
         """多个 tool_call 都被收集，顺序保留。"""
@@ -98,9 +101,9 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert len(result["tool_calls"]) == 2
-        assert result["tool_calls"][0]["function"]["name"] == "get_cpu"
-        assert result["tool_calls"][1]["function"]["name"] == "get_memory"
+        assert len(result.tool_calls) == 2
+        assert result.tool_calls[0]["function"]["name"] == "get_cpu"
+        assert result.tool_calls[1]["function"]["name"] == "get_memory"
 
     async def test_streaming_tool_use_chunks_are_merged(self):
         """tool_call 可能分多个 chunk 到达（name 先到，arguments 后到）。"""
@@ -115,8 +118,8 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert len(result["tool_calls"]) == 1
-        fn = result["tool_calls"][0]["function"]
+        assert len(result.tool_calls) == 1
+        fn = result.tool_calls[0]["function"]
         assert fn["name"] == "bash"
         assert "ls" in fn["arguments"]
 
@@ -160,7 +163,7 @@ class TestActNode:
         tool_names = [c["tool_name"] for c in executor.calls]
         assert "get_cpu" in tool_names
         assert "get_memory" in tool_names
-        assert len(result["tool_results"]) == 2
+        assert len(result.results) == 2
 
     async def test_concurrent_readonly_tools_use_execute_parallel(self, monkeypatch):
         """AG-003: 多个只读工具 → execute_parallel 一次性调用。"""
@@ -184,13 +187,13 @@ class TestActNode:
         assert len(call_args) == 2
         assert call_args[0]["tool_name"] == "get_cpu"
         assert call_args[1]["tool_name"] == "get_memory"
-        assert len(result["tool_results"]) == 2
+        assert len(result.results) == 2
 
     async def test_empty_approved_list_returns_nothing(self):
         executor = MockExecutor()
         result = await act_node(_state_with_tools([]), executor=executor)
 
-        assert result["tool_results"] == []
+        assert result.results == []
         assert executor.calls == []
 
     async def test_execution_failure_recorded(self):
@@ -203,8 +206,8 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        assert result["tool_results"][0]["result"]["execution_status"] == "FAILED"
-        assert "permission denied" in str(result["tool_results"][0]["result"])
+        assert result.results[0]["result"]["execution_status"] == "FAILED"
+        assert "permission denied" in str(result.results[0]["result"])
 
     async def test_tool_results_include_tool_name(self):
         executor = MockExecutor()
@@ -213,7 +216,7 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        assert result["tool_results"][0]["tool_name"] == "get_cpu"
+        assert result.results[0]["tool_name"] == "get_cpu"
 
     async def test_no_fake_execution_time_per_tool(self):
         """act_node does not fabricate per-tool execution_time_ms for parallel batch."""
@@ -223,7 +226,7 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        et = result["tool_results"][0]["result"].get("execution_time_ms")
+        et = result.results[0]["result"].get("execution_time_ms")
         assert et is None
 
 
@@ -248,9 +251,9 @@ class TestStreamingThink:
 
         result = await think_node(state, llm=llm, executor=executor)
 
-        assert len(result["streaming_tool_results"]) == 1
-        assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
-        assert result["tool_calls"] == []
+        assert len(result.pre_executed) == 1
+        assert result.pre_executed[0]["tool_name"] == "get_cpu"
+        assert result.tool_calls == []
 
     async def test_non_readonly_stays_in_tool_calls(self):
         """Approval-pool (non-mutable, not readonly) → stays in tool_calls."""
@@ -267,9 +270,9 @@ class TestStreamingThink:
 
         result = await think_node(state, llm=llm, executor=executor)
 
-        assert result["streaming_tool_results"] == []
-        assert len(result["tool_calls"]) == 1
-        assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+        assert result.pre_executed == []
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["function"]["name"] == "restart_service"
 
     async def test_mixed_readonly_and_highrisk(self):
         """Mixed: readonly pre-executed, write stays in tool_calls."""
@@ -290,10 +293,10 @@ class TestStreamingThink:
 
         result = await think_node(state, llm=llm, executor=executor)
 
-        assert len(result["streaming_tool_results"]) == 1
-        assert result["streaming_tool_results"][0]["tool_name"] == "get_cpu"
-        assert len(result["tool_calls"]) == 1
-        assert result["tool_calls"][0]["function"]["name"] == "restart_service"
+        assert len(result.pre_executed) == 1
+        assert result.pre_executed[0]["tool_name"] == "get_cpu"
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["function"]["name"] == "restart_service"
 
     async def test_mutable_tool_stays_pending(self):
         """Mutable pool — not pre-executed, stays in tool_calls for review_node classification."""
@@ -310,9 +313,9 @@ class TestStreamingThink:
 
         result = await think_node(state, llm=llm, executor=executor)
 
-        assert result["streaming_tool_results"] == []
-        assert len(result["tool_calls"]) == 1
-        tc = result["tool_calls"][0]
+        assert result.pre_executed == []
+        assert len(result.tool_calls) == 1
+        tc = result.tool_calls[0]
         assert tc["function"]["name"] == "bash"
         assert tc["mutable"] is True
         assert tc["server_name"] == "tool-server"
@@ -332,9 +335,9 @@ class TestStreamingThink:
 
         result = await think_node(state, llm=llm, executor=executor)
 
-        assert result["tool_calls"] == []
-        assert len(result["streaming_tool_results"]) == 1
-        assert result["streaming_tool_results"][0]["tool_name"] == "search_experience"
+        assert result.tool_calls == []
+        assert len(result.pre_executed) == 1
+        assert result.pre_executed[0]["tool_name"] == "search_experience"
 
 
 class TestObserveNode:
@@ -347,17 +350,17 @@ class TestObserveNode:
             {"tool_name": "get_memory", "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"}},
         ])
 
-        assert len(result["messages"]) == 2
-        assert result["messages"][0]["role"] == "tool"
-        assert "get_cpu" in result["messages"][0]["content"]
-        assert "get_memory" in result["messages"][1]["content"]
-        assert result["transition"] == Transition.TOOL_RESULTS
+        assert len(result.tool_messages) == 2
+        assert result.tool_messages[0]["role"] == "tool"
+        assert "get_cpu" in result.tool_messages[0]["content"]
+        assert "get_memory" in result.tool_messages[1]["content"]
+        assert result.transition == Transition.TOOL_RESULTS
 
     def test_empty_results_returns_empty(self):
         result = observe_node(_state_with_tools(), tool_results=[])
 
-        assert result["messages"] == []
-        assert result["transition"] == Transition.TOOL_RESULTS
+        assert result.tool_messages == []
+        assert result.transition == Transition.TOOL_RESULTS
 
     def test_merges_streaming_tool_results(self):
         """AG-007: observe_node 合并 streaming_tool_results 和 tool_results。"""
@@ -370,8 +373,8 @@ class TestObserveNode:
             {"tool_name": "get_memory", "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"}},
         ])
 
-        assert len(result["messages"]) == 2
-        assert result["transition"] == Transition.TOOL_RESULTS
+        assert len(result.tool_messages) == 2
+        assert result.transition == Transition.TOOL_RESULTS
 
     def test_clears_streaming_tool_results(self):
         """observe_node clears streaming_tool_results and tool_results, preserves _emitted_results."""
@@ -384,9 +387,7 @@ class TestObserveNode:
             {"tool_name": "get_mem", "tool_call_id": "t2", "result": {"execution_status": "SUCCEEDED"}},
         ])
 
-        assert result.get("streaming_tool_results") == []
-        assert result.get("tool_results") == []
-        assert len(result.get("_emitted_results", [])) == 2
+        assert len(result.emitted_results) == 2
 
 
 class TestMessagesConversion:
@@ -549,111 +550,74 @@ class TestMergeToolBlock:
 
 
 class TestReasoningStreaming:
-    """B2a: think_node streams reasoning tokens via RunnableConfig side-channel."""
+    """B2a: think_node captures reasoning and content in ThinkOutput.stream_chunks."""
 
     async def test_streams_reasoning_to_queue(self):
-        """reasoning_content in assistant events → pushed to queue as reasoning events."""
-        import asyncio
-        from langchain_core.runnables.config import RunnableConfig
-
+        """reasoning_content in assistant events → captured in ThinkOutput.stream_chunks."""
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "Let me", "reasoning_content": "Let me"})},
             {"event": "assistant", "data": json.dumps({"delta": " check", "reasoning_content": " check"})},
             {"event": "done", "data": "{}"},
         ])
-        queue = asyncio.Queue()
-        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
+        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
 
-        result = await think_node(_state(), config, llm=llm)
+        result = await think_node(_state(), ctx, llm=llm)
 
-        assert result["messages"][0]["reasoning_content"] == "Let me check"
-        items = []
-        while not queue.empty():
-            items.append(queue.get_nowait())
-        assert len(items) >= 3
-        assert items[0]["event"] == "reasoning"
-        assert items[-1]["event"] == "thinking_done"
+        assert result.assistant_message["reasoning_content"] == "Let me check"
+        # stream_chunks records (type, delta) tuples for later emission by EventEmitter
+        assert len(result.stream_chunks) == 4  # 2 reasoning + 2 assistant
+        types = [t for t, _ in result.stream_chunks]
+        assert "reasoning" in types
 
     async def test_no_queue_no_crash(self):
-        """When queue is None (contextvar not set), reasoning still works without side-channel."""
+        """When ctx is None, reasoning still works."""
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "OK", "reasoning_content": "think"})},
             {"event": "done", "data": "{}"},
         ])
         result = await think_node(_state(), llm=llm)
-        assert result["messages"][0]["reasoning_content"] == "think"
-        assert result["transition"] == Transition.DONE
+        assert result.assistant_message["reasoning_content"] == "think"
+        assert result.is_done is True
 
     async def test_content_streamed_to_queue_without_message_id(self):
-        """Content chunks are forwarded to queue as plain deltas (no message_id)."""
-        import asyncio
-        from langchain_core.runnables.config import RunnableConfig
-
+        """Content chunks are captured in ThinkOutput.stream_chunks as AssistantDelta-type tuples."""
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
             {"event": "assistant", "data": json.dumps({"delta": "world"})},
             {"event": "done", "data": "{}"},
         ])
-        queue = asyncio.Queue()
-        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
+        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
 
-        result = await think_node(_state(), config, llm=llm)
+        result = await think_node(_state(), ctx, llm=llm)
 
-        assert result["messages"][0]["content"] == "Hello world"
-        items = []
-        while not queue.empty():
-            items.append(queue.get_nowait())
-        assistant_items = [i for i in items if i["event"] == "assistant"]
-        assert len(assistant_items) == 2
-        for item in assistant_items:
-            data = json.loads(item["data"])
-            assert "message_id" not in data
-            assert "delta" in data
+        assert result.assistant_message["content"] == "Hello world"
+        # stream_chunks records (type, delta) tuples for later emission by EventEmitter
+        assert len(result.stream_chunks) == 2
+        assert result.stream_chunks == [("assistant", "Hello "), ("assistant", "world")]
 
     async def test_no_reasoning_no_queue_events(self):
-        """When there's no reasoning_content, only content + thinking_done pushed to queue."""
-        import asyncio
-        from langchain_core.runnables.config import RunnableConfig
-
+        """When there's no reasoning_content, only content chunk captured in stream_chunks."""
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "CPU normal."})},
             {"event": "done", "data": "{}"},
         ])
-        queue = asyncio.Queue()
-        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
+        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
 
-        await think_node(_state(), config, llm=llm)
+        result = await think_node(_state(), ctx, llm=llm)
 
-        items = []
-        while not queue.empty():
-            items.append(queue.get_nowait())
-        # Content chunk and thinking_done are pushed; no reasoning events.
-        assert len(items) == 2
-        assert items[0]["event"] == "assistant"
-        assert "CPU normal." in items[0]["data"]
-        assert items[1]["event"] == "thinking_done"
+        # stream_chunks records (type, delta) tuples for later emission by EventEmitter
+        assert len(result.stream_chunks) == 1
+        assert result.stream_chunks == [("assistant", "CPU normal.")]
 
-    async def test_reasoning_streamed_via_runnable_config(self):
-        """think_node 从 RunnableConfig 读取 _event_queue 并推送流式事件（Config 优先于 ContextVar）。"""
-        import asyncio
-        from langchain_core.runnables.config import RunnableConfig
-
+    async def test_reasoning_streamed_directly(self):
+        """think_node captures streaming content in ThinkOutput."""
         llm = MockLLM([
             {"event": "assistant", "data": json.dumps({"delta": "Hello", "reasoning_content": "thinking"})},
             {"event": "done", "data": "{}"},
         ])
-        queue = asyncio.Queue()
-        config: RunnableConfig = {"configurable": {"_event_queue": queue, "_chat_id": "test-cid"}}
+        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
 
-        result = await think_node(_state(), config, llm=llm)
+        result = await think_node(_state(), ctx, llm=llm)
 
-        assert result["messages"][0]["content"] == "Hello"
-        assert result["messages"][0]["reasoning_content"] == "thinking"
-
-        items = []
-        while not queue.empty():
-            items.append(queue.get_nowait())
-        # reasoning → assistant → thinking_done
-        assert len(items) >= 3
-        assert items[0]["event"] == "reasoning"
-        assert items[-1]["event"] == "thinking_done"
+        assert result.assistant_message["content"] == "Hello"
+        assert result.assistant_message["reasoning_content"] == "thinking"

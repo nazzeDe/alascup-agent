@@ -1,71 +1,114 @@
 """Unit tests for ApprovalHandler and its module-level helpers."""
 
 import json
+from uuid import UUID, uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.agent.events import ApprovalRequired, EventChannel
 from src.agent.loop.approval import (
     ApprovalHandler,
     _apply_decisions,
     _inject_rejection_messages,
 )
-from src.agent.state import Transition
+from src.agent.loop.emitter import EventEmitter
+from src.agent.state import Transition, TurnScratch
+from src.agent.turn_context import TurnContext
 from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
 
 
-# ── _apply_decisions ──────────────────────────────────────────────────────
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_turn_ctx(chat_id: UUID | None = None, turn_id: UUID = None, iteration: int = 1, model: str = "test-model") -> TurnContext:
+    if turn_id is None:
+        turn_id = uuid4()
+    if chat_id is None:
+        chat_id = uuid4()
+    return TurnContext(chat_id=chat_id, turn_id=turn_id, iteration=iteration, model=model)
+
+
+async def _collect_approval_events(channel: EventChannel, timeout: float = 0.5) -> list[ApprovalRequired]:
+    import asyncio as _asyncio
+    events: list[ApprovalRequired] = []
+    while True:
+        try:
+            event = await _asyncio.wait_for(channel.receive(), timeout=timeout)
+        except _asyncio.TimeoutError:
+            break
+        if event is None:
+            break
+        if isinstance(event, ApprovalRequired):
+            events.append(event)
+    return events
+
+
+def _make_scratch(**overrides) -> TurnScratch:
+    """Create a TurnScratch with sensible defaults for testing."""
+    defaults = {
+        "pending_approval": [],
+        "approved_tool_calls": [],
+        "rejected_tool_calls": [],
+        "tool_calls": [],
+        "tool_results": [],
+        "streaming_tool_results": [],
+        "_emitted_results": [],
+        "llm_error": None,
+        "transition": None,
+    }
+    defaults.update(overrides)
+    return TurnScratch(**defaults)
+
+
+# ── _apply_decisions ─────────────────────────────────────────────────────────
 
 
 class TestApplyDecisions:
+    def test_splits_approved_and_rejected(self):
+        pending = [
+            {"function": {"name": "get_cpu"}, "id": "1"},
+            {"function": {"name": "rm_file"}, "id": "2"},
+        ]
+        decisions = ["APPROVED", "REJECTED"]
+        approved, rejected = _apply_decisions(pending, decisions)
+        assert len(approved) == 1
+        assert approved[0]["id"] == "1"
+        assert approved[0]["approval_status"] == "APPROVED"
+        assert len(rejected) == 1
+        assert rejected[0]["id"] == "2"
+
+    def test_missing_decisions_default_to_expired(self):
+        pending = [
+            {"function": {"name": "get_cpu"}, "id": "1"},
+            {"function": {"name": "rm_file"}, "id": "2"},
+        ]
+        decisions = ["APPROVED"]  # Only one decision for two tools
+        approved, rejected = _apply_decisions(pending, decisions)
+        assert len(approved) == 1
+        assert approved[0]["id"] == "1"
+        assert len(rejected) == 1
+        assert rejected[0]["id"] == "2"
+
     def test_all_approved(self):
         pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "get_mem"}, "id": "2"},
+            {"function": {"name": "a"}, "id": "1"},
+            {"function": {"name": "b"}, "id": "2"},
         ]
-        decisions = ["APPROVED", "APPROVED"]
-        approved, rejected = _apply_decisions(pending, decisions)
+        approved, rejected = _apply_decisions(pending, ["APPROVED", "APPROVED"])
         assert len(approved) == 2
         assert len(rejected) == 0
-        assert approved[0]["approval_status"] == "APPROVED"
-        assert approved[1]["approval_status"] == "APPROVED"
 
-    def test_all_rejected(self):
+    def test_all_expired_default(self):
         pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "get_mem"}, "id": "2"},
+            {"function": {"name": "a"}, "id": "1"},
+            {"function": {"name": "b"}, "id": "2"},
         ]
-        decisions = ["REJECTED", "REJECTED"]
+        decisions = ["EXPIRED", "EXPIRED"]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 0
         assert len(rejected) == 2
-
-    def test_mixed(self):
-        pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "get_mem"}, "id": "2"},
-            {"function": {"name": "get_uptime"}, "id": "3"},
-        ]
-        decisions = ["APPROVED", "REJECTED", "APPROVED"]
-        approved, rejected = _apply_decisions(pending, decisions)
-        assert len(approved) == 2
-        assert len(rejected) == 1
-        assert approved[0]["id"] == "1"
-        assert rejected[0]["id"] == "2"
-        assert approved[1]["id"] == "3"
-
-    def test_missing_decision_defaults_to_expired(self):
-        """Fewer decisions than pending → remaining treated as EXPIRED (rejected)."""
-        pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "get_mem"}, "id": "2"},
-        ]
-        decisions = ["APPROVED"]  # only 1 decision for 2 tools
-        approved, rejected = _apply_decisions(pending, decisions)
-        assert len(approved) == 1
-        assert len(rejected) == 1
-        assert rejected[0]["id"] == "2"
 
 
 # ── _inject_rejection_messages ─────────────────────────────────────────────
@@ -163,195 +206,145 @@ _MOCK_PROFILER = MagicMock()
 
 
 class TestApprovalHandlerResolve:
-    """Tests for ApprovalHandler.resolve() — the sole public method."""
+    """Tests for ApprovalHandler.resolve() — the sole public method.
+
+    resolve() is now a pure side-effecting helper: it emits ApprovalRequired events,
+    waits on the bridge, applies decisions, and returns. It does NOT call graph.ainvoke.
+    Multi-round approval is handled by the orchestrator's outer loop.
+    """
 
     @pytest.mark.asyncio
     async def test_no_pending_approval_yields_nothing(self):
-        """When result has no pending_approval, resolve yields no events."""
+        """When scratch has no pending_approval, resolve sends no events."""
         handler = ApprovalHandler(
-            graph=AsyncMock(),
             bridge=MagicMock(),
             audit_logger=MagicMock(),
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "messages": [{"role": "assistant", "content": "done"}],
-        }
-        events = []
-        async for ev in handler.resolve(result):
-            events.append(ev)
+        scratch = _make_scratch()
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
+        events = await _collect_approval_events(channel)
         assert events == []
 
     @pytest.mark.asyncio
-    async def test_pending_approval_yields_approval_required(self):
-        """With pending_approval, resolve yields tool_approval_required events."""
+    async def test_pending_approval_sends_approval_required(self):
+        """With pending_approval, resolve sends ApprovalRequired events."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        events = []
-        async for ev in handler.resolve(result):
-            events.append(ev)
-
-        approval_events = [e for e in events if e["event"] == "tool_approval_required"]
-        assert len(approval_events) == 1
-        data = json.loads(approval_events[0]["data"])
-        assert data["tool_name"] == "get_cpu"
-        assert data["request_id"] == "req-1"
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
+        events = await _collect_approval_events(channel)
+        assert len(events) == 1
+        assert events[0].tool_name == "get_cpu"
+        assert events[0].request_id == "req-1"
 
     @pytest.mark.asyncio
     async def test_approved_tool_added_to_result(self):
-        """Approved tools populate result['approved_tool_calls']."""
+        """Approved tools populate scratch.approved_tool_calls. No graph call."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
 
-        assert len(result["approved_tool_calls"]) == 1
-        assert result["approved_tool_calls"][0]["approval_status"] == "APPROVED"
-        assert result["pending_approval"] == []
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        assert len(scratch.approved_tool_calls) == 1
+        assert scratch.approved_tool_calls[0]["approval_status"] == "APPROVED"
+        assert scratch.pending_approval == []
+        assert scratch.transition == Transition.APPROVAL_GRANTED
 
     @pytest.mark.asyncio
     async def test_rejected_tool_added_to_result_and_injected(self):
-        """Rejected tools populate result['rejected_tool_calls'] and get injected into messages."""
+        """Rejected tools populate scratch.rejected_tool_calls.
+        Message injection is handled by the orchestrator, not resolve().
+        """
         bridge = _MockBridge(decisions=["REJECTED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_REJECTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "rm_file", "arguments": "{}"}, "id": "tc-x", "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [{"role": "user", "content": "delete tmp"}],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
 
-        assert len(result["rejected_tool_calls"]) == 1
-        assert result["pending_approval"] == []
-        assert result["transition"] == Transition.APPROVAL_REJECTED
-        # Rejection message injected
-        assert len(result["messages"]) == 2
-        assert result["messages"][-1]["role"] == "tool"
-        assert "REJECTED" in result["messages"][-1]["content"]
+        assert len(scratch.rejected_tool_calls) == 1
+        assert scratch.pending_approval == []
+        assert scratch.transition == Transition.APPROVAL_REJECTED
 
     @pytest.mark.asyncio
-    async def test_multi_round_approval(self):
-        """Graph returns more pending approvals after first resolution → second round."""
+    async def test_single_pass_approval_does_not_loop(self):
+        """resolve() processes one round of pending_approval, then returns.
+
+        Multi-round approval is handled by the orchestrator's outer loop
+        re-invoking the graph, not by resolve() looping internally.
+        """
         bridge = _MockBridge(decisions=["APPROVED"])
-        # First graph resume returns another pending; second finishes.
-        graph = _MockGraph(responses=[
-            {"pending_approval": [
-                {"function": {"name": "tool_b", "arguments": "{}"}, "request_id": "req-2"},
-            ], "transition": None},
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         audit = _MockAuditLogger()
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=audit,
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "tool_a", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        events = []
-        async for ev in handler.resolve(result):
-            events.append(ev)
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
+        events = await _collect_approval_events(channel)
 
-        # Two rounds → two approval events
-        approval_events = [e for e in events if e["event"] == "tool_approval_required"]
-        assert len(approval_events) == 2
-        assert len(graph._calls) == 2
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        # Single round — one approval event
+        assert len(events) == 1
+        assert scratch.transition == Transition.APPROVAL_GRANTED
+        assert len(scratch.approved_tool_calls) == 1
+        assert scratch.pending_approval == []
 
     @pytest.mark.asyncio
     async def test_audit_approved_logged(self):
-        """Approved tool → TOOL_APPROVED audit event."""
+        """Approved tool -> TOOL_APPROVED audit event."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         audit = _MockAuditLogger()
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=audit,
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
 
         tool_approved = [e for e in audit.events if e.event == "TOOL_APPROVED"]
         assert len(tool_approved) == 1
@@ -361,31 +354,22 @@ class TestApprovalHandlerResolve:
 
     @pytest.mark.asyncio
     async def test_audit_rejected_logged(self):
-        """Rejected tool → TOOL_REJECTED audit event."""
+        """Rejected tool -> TOOL_REJECTED audit event."""
         bridge = _MockBridge(decisions=["REJECTED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_REJECTED},
-        ])
         audit = _MockAuditLogger()
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=audit,
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
 
         tool_rejected = [e for e in audit.events if e.event == "TOOL_REJECTED"]
         assert len(tool_rejected) == 1
@@ -397,31 +381,22 @@ class TestApprovalHandlerResolve:
     async def test_lifecycle_updated_on_approved(self):
         """Lifecycle receives APPROVED/RUNNING status for approved tools."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         lifecycle = _MockLifecycle()
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
             lifecycle=lifecycle,
         )
         chat_id = "12345678-1234-5678-1234-567812345678"
-        result = {
-            "_chat_id": chat_id,
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        channel.close()
 
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
@@ -433,31 +408,22 @@ class TestApprovalHandlerResolve:
     async def test_lifecycle_updated_on_rejected(self):
         """Lifecycle receives REJECTED/FAILED status for rejected tools."""
         bridge = _MockBridge(decisions=["REJECTED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_REJECTED},
-        ])
         lifecycle = _MockLifecycle()
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
             lifecycle=lifecycle,
         )
         chat_id = "12345678-1234-5678-1234-567812345678"
-        result = {
-            "_chat_id": chat_id,
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-2"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        channel.close()
 
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
@@ -469,82 +435,75 @@ class TestApprovalHandlerResolve:
     async def test_no_lifecycle_no_crash(self):
         """Missing lifecycle does not crash resolve."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
             lifecycle=None,
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
-        # No exception → success
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
+        # No exception -> success
+        assert scratch.transition == Transition.APPROVAL_GRANTED
 
     @pytest.mark.asyncio
     async def test_no_audit_logger_no_crash(self):
         """Missing audit_logger does not crash resolve."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=None,
         )
-        result = {
-            "_chat_id": "c1",
-            "_turn_id": None,
-            "_iteration": 1,
-            "_model": "test-model",
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+        channel.close()
+        assert scratch.transition == Transition.APPROVAL_GRANTED
 
     @pytest.mark.asyncio
-    async def test_missing_turn_id_model_from_result_handled(self):
-        """When _turn_id and _model are missing, resolve still works."""
+    async def test_missing_turn_context_handled(self):
+        """When turn_ctx is not passed, resolve uses safe defaults (TurnContext fields optional)."""
         bridge = _MockBridge(decisions=["APPROVED"])
-        graph = _MockGraph(responses=[
-            {"pending_approval": [], "transition": Transition.APPROVAL_GRANTED},
-        ])
         handler = ApprovalHandler(
-            graph=graph,
             bridge=bridge,
             audit_logger=_MockAuditLogger(),
         )
-        result = {
-            "_chat_id": "",
-            "_iteration": 0,
-            "pending_approval": [
+        scratch = _make_scratch(
+            pending_approval=[
                 {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
             ],
-            "approved_tool_calls": [],
-            "rejected_tool_calls": [],
-            "messages": [],
-        }
-        async for _ in handler.resolve(result):
-            pass
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        )
+        # TurnContext with None chat_id (not a real UUID)
+        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=0, model=None)
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=ctx, emitter=emitter)
+        channel.close()
+        assert scratch.transition == Transition.APPROVAL_GRANTED
+
+    @pytest.mark.asyncio
+    async def test_no_channel_no_crash(self):
+        """Missing emitter does not crash resolve (backward compat for tests without emitter)."""
+        bridge = _MockBridge(decisions=["APPROVED"])
+        handler = ApprovalHandler(
+            bridge=bridge,
+            audit_logger=_MockAuditLogger(),
+        )
+        scratch = _make_scratch(
+            pending_approval=[
+                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+            ],
+        )
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=None)
+        assert scratch.transition == Transition.APPROVAL_GRANTED

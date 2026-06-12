@@ -1,7 +1,73 @@
+"""Shared helpers for agent steps: message formatting, tool dispatch, arg parsing."""
+
 import json
 from uuid import uuid4
 
 from loguru import logger
+
+from src.agent.messages import normalize_message
+
+
+# ── Message formatting ──
+
+
+def _messages(state) -> list[dict]:
+    """Convert messages to OpenAI-compatible dicts for LLM call."""
+    result: list[dict] = []
+    for m in state.get("messages", []):
+        entry = normalize_message(m)
+        msg: dict = {"role": entry["role"], "content": entry["content"]}
+        if entry["role"] == "assistant":
+            tcs = entry.get("tool_calls")
+            if tcs:
+                msg["tool_calls"] = tcs
+            rc = entry.get("reasoning_content", "")
+            if rc:
+                msg["reasoning_content"] = rc
+        elif entry["role"] == "tool":
+            tc_id = entry.get("tool_call_id", "")
+            if tc_id:
+                msg["tool_call_id"] = tc_id
+            nm = entry.get("name", "")
+            if nm:
+                msg["name"] = nm
+        result.append(msg)
+    return result
+
+
+def _format_tools(tools: list) -> list[dict]:
+    """Convert tool schemas to OpenAI function-calling format."""
+    result: list[dict] = []
+    for t in tools:
+        if isinstance(t, dict):
+            name = t.get("name", "")
+            server = t.get("server_name", "")
+            desc = t.get("description", "")
+            params = t.get("params_schema", {})
+        else:
+            name = getattr(t, "name", "")
+            server = getattr(t, "server_name", "")
+            desc = getattr(t, "description", "")
+            params = getattr(t, "params_schema", {})
+        full_name = f"{server}__{name}" if server else name
+        if not params or not isinstance(params, dict) or params.get("type") != "object":
+            params = {"type": "object", "properties": {}}
+        result.append({
+            "type": "function",
+            "function": {"name": full_name, "description": desc, "parameters": params},
+        })
+    return result
+
+
+# ── Tool dispatch ──
+
+
+def _parse_args(args: str) -> dict:
+    """Parse JSON arguments string to dict. Returns {} on failure."""
+    try:
+        return json.loads(args) if isinstance(args, str) else args
+    except json.JSONDecodeError:
+        return {}
 
 
 async def _dispatch_tool_calls(
@@ -40,6 +106,15 @@ async def _dispatch_tool_calls(
             })
 
     return pending, pre_executed
+
+
+async def _execute_with_error_handling(executor, dispatch_list: list[dict]) -> list[dict]:
+    """Execute tool calls with error handling. Returns list of result dicts."""
+    try:
+        return await executor.execute_parallel(dispatch_list)
+    except Exception as exc:
+        logger.opt(exception=True).warning("tool execution failed: {err}", err=exc)
+        return [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(dispatch_list)
 
 
 def _build_tool_index(available_tools: list[dict]) -> dict[str, dict]:
@@ -84,19 +159,3 @@ def _classify_and_route(tc, tool_name, args, server_name, tc_id, meta, pending, 
         tc["mutable"] = False
         tc["is_read_only"] = False
         pending.append(tc)
-
-
-async def _execute_with_error_handling(executor, dispatch_list: list[dict]) -> list[dict]:
-    """Execute tool calls with error handling. Returns list of result dicts."""
-    try:
-        return await executor.execute_parallel(dispatch_list)
-    except Exception as exc:
-        logger.opt(exception=True).warning("tool execution failed: {err}", err=exc)
-        return [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(dispatch_list)
-
-
-def _parse_args(args: str) -> dict:
-    try:
-        return json.loads(args) if isinstance(args, str) else args
-    except json.JSONDecodeError:
-        return {}

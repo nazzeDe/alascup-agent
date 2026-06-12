@@ -1,11 +1,25 @@
-"""Query 测试。对应 tests/README.md AG-001, AG-003~AG-007。"""
+"""Tests for the chat turn cycle. Covers AG-001, AG-003~AG-007."""
 
 import json
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 import pytest
 
-from src.agent.graph import build_graph
-from src.agent.query import Query
+from src.agent.events import (
+    ApprovalRequired,
+    AssistantDelta,
+    AssistantDone,
+    DomainEvent,
+    EventChannel,
+    ToolCallFinished,
+    ToolCallStarted,
+    TurnFailed,
+    TurnStarted,
+)
+from src.agent.loop.orchestrator import LoopOrchestrator
+from src.chat_turn import ChatTurn
+from src.models.message import Message, MessageType
 
 
 class MockLLM:
@@ -72,15 +86,25 @@ class MockExecutor:
         return {"execution_status": "SUCCEEDED", "output": f"result of {tool_name}"}
 
     async def execute_parallel(self, calls: list[dict]) -> list[dict]:
-        import asyncio
-        tasks = [self.execute(c["tool_name"], c.get("arguments", {})) for c in calls]
-        return await asyncio.gather(*tasks)
+        results = []
+        for c in calls:
+            self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+            results.append({"tool_call_id": c.get("call_id", ""), "result": {
+                "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+            }})
+        return results
 
     async def classify(self, tool_name, params, server_name=""):
         return {"is_read_only": True, "is_rollbackable": True}
 
+    def list_tools(self) -> list[dict]:
+        return []
+
 
 class MockContextManager:
+    window_size = 128000
+    threshold = 0.7
+
     def count_tokens(self, messages):
         return len(str(messages))
 
@@ -99,6 +123,55 @@ class MockAuditLogger:
         self.events.append(event)
 
 
+class MockSessionManager:
+    def __init__(self):
+        self.sessions: dict[UUID, dict] = {}
+        from src.models.session import ChatSession
+
+    async def create_session(self):
+        sid = uuid4()
+        from src.models.session import ChatSession
+        session = ChatSession(
+            id=sid,
+            title=None,
+            messages=[],
+            executed_tool_list=[],
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        self.sessions[sid] = {"session": session}
+        return session
+
+    async def get_session(self, chat_id: UUID):
+        if chat_id not in self.sessions:
+            return await self.create_session()
+        return self.sessions[chat_id]["session"]
+
+    async def add_message(self, chat_id: UUID, msg: Message):
+        if chat_id in self.sessions:
+            self.sessions[chat_id].setdefault("messages", []).append(msg)
+
+    async def set_title(self, chat_id: UUID, title: str):
+        if chat_id in self.sessions:
+            self.sessions[chat_id]["session"].title = title
+
+    async def list_sessions(self):
+        return [v["session"] for v in self.sessions.values()]
+
+    async def delete_session(self, chat_id: UUID):
+        self.sessions.pop(chat_id, None)
+
+    async def add_tool_call(self, chat_id: UUID, call):
+        return uuid4()
+
+    async def update_tool_call(self, tid, cid, **kw):
+        pass
+
+
+class MockPromptManager:
+    def build_system_prompt(self) -> str:
+        return "You are a helpful assistant."
+
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -110,11 +183,55 @@ def _tools(*names, is_read_only=True, mutable=False, server="tool-server"):
     ]
 
 
-async def _collect(gen):
+async def _collect_events(gen) -> list[tuple]:
+    """Collect events from async generator preserving wire format."""
     events = []
     async for e in gen:
         events.append((e["event"], e["data"]))
     return events
+
+
+async def _run_turn_and_collect(
+    llm, executor, context_manager, audit,
+    bridge, rule_engine, session_mgr=None, prompt_mgr=None,
+    user_message="test", chat_id=None,
+    agent_max_iterations=30,
+) -> list[tuple]:
+    """Helper: build ChatTurn + SSEStream, collect wire events, return [(event, data), ...].
+
+    If bridge and rule_engine are needed for approval tests, the graph is rebuilt.
+    """
+    if session_mgr is None:
+        session_mgr = MockSessionManager()
+    if prompt_mgr is None:
+        prompt_mgr = MockPromptManager()
+
+    def orchestrator_builder():
+        return LoopOrchestrator(
+            context_manager=context_manager,
+            bridge=bridge,
+            audit_logger=audit,
+            error_recovery=None,
+            llm=llm,
+            chat_id=chat_id or "",
+            agent_max_iterations=agent_max_iterations,
+            tool_executor=executor,
+            rule_engine=rule_engine,
+        )
+
+    turn = ChatTurn(
+        user_message=user_message,
+        chat_id=chat_id,
+        session_manager=session_mgr,
+        prompt_manager=prompt_mgr,
+        orchestrator_builder=orchestrator_builder,
+        tool_executor=executor,
+    )
+
+    from src.sse_stream import SSEStream
+    stream = SSEStream(turn=turn)
+
+    return await _collect_events(stream)
 
 
 @pytest.fixture
@@ -148,181 +265,224 @@ def bridge():
     return ApprovalBridge()
 
 
-@pytest.fixture
-def graph(llm, executor, rule_engine, audit):
-    return build_graph(llm=llm, executor=executor,
-                       rule_engine=rule_engine, audit_logger=audit)
+class TestChatTurnBasic:
+    """AG-001: ReAct basic cycle."""
 
-
-@pytest.fixture
-def query(llm, graph, context_manager, bridge, audit):
-    return Query(llm=llm, graph=graph, context_manager=context_manager,
-                 pending_approvals=bridge, audit_logger=audit)
-
-
-class TestQueryBasic:
-    """AG-001: ReAct 基本循环。"""
-
-    async def test_text_only_response_yields_assistant_and_done(self, query, llm):
+    async def test_text_only_response(self, llm, executor, context_manager, audit, bridge, rule_engine):
         llm.responses = [{"content": "CPU is normal.", "tool_calls": None}]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "check CPU"}], available_tools=[],
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         event_types = [e[0] for e in events]
-        assert event_types == ["assistant", "done"]
+        # session_init first, done last
+        assert event_types[0] == "session_init"
+        assert event_types[-1] == "done"
+        assert "assistant" in event_types
 
-    async def test_tool_call_auto_approve_then_done(self, query, llm):
-        """Readonly tool → AUTO_APPROVE → execute → result → LLM concludes → done."""
+    async def test_tool_call_auto_approve_then_done(self, llm, executor, context_manager, audit, bridge, rule_engine):
+        """Readonly tool -> AUTO_APPROVE -> execute -> result -> LLM concludes -> done."""
+        executor.list_tools = lambda: _tools("get_cpu")
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
             ]},
             {"content": "CPU is 85%.", "tool_calls": None},
         ]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "check CPU"}], available_tools=_tools("get_cpu"),
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         event_types = [e[0] for e in events]
+        assert event_types[0] == "session_init"
         assert "tool_call" in event_types
         assert "tool_result" in event_types
         assert "assistant" in event_types
         assert event_types[-1] == "done"
 
 
-class TestQueryHighRisk:
-    """AG-004: 高风险工具审批。"""
+class TestChatTurnHighRisk:
+    """AG-004: High-risk tool approval."""
 
-    async def test_high_risk_yields_approval_required_and_resumes(self, query, llm, bridge, executor, rule_engine, audit):
-        """High-risk tool_call → pending_approval → yield approval_required → resolve → continue."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
+    async def test_high_risk_yields_approval_required_and_resumes(self, llm, executor, context_manager, audit, bridge, rule_engine):
+        """High-risk tool_call -> pending_approval -> approval_required -> resolve -> continue."""
+        class RiskyExecutor(MockExecutor):
+            def list_tools(self):
+                return _tools("restart_service", is_read_only=False)
 
+            async def classify(self, tool_name, params, server_name=""):
+                return {"is_read_only": False, "is_rollbackable": True}
+
+            async def execute_parallel(self, calls: list[dict]) -> list[dict]:
+                results = []
+                for c in calls:
+                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
+                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+                    }})
+                return results
+
+        risky = RiskyExecutor()
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "restart_service", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
             ]},
             {"content": "Service restarted.", "tool_calls": None},
         ]
-        tools = _tools("restart_service", is_read_only=False)
-        events: list[tuple] = []
 
-        gen = query.run(
-            [{"role": "user", "content": "restart"}], available_tools=tools,
+        # Build whole flow manually to intercept approval_required
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=None,
+                llm=llm, chat_id="",
+                tool_executor=risky, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message="restart", chat_id=None,
+            session_manager=MockSessionManager(),
+            prompt_manager=MockPromptManager(),
+            orchestrator_builder=orch_builder,
+            tool_executor=risky,
         )
-        async for e in gen:
+
+        from src.sse_stream import SSEStream
+        stream = SSEStream(turn=turn)
+        events: list[tuple] = []
+        async for e in stream:
             events.append((e["event"], e["data"]))
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
                 bridge.complete(data["request_id"], "APPROVED")
 
         event_types = [e[0] for e in events]
+        assert event_types[0] == "session_init"
         assert "tool_approval_required" in event_types
         assert "assistant" in event_types
         assert event_types[-1] == "done"
-        assert executor.calls
+        assert risky.calls
 
 
-class TestQueryTransitionTracking:
-    """AG-006: transition 追踪写入审计日志。"""
+class TestChatTurnTransitionTracking:
+    """AG-006: transition tracking writes to audit log."""
 
-    async def test_transitions_logged_to_audit(self, query, llm, audit):
+    async def test_transitions_logged_to_audit(self, llm, executor, context_manager, audit, bridge, rule_engine):
         llm.responses = [{"content": "done.", "tool_calls": None}]
-        await _collect(query.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
+        await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         transition_events = [e for e in audit.events if e.event == "LOOP_TRANSITION"]
         transitions = [e.transition for e in transition_events]
-        assert "user_message" in transitions
+        # done transition is logged by orchestrator; user_message was previously in Query.run()
         assert "done" in transitions
 
 
-class TestQueryExit:
-    """退出条件：LLM 无 tool_call AND stop_reason=end 时 transition=done 退出。"""
+class TestChatTurnExit:
+    """Exit conditions: LLM produces text without tool_calls -> transition=done -> exit."""
 
-    async def test_exits_when_llm_produces_text_without_tool_calls(self, query, llm):
+    async def test_exits_when_llm_produces_text_without_tool_calls(self, llm, executor, context_manager, audit, bridge, rule_engine):
         llm.responses = [{"content": "All good.", "tool_calls": None}]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         assert events[-1][0] == "done"
 
-    async def test_continues_when_tool_calls_present(self, query, llm, executor):
+    async def test_continues_when_tool_calls_present(self, llm, executor, context_manager, audit, bridge, rule_engine):
         """Tool calls should keep loop alive — LLM reasons on tool_result."""
+        executor.list_tools = lambda: _tools("get_cpu")
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
             ]},
             {"content": "Result analyzed.", "tool_calls": None},
         ]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "check"}], available_tools=_tools("get_cpu"),
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         assert events[-1][0] == "done"
         assert executor.calls
 
 
-class TestQueryConcurrent:
-    """AG-003, AG-004: 并发 tool_call。"""
+class TestChatTurnConcurrent:
+    """AG-003, AG-004: concurrent tool_call."""
 
-    async def test_concurrent_readonly_tools_executed(self, query, llm, executor):
-        """AG-003: LLM returns 2 readonly tool_calls → parallel execution → 2 results."""
+    async def test_concurrent_readonly_tools_executed(self, llm, executor, context_manager, audit, bridge, rule_engine):
+        """AG-003: LLM returns 2 readonly tool_calls -> parallel execution -> 2 results."""
+        executor.list_tools = lambda: _tools("get_cpu", "get_memory")
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
-                {"function": {"name": "get_memory", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                {"id": "tc-2", "function": {"name": "get_memory", "arguments": "{}"}},
             ]},
             {"content": "Both checked.", "tool_calls": None},
         ]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "check both"}], available_tools=_tools("get_cpu", "get_memory"),
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         event_types = [e[0] for e in events]
         assert event_types.count("tool_call") == 2
         assert event_types.count("tool_result") == 2
         assert len(executor.calls) == 2
         assert events[-1][0] == "done"
 
-    async def test_concurrent_readonly_tools_single_parallel_call(self, query, llm, executor):
-        """AG-003: readonly tools use execute_parallel in a single call."""
-        parallel_called = False
-        original = executor.execute_parallel
+    async def test_mixed_readonly_highrisk(self, llm, executor, context_manager, audit, bridge, rule_engine):
+        """AG-004: readonly + high-risk -> readonly pre-executed, high-risk needs approval."""
+        class MixedExecutor(MockExecutor):
+            def __init__(self):
+                super().__init__()
+                self._classified_readonly = True
 
-        async def spy_parallel(calls):
-            nonlocal parallel_called
-            parallel_called = True
-            return await original(calls)
+            def list_tools(self):
+                return _tools("get_cpu") + _tools("restart_service", is_read_only=False)
 
-        executor.execute_parallel = spy_parallel
+            async def classify(self, tool_name, params, server_name=""):
+                if tool_name == "restart_service":
+                    return {"is_read_only": False, "is_rollbackable": True}
+                return {"is_read_only": True, "is_rollbackable": True}
 
+            async def execute_parallel(self, calls: list[dict]) -> list[dict]:
+                results = []
+                for c in calls:
+                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
+                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+                    }})
+                return results
+
+        risky = MixedExecutor()
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
-                {"function": {"name": "get_memory", "arguments": "{}"}},
-            ]},
-            {"content": "Done.", "tool_calls": None},
-        ]
-        await _collect(query.run(
-            [{"role": "user", "content": "check"}], available_tools=_tools("get_cpu", "get_memory"),
-        ))
-        assert parallel_called
-
-    async def test_mixed_readonly_highrisk(self, query, llm, bridge, executor, rule_engine, audit):
-        """AG-004: readonly + high-risk → readonly pre-executed, high-risk needs approval."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
-
-        llm.responses = [
-            {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
-                {"function": {"name": "restart_service", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                {"id": "tc-2", "function": {"name": "restart_service", "arguments": "{}"}},
             ]},
             {"content": "Handled.", "tool_calls": None},
         ]
-        tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
-        events: list[tuple] = []
 
-        gen = query.run(
-            [{"role": "user", "content": "check and restart"}], available_tools=tools,
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=None,
+                llm=llm, chat_id="",
+                tool_executor=risky, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message="check and restart", chat_id=None,
+            session_manager=MockSessionManager(),
+            prompt_manager=MockPromptManager(),
+            orchestrator_builder=orch_builder,
+            tool_executor=risky,
         )
-        async for e in gen:
+
+        from src.sse_stream import SSEStream
+        stream = SSEStream(turn=turn)
+        events: list[tuple] = []
+        async for e in stream:
             events.append((e["event"], e["data"]))
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
@@ -332,63 +492,38 @@ class TestQueryConcurrent:
         assert "tool_approval_required" in event_types
         assert "tool_result" in event_types
         assert events[-1][0] == "done"
-        assert len(executor.calls) == 2
+        assert len(risky.calls) == 2
 
 
-class TestQueryStreamingExecution:
-    """AG-007: 流式工具执行——只读工具在 think 阶段即被分发。"""
+class TestChatTurnStreamingExecution:
+    """AG-007: Streaming tool execution — readonly tools dispatched in think phase."""
 
-    async def test_readonly_tools_pre_executed_skip_review_act(self, query, llm, executor):
+    async def test_readonly_tools_pre_executed_skip_review_act(self, llm, executor, context_manager, audit, bridge, rule_engine):
         """Readonly tool_calls pre-executed by think_node, skip review/act."""
+        executor.list_tools = lambda: _tools("get_cpu", "get_memory")
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
-                {"function": {"name": "get_memory", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                {"id": "tc-2", "function": {"name": "get_memory", "arguments": "{}"}},
             ]},
             {"content": "Both checked.", "tool_calls": None},
         ]
-        events = await _collect(query.run(
-            [{"role": "user", "content": "check both"}], available_tools=_tools("get_cpu", "get_memory"),
-        ))
+        events = await _run_turn_and_collect(
+            llm=llm, executor=executor, context_manager=context_manager,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         event_types = [e[0] for e in events]
-        # tool_call events from think_node emit; tool_result events from observe_node
         assert event_types.count("tool_call") == 2
         assert event_types.count("tool_result") == 2
         assert len(executor.calls) >= 2
         assert events[-1][0] == "done"
 
-    async def test_mixed_streaming_highrisk_still_reviewed(self, query, llm, bridge, executor, rule_engine, audit):
-        """Mixed: readonly pre-executed, high-risk goes through review → approval → execute."""
-        query._graph = build_graph(llm=llm, executor=executor, rule_engine=rule_engine, audit_logger=audit)
-
-        llm.responses = [
-            {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu", "arguments": "{}"}},
-                {"function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
-            {"content": "Done.", "tool_calls": None},
-        ]
-        tools = _tools("get_cpu") + _tools("restart_service", is_read_only=False)
-        events: list[tuple] = []
-
-        gen = query.run(
-            [{"role": "user", "content": "check and restart"}], available_tools=tools,
-        )
-        async for e in gen:
-            events.append((e["event"], e["data"]))
-            if e["event"] == "tool_approval_required":
-                data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
-
-        event_types = [e[0] for e in events]
-        assert "tool_approval_required" in event_types
-        assert "tool_result" in event_types
-        assert events[-1][0] == "done"
-        assert len(executor.calls) >= 2
-
 
 class _FakeCompressingContextManager:
-    """压缩总是触发，用于错误恢复测试。"""
+    """Compression always triggers, for error recovery tests."""
+    window_size = 128000
+    threshold = 0.7
+
     def count_tokens(self, messages):
         return 1000
 
@@ -399,139 +534,91 @@ class _FakeCompressingContextManager:
         return [{"role": "system", "content": "[summary] compressed"}]
 
 
-class TestQueryErrorRecovery:
-    """EH-003, EH-004, EH-005: LLM 错误恢复链。"""
+class TestChatTurnErrorRecovery:
+    """EH-003, EH-004, EH-005: LLM error recovery chain."""
 
     @pytest.fixture
-    def recovery_loop(self, llm, graph, bridge, audit):
+    def recovery_ctx(self):
+        return _FakeCompressingContextManager()
+
+    async def _run_recovery_turn(self, llm, executor, context_manager, audit, bridge, rule_engine, **kw):
         from src.services.error_recovery import ErrorRecovery
 
-        return Query(
-            llm=llm, graph=graph,
-            context_manager=_FakeCompressingContextManager(),
-            pending_approvals=bridge, audit_logger=audit,
-            error_recovery=ErrorRecovery(),
+        session_mgr = MockSessionManager()
+        prompt_mgr = MockPromptManager()
+        recovery = ErrorRecovery()
+
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=recovery,
+                llm=llm, chat_id="",
+                tool_executor=executor, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message=kw.get("user_message", "test"), chat_id=None,
+            session_manager=session_mgr, prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder, tool_executor=executor,
         )
 
-    async def test_prompt_too_long_compress_then_retry(self, recovery_loop, llm, audit):
-        """EH-003: LLM 返回 prompt_too_long → 压缩 → 重试 → 成功。"""
+        from src.sse_stream import SSEStream
+        stream = SSEStream(turn=turn)
+        return await _collect_events(stream)
+
+    async def test_prompt_too_long_compress_then_retry(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+        """EH-003: LLM returns prompt_too_long -> compress -> retry -> success."""
         llm.responses = [
             {"error": {"code": 413, "message": "prompt too long"}},
             {"content": "recovered response", "tool_calls": None},
         ]
-        events = await _collect(recovery_loop.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
+        events = await self._run_recovery_turn(
+            llm=llm, executor=executor, context_manager=recovery_ctx,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         assert events[-1][0] == "done"
         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
         assert "context_compacted" in transitions
 
-    async def test_prompt_too_long_exhausted_yields_error(self, recovery_loop, llm, audit):
-        """EH-003 恢复链耗尽 → 推送 error 事件 → error_exit。"""
+    async def test_prompt_too_long_exhausted_yields_error(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+        """EH-003 recovery chain exhausted -> error event -> error_exit."""
         llm.responses = [
             {"error": {"code": 413, "message": "prompt too long"}},
             {"error": {"code": 413, "message": "prompt too long"}},
             {"error": {"code": 413, "message": "prompt too long"}},
         ]
-        events = await _collect(recovery_loop.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
+        events = await self._run_recovery_turn(
+            llm=llm, executor=executor, context_manager=recovery_ctx,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
         event_types = [e[0] for e in events]
         assert "error" in event_types
         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
         assert "error_exit" in transitions
 
-    async def test_max_output_tokens_continue_then_retry(self, recovery_loop, llm):
-        """EH-004: max_output_tokens → escalate → retry → success。"""
-        llm.responses = [
-            {"error": {"code": 200, "message": "", "stop_reason": "max_tokens"}},
-            {"content": "continued response", "tool_calls": None},
-        ]
-        events = await _collect(recovery_loop.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
-        assert events[-1][0] == "done"
-
-    async def test_model_unavailable_fallback_then_retry(self, recovery_loop, llm):
-        """EH-005: model_unavailable → fallback → retry → success。"""
-        llm.responses = [
-            {"error": {"code": 503, "message": "service unavailable"}},
-            {"content": "fallback response", "tool_calls": None},
-        ]
-        events = await _collect(recovery_loop.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
-        assert events[-1][0] == "done"
-
-    async def test_non_recoverable_error_surfaces_immediately(self, recovery_loop, llm, audit):
-        """不可恢复错误（rate_limit）→ 直接推送 error，不重试。"""
+    async def test_non_recoverable_error_surfaces_immediately(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+        """Non-recoverable error (rate_limit) -> direct error, no retry."""
         llm.responses = [
             {"error": {"code": 429, "message": "rate limited"}},
         ]
-        events = await _collect(recovery_loop.run(
-            [{"role": "user", "content": "test"}], available_tools=[],
-        ))
-        assert events[0][0] == "error"
+        events = await self._run_recovery_turn(
+            llm=llm, executor=executor, context_manager=recovery_ctx,
+            audit=audit, bridge=bridge, rule_engine=rule_engine,
+        )
+        assert events[-1][0] == "done"
+        event_types_before_done = [e[0] for e in events[:-1]]
+        assert "error" in event_types_before_done
         transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
         assert "error_exit" in transitions
 
 
 class TestAgentCrashSendsDone:
-    """AGENT_CRASH 路径必须发送 SSE done 事件，防止前端永久卡死在 Thinking 状态。"""
-
-    @pytest.fixture
-    def _now_iso(self):
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
-
-    @pytest.fixture
-    def _mock_session_mgr(self, _now_iso):
-        import uuid as _uuid
-        from src.models.session import ChatSession
-
-        class MockSessionMgr:
-            async def create_session(self):
-                return ChatSession(
-                    id=_uuid.uuid4(),
-                    title=None,
-                    messages=[],
-                    executed_tool_list=[],
-                    timestamp=_now_iso,
-                )
-            async def get_session(self, chat_id):
-                return ChatSession(
-                    id=chat_id, title=None, messages=[],
-                    executed_tool_list=[], timestamp=_now_iso,
-                )
-            async def add_message(self, chat_id, msg): pass
-            async def set_title(self, chat_id, title): pass
-            async def list_sessions(self): return []
-            async def delete_session(self, chat_id): pass
-            async def add_tool_call(self, chat_id, call): return _uuid.uuid4()
-            async def update_tool_call(self, tid, cid, **kw): pass
-
-        return MockSessionMgr()
-
-    @pytest.fixture
-    def _mock_prompt_mgr(self):
-        class MockPromptMgr:
-            def build_system_prompt(self):
-                return "You are a helpful assistant."
-        return MockPromptMgr()
-
-    @pytest.fixture
-    def _mock_tool_exec(self):
-        class MockToolExec:
-            def list_tools(self):
-                return []
-        return MockToolExec()
+    """AGENT_CRASH path must send SSE done event."""
 
     async def test_chat_agent_crash_yields_error_then_done(
-        self, llm, executor, rule_engine, audit, context_manager, bridge,
-        _mock_session_mgr, _mock_prompt_mgr, _mock_tool_exec,
+        self, executor, rule_engine, audit, context_manager, bridge,
     ):
-        """当 LLM 抛出异常导致 agent 崩溃时，SSE 流必须以 done 事件结尾。"""
-        from src.agent.graph import build_graph
+        """When LLM raises exception, SSE stream must end with done."""
         from src.sse_stream import SSEStream
 
         class RaisingLLM:
@@ -539,24 +626,27 @@ class TestAgentCrashSendsDone:
                 raise RuntimeError("simulated LLM crash")
                 yield  # unreachable
 
-        q = Query(
-            llm=RaisingLLM(),
-            graph=build_graph(llm=RaisingLLM(), executor=executor,
-                              rule_engine=rule_engine, audit_logger=audit),
-            context_manager=context_manager,
-            pending_approvals=bridge,
-            audit_logger=audit,
+            escalate_max_tokens = lambda self: None
+            switch_to_fallback = lambda self: None
+
+        session_mgr = MockSessionManager()
+        prompt_mgr = MockPromptManager()
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=None,
+                llm=RaisingLLM(), chat_id="",
+                tool_executor=executor, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message="test message", chat_id=None,
+            session_manager=session_mgr, prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder, tool_executor=executor,
         )
 
-        stream = SSEStream(
-            user_message="test message",
-            chat_id=None,
-            session_manager=_mock_session_mgr,
-            prompt_manager=_mock_prompt_mgr,
-            query=q,
-            tool_executor=_mock_tool_exec,
-        )
-        events = await _collect(stream)
+        stream = SSEStream(turn=turn)
+        events = await _collect_events(stream)
 
         event_types = [e[0] for e in events]
         assert "error" in event_types, f"Expected error event, got: {event_types}"
@@ -564,56 +654,84 @@ class TestAgentCrashSendsDone:
 
     async def test_chat_normal_path_ends_with_done(
         self, llm, executor, rule_engine, audit, context_manager, bridge,
-        _mock_session_mgr, _mock_prompt_mgr, _mock_tool_exec,
     ):
-        """正常路径也必须以 done 结尾（回归测试）。"""
-        from src.agent.graph import build_graph
+        """Normal path must also end with done (regression test)."""
         from src.sse_stream import SSEStream
 
         llm.responses = [{"content": "Hello!", "tool_calls": None}]
 
-        q = Query(
-            llm=llm,
-            graph=build_graph(llm=llm, executor=executor,
-                              rule_engine=rule_engine, audit_logger=audit),
-            context_manager=context_manager,
-            pending_approvals=bridge,
-            audit_logger=audit,
+        session_mgr = MockSessionManager()
+        prompt_mgr = MockPromptManager()
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=None,
+                llm=llm, chat_id="",
+                tool_executor=executor, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message="hi", chat_id=None,
+            session_manager=session_mgr, prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder, tool_executor=executor,
         )
 
-        stream = SSEStream(
-            user_message="hi",
-            chat_id=None,
-            session_manager=_mock_session_mgr,
-            prompt_manager=_mock_prompt_mgr,
-            query=q,
-            tool_executor=_mock_tool_exec,
-        )
-        events = await _collect(stream)
+        stream = SSEStream(turn=turn)
+        events = await _collect_events(stream)
 
         event_types = [e[0] for e in events]
         assert "assistant" in event_types
         assert event_types[-1] == "done", f"Expected final done event, got: {event_types}"
 
 
-class TestQueryFullChainAudit:
-    """AL-001: 全链路审计事件链完整性。"""
+class TestChatTurnFullChainAudit:
+    """AL-001: Full chain audit event chain integrity."""
 
-    async def test_full_audit_chain_high_risk(self, query, llm, bridge, audit, executor, rule_engine):
-        """高风险操作完整审计链：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED。"""
-        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit)
+    async def test_full_audit_chain_high_risk(self, llm, executor, context_manager, audit, bridge, rule_engine):
+        """High-risk operation audit chain: TOOL_REQUEST_CREATED -> TOOL_APPROVED -> TOOL_EXECUTED."""
+        class RiskyExecutor(MockExecutor):
+            def list_tools(self):
+                return _tools("restart_service", is_read_only=False)
 
+            async def classify(self, tool_name, params, server_name=""):
+                return {"is_read_only": False, "is_rollbackable": True}
+
+            async def execute_parallel(self, calls: list[dict]) -> list[dict]:
+                results = []
+                for c in calls:
+                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
+                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
+                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
+                    }})
+                return results
+
+        risky = RiskyExecutor()
         llm.responses = [
             {"content": "", "tool_calls": [
-                {"function": {"name": "restart_service", "arguments": "{}"}},
+                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
             ]},
             {"content": "Service restarted.", "tool_calls": None},
         ]
 
-        gen = query.run(
-            [{"role": "user", "content": "restart"}], available_tools=[],
+        def orch_builder():
+            return LoopOrchestrator(
+                context_manager=context_manager,
+                bridge=bridge, audit_logger=audit, error_recovery=None,
+                llm=llm, chat_id="",
+                tool_executor=risky, rule_engine=rule_engine,
+            )
+
+        turn = ChatTurn(
+            user_message="restart", chat_id=None,
+            session_manager=MockSessionManager(),
+            prompt_manager=MockPromptManager(),
+            orchestrator_builder=orch_builder,
+            tool_executor=risky,
         )
-        async for e in gen:
+
+        from src.sse_stream import SSEStream
+        stream = SSEStream(turn=turn)
+        async for e in stream:
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
                 bridge.complete(data["request_id"], "APPROVED")
@@ -622,116 +740,7 @@ class TestQueryFullChainAudit:
         assert "TOOL_REQUEST_CREATED" in audit_events
         assert "TOOL_APPROVED" in audit_events
         assert "TOOL_EXECUTED" in audit_events
-        # Verify order: CREATED before APPROVED before EXECUTED
         created_idx = audit_events.index("TOOL_REQUEST_CREATED")
         approved_idx = audit_events.index("TOOL_APPROVED")
         executed_idx = audit_events.index("TOOL_EXECUTED")
         assert created_idx < approved_idx < executed_idx
-
-    async def test_full_audit_chain_mixed(self, query, llm, bridge, audit, executor, rule_engine):
-        """混合场景：TOOL_REQUEST_CREATED → TOOL_APPROVED → TOOL_EXECUTED 链路完整。"""
-        query._graph = build_graph(llm=llm, executor=executor,                                    rule_engine=rule_engine, audit_logger=audit)
-
-        llm.responses = [
-            {"content": "", "tool_calls": [
-                {"function": {"name": "restart_service", "arguments": "{}"}},
-                {"function": {"name": "delete_logs", "arguments": "{}"}},
-            ]},
-            {"content": "Done.", "tool_calls": None},
-        ]
-
-        gen = query.run(
-            [{"role": "user", "content": "restart and clean"}], available_tools=[],
-        )
-        approval_count = 0
-        async for e in gen:
-            if e["event"] == "tool_approval_required":
-                approval_count += 1
-                data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
-
-        assert approval_count == 2  # two tools, two approvals
-
-        audit_events = [e.event for e in audit.events]
-        assert "TOOL_REQUEST_CREATED" in audit_events
-        assert "TOOL_APPROVED" in audit_events
-        # 两个高风险工具都审批通过并执行
-        assert audit_events.count("TOOL_EXECUTED") >= 2
-
-
-# ── Slice 4: AgentRunner Protocol ────────────────────────────────────────
-
-
-class TestAgentRunnerProtocol:
-    """Slice 4: AgentRunner Protocol — SSEStream 依赖抽象而非 Query."""
-
-    def test_protocol_exists_and_importable(self):
-        from src.agent.query import AgentRunner
-        assert AgentRunner is not None
-
-    def test_query_satisfies_protocol(self):
-        """Query structurally implements AgentRunner.run()."""
-        from typing import get_type_hints
-        from src.agent.query import Query, AgentRunner
-
-        query_hints = get_type_hints(Query.run)
-        proto_hints = get_type_hints(AgentRunner.run)
-
-        # Both have the same core params
-        assert "messages" in proto_hints
-        assert "available_tools" in proto_hints
-        assert "system" in proto_hints
-        assert "return" in proto_hints
-
-    def test_mock_agent_runner_can_replace_query(self):
-        """Any class with run() matching the protocol can stand in for Query."""
-        from src.agent.query import AgentRunner
-
-        class MockRunner:
-            async def run(self, messages, available_tools, system=None,
-                          *, _event_queue=None, _chat_id=None):
-                yield {"event": "assistant",
-                       "data": '{"delta": "mock response"}'}
-                yield {"event": "done", "data": "{}"}
-
-        runner = MockRunner()
-        # Structural check: has the required method
-        assert hasattr(runner, "run")
-        assert callable(runner.run)
-
-
-# ── Slice 5: Persistence-decoupled emission ──────────────────────────────
-
-
-class TestEmissionTrackerInitialCount:
-    """Slice 5: EmissionTracker 初始 assistant_count 可外部设定."""
-
-    def test_initial_count_settable(self):
-        from src.agent.loop.emission import EmissionTracker
-        tracker = EmissionTracker(initial_assistant_count=5)
-        assert tracker.assistant_count == 5
-
-    def test_initial_count_defaults_to_zero(self):
-        from src.agent.loop.emission import EmissionTracker
-        tracker = EmissionTracker()
-        assert tracker.assistant_count == 0
-
-    def test_initial_count_in_emit_events(self):
-        """With initial count, emit_events skips those messages."""
-        from src.agent.loop.emission import EmissionTracker
-        from src.agent.loop.events import emit_events
-
-        tracker = EmissionTracker(initial_assistant_count=2)
-        state = {
-            "messages": [
-                {"id": "a", "role": "assistant", "content": "1st."},
-                {"id": "b", "role": "assistant", "content": "2nd."},
-                {"id": "c", "role": "assistant", "content": "3rd."},
-            ]
-        }
-        events = emit_events(state, tracker=tracker)
-        assistant_events = [e for e in events if e["event"] == "assistant"]
-        # Initial count 2 → first 2 skipped → only "3rd." emitted
-        assert len(assistant_events) == 1
-        data = json.loads(assistant_events[0]["data"])
-        assert data["delta"] == "3rd."

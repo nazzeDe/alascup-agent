@@ -1,25 +1,23 @@
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
-from src.agent.loop.audit import _safe_uuid
-from src.agent.nodes._tool_dispatch import _parse_args, _execute_with_error_handling
-from src.models.audit import AuditActor, AuditEvent, AuditLevel
+from src.agent.nodes._helpers import _execute_with_error_handling, _parse_args
+from src.agent.results import ExecuteOutput
+from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
+from src.models.audit import AuditActor
 from src.models.tool import ExecutionStatus
 from src.observability.timing import start_feature, complete_feature
 
 
-async def act_node(state, config: RunnableConfig = None, *, executor, audit_logger=None, lifecycle=None):
+async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=None, lifecycle=None):
     """Execute approved_tool_calls concurrently."""
     tool_calls = state.get("approved_tool_calls", []) or []
     if not tool_calls:
-        return {"tool_results": []}
+        return ExecuteOutput()
 
-    turn_id = state.get("_turn_id")
-    iteration = state.get("_iteration")
-    model = state.get("_model")
+    auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
+
     calls = []
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -31,8 +29,7 @@ async def act_node(state, config: RunnableConfig = None, *, executor, audit_logg
             "request_id": tc.get("request_id", str(uuid4())),
         })
 
-    configurable = config.get("configurable", {}) if config else {}
-    chat_id = configurable.get("_chat_id")
+    chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     feature = f"tool_exec:{chat_id}"
     start_feature(feature)
     logger.debug("act_node: executing {count} tools: {names}", count=len(calls), names=[c["tool_name"] for c in calls])
@@ -48,14 +45,13 @@ async def act_node(state, config: RunnableConfig = None, *, executor, audit_logg
             "is_read_only": tool_calls[i].get("is_read_only", False),
             "is_rollbackable": tool_calls[i].get("is_rollbackable", False),
         })
-        await _audit_tool_executed(
-            audit_logger, calls[i]["tool_name"],
-            execution_status=r.get("execution_status", "UNKNOWN"),
-            turn_id=turn_id, iteration=iteration,
-            chat_id=_safe_uuid(chat_id) if chat_id else None,
+        await auditor.tool_event(
+            "TOOL_EXECUTED",
+            actor=AuditActor.TOOL,
+            tool_name=calls[i]["tool_name"],
             request_id=_safe_uuid(calls[i].get("request_id", "")),
             params=calls[i].get("arguments"),
-            model=model,
+            execution_status=r.get("execution_status", "UNKNOWN"),
         )
         if lifecycle is not None:
             call_id = tool_calls[i].get("call_id")
@@ -71,29 +67,4 @@ async def act_node(state, config: RunnableConfig = None, *, executor, audit_logg
             err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
             logger.warning("tool_failed tool={name} error={err}", name=calls[i]["tool_name"], err=err_msg)
 
-    return {"tool_results": formatted, "approved_tool_calls": []}
-
-
-async def _audit_tool_executed(audit_logger, tool_name: str,
-             execution_status: str = "UNKNOWN",
-             turn_id=None, iteration=None,
-             chat_id: UUID | None = None,
-             request_id: UUID | None = None,
-             params: dict | None = None,
-             model: str | None = None) -> None:
-    if audit_logger is None:
-        return
-    await audit_logger.log(AuditEvent(
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        chat_id=chat_id,
-        request_id=request_id,
-        level=AuditLevel.INFO,
-        actor=AuditActor.TOOL.value,
-        event="TOOL_EXECUTED",
-        tool_name=tool_name,
-        params=params,
-        model=model,
-        execution_status=execution_status,
-        turn_id=turn_id,
-        iteration=iteration,
-    ))
+    return ExecuteOutput(results=formatted)

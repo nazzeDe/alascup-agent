@@ -1,33 +1,19 @@
 import json
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
-from src.agent.nodes._message_format import _format_tools, _messages
-from src.agent.nodes._tool_dispatch import _dispatch_tool_calls
-from src.agent.state import Transition
+from src.agent.nodes._helpers import _format_tools, _messages
+from src.agent.nodes._helpers import _dispatch_tool_calls
+from src.agent.results import ThinkOutput
+from src.agent.turn_context import TurnContext
 from src.observability.debug_log import log as debug_log
 from src.observability.timing import start_feature, complete_feature
 
 
-async def think_node(state, config: RunnableConfig = None, *, llm, executor=None, lifecycle=None):
-    """Stream LLM, return assistant text, pending tool_calls, and streaming results.
-
-    AG-007: Readonly tools are pre-executed inline (streaming_tool_results).
-    Mutable and write tools stay in tool_calls for review_node.
-
-    Fast-path: when approved_tool_calls is already populated (orchestrator
-    merged human approval decisions), skip LLM and route directly to act_node.
-    """
-    # Fast-path: orchestrator has already populated approved_tool_calls
-    # after human approval. Skip LLM, let route_after_think send us to act.
+async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, lifecycle=None):
     if state.get("approved_tool_calls"):
-        return {
-            "tool_calls": [],
-            "streaming_tool_results": [],
-            "transition": None,
-        }
+        return ThinkOutput()
 
     available_tools = state.get("available_tools", [])
     tools = _format_tools(available_tools)
@@ -37,33 +23,29 @@ async def think_node(state, config: RunnableConfig = None, *, llm, executor=None
     accumulated_text: list[str] = []
     accumulated_reasoning: list[str] = []
     tool_call_blocks: list[dict] = []
-    configurable = config.get("configurable", {}) if config else {}
-    queue = configurable.get("_event_queue")
-    chat_id = configurable.get("_chat_id")
+    stream_chunks: list[tuple] = []
+    chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     feature = f"llm_call:{chat_id}"
     start_feature(feature)
     debug_log("DEBUG", "LLM call start", chat_id=str(chat_id), tools=len(tools))
 
     error = await _stream_llm(
-        llm, messages, tools, system, chat_id, feature, queue,
-        accumulated_text, accumulated_reasoning, tool_call_blocks,
+        llm, messages, tools, system, chat_id, feature,
+        accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
     )
     if error is not None:
-        return error
-
-    if queue is not None:
-        await queue.put({"event": "thinking_done"})
+        return ThinkOutput(llm_error=error, is_done=True)
 
     return await _build_think_result(
         accumulated_text, accumulated_reasoning, tool_call_blocks,
-        executor, available_tools, llm=llm, lifecycle=lifecycle,
-        configurable=configurable,
+        stream_chunks, executor, available_tools, llm=llm, lifecycle=lifecycle,
+        ctx=ctx,
     )
 
 
 async def _stream_llm(
-    llm, messages, tools, system, chat_id, feature, queue,
-    accumulated_text, accumulated_reasoning, tool_call_blocks,
+    llm, messages, tools, system, chat_id, feature,
+    accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
 ) -> dict | None:
     """Drive the LLM stream. Returns error dict or None on success."""
     async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
@@ -75,9 +57,9 @@ async def _stream_llm(
         if result is not None:
             _log_stream_error(result, chat_id)
             complete_feature(feature, status="error")
-            return {"messages": [], "tool_calls": [], "llm_error": result, "transition": Transition.ERROR_EXIT}
-        if queue is not None and event["event"] == "assistant":
-            await _forward_to_queue(queue, event["data"])
+            return result
+        if event["event"] == "assistant":
+            _record_stream_chunks(event["data"], stream_chunks)
     return None
 
 
@@ -98,23 +80,20 @@ def _log_stream_error(result, chat_id):
                  code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
 
 
-async def _forward_to_queue(queue, data_str: str) -> None:
-    """Forward reasoning and content chunks to the SSE queue."""
+def _record_stream_chunks(data_str: str, stream_chunks: list[tuple]) -> None:
+    """Record (type, delta) tuples for ThinkOutput.stream_chunks."""
     data = json.loads(data_str)
     rc = data.get("reasoning_content", "")
     if rc:
-        await queue.put({"event": "reasoning", "data": json.dumps({"delta": rc})})
+        stream_chunks.append(("reasoning", rc))
     content_chunk = data.get("delta", "")
     if content_chunk:
-        await queue.put({"event": "assistant", "data": json.dumps({"delta": content_chunk})})
+        stream_chunks.append(("assistant", content_chunk))
 
 
-async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, executor, available_tools, llm=None, lifecycle=None, configurable=None) -> dict:
-    """Assemble the final state dict from accumulated stream data."""
-    result: dict = {}
-
-    if msg := _assemble_assistant_message("".join(accumulated_text), "".join(accumulated_reasoning), tool_call_blocks):
-        result["messages"] = [msg]
+async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks, executor, available_tools, llm=None, lifecycle=None, ctx=None) -> ThinkOutput:
+    """Assemble ThinkOutput from accumulated stream data."""
+    assistant_msg = _assemble_assistant_message("".join(accumulated_text), "".join(accumulated_reasoning), tool_call_blocks)
 
     if executor is not None and tool_call_blocks:
         pending_tool_calls, pre_executed = await _dispatch_tool_calls(
@@ -127,14 +106,16 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
     # Persist discovered tool calls to database.
     llm_trace_id = getattr(llm, "_last_trace_id", None) if llm else None
     if lifecycle is not None:
-        chat_id_str = (configurable or {}).get("_chat_id")
-        chat_id = UUID(chat_id_str) if chat_id_str else None
+        chat_id = ctx.chat_id if ctx else None
         await lifecycle.register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
 
-    result["tool_calls"] = pending_tool_calls
-    result["streaming_tool_results"] = pre_executed
-    result["transition"] = Transition.DONE if not (pending_tool_calls or pre_executed) else None
-    return result
+    return ThinkOutput(
+        assistant_message=assistant_msg,
+        tool_calls=pending_tool_calls,
+        pre_executed=pre_executed,
+        is_done=not (pending_tool_calls or pre_executed),
+        stream_chunks=stream_chunks,
+    )
 
 
 def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict]) -> dict | None:

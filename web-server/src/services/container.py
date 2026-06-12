@@ -11,8 +11,8 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from fastapi import Request
-from langgraph.graph.state import CompiledStateGraph
 
+from src.agent.loop.runner import AgentLoop
 from src.mcp_client.executor import ToolExecutor
 from src.models.message import Message
 from src.models.session import ChatSession
@@ -53,8 +53,11 @@ class Services:
     tool_executor: ToolExecutor
     audit_logger: AuditLogger
     approval_bridge: ApprovalBridge
-    graph: CompiledStateGraph
+    graph: Any = None  # Deprecated, replaced by AgentLoop; kept for backward compat
+    agent_loop: AgentLoop | None = None
     error_recovery: ErrorRecovery | None = None
+    agent_max_iterations: int = 30
+    agent_token_ceiling_ratio: float = 0.95
     db: Any | None = None
     lifecycle: Any | None = None  # ToolCallLifecycle
 
@@ -102,7 +105,12 @@ def error_recovery(request: Request) -> ErrorRecovery | None:
     return _services(request).error_recovery
 
 
-def graph(request: Request) -> CompiledStateGraph:
+def agent_loop(request: Request):
+    return _services(request).agent_loop
+
+
+# Deprecated — kept for backward compat
+def graph(request: Request):
     return _services(request).graph
 
 
@@ -112,3 +120,11 @@ def db(request: Request):
 
 def lifecycle(request: Request):
     return _services(request).lifecycle
+
+
+def agent_max_iterations(request: Request) -> int:
+    return _services(request).agent_max_iterations
+
+
+def agent_token_ceiling_ratio(request: Request) -> float:
+    return _services(request).agent_token_ceiling_ratio

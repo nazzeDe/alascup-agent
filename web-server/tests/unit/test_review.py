@@ -69,10 +69,10 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        assert len(result["approved_tool_calls"]) == 2
-        assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
-        assert result["approved_tool_calls"][1]["function"]["name"] == "get_memory"
-        assert result["rejected_tool_calls"] == []
+        assert len(result.approved) == 2
+        assert result.approved[0]["function"]["name"] == "get_cpu"
+        assert result.approved[1]["function"]["name"] == "get_memory"
+        assert result.rejected == []
 
     async def test_blacklisted_tools_rejected(self):
         from src.agent.nodes import review_node
@@ -89,10 +89,10 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        assert len(result["approved_tool_calls"]) == 1
-        assert result["approved_tool_calls"][0]["function"]["name"] == "get_cpu"
-        assert len(result["rejected_tool_calls"]) == 1
-        assert result["rejected_tool_calls"][0]["function"]["name"] == "blacklist_cmd"
+        assert len(result.approved) == 1
+        assert result.approved[0]["function"]["name"] == "get_cpu"
+        assert len(result.rejected) == 1
+        assert result.rejected[0]["function"]["name"] == "blacklist_cmd"
 
     async def test_whitelist_overrides_classification(self):
         """Whitelist overrides: even non-readonly is auto-approved if whitelisted."""
@@ -109,8 +109,8 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        assert len(result["approved_tool_calls"]) == 1
-        assert result["rejected_tool_calls"] == []
+        assert len(result.approved) == 1
+        assert result.rejected == []
 
     async def test_high_risk_returns_pending_approval(self):
         """Non-readonly, non-whitelist, non-blacklist → pending_approval returned."""
@@ -127,11 +127,11 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        assert len(result["pending_approval"]) == 1
-        assert result["pending_approval"][0]["function"]["name"] == "delete_logs"
-        assert result["approved_tool_calls"] == []
-        assert result["rejected_tool_calls"] == []
-        assert result["transition"] == Transition.APPROVAL_PENDING
+        assert len(result.pending) == 1
+        assert result.pending[0]["function"]["name"] == "delete_logs"
+        assert result.approved == []
+        assert result.rejected == []
+        assert result.transition == Transition.APPROVAL_PENDING
 
     async def test_high_risk_no_auto_approved_or_rejected(self):
         """High-risk tool goes to pending, not approved/rejected."""
@@ -148,9 +148,9 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        assert result["approved_tool_calls"] == []
-        assert result["rejected_tool_calls"] == []
-        assert len(result["pending_approval"]) == 1
+        assert result.approved == []
+        assert result.rejected == []
+        assert len(result.pending) == 1
 
     async def test_mixed_classifications(self):
         """Mixed: readonly auto-approved, blacklist rejected, high-risk pending."""
@@ -170,15 +170,15 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        approved_names = [tc["function"]["name"] for tc in result["approved_tool_calls"]]
-        pending_names = [tc["function"]["name"] for tc in result["pending_approval"]]
+        approved_names = [tc["function"]["name"] for tc in result.approved]
+        pending_names = [tc["function"]["name"] for tc in result.pending]
         assert "get_cpu" in approved_names
         assert "get_memory" in approved_names
         assert "delete_logs" in pending_names
         assert "blacklist_cmd" not in approved_names
         assert "blacklist_cmd" not in pending_names
-        assert len(result["rejected_tool_calls"]) == 1
-        assert result["transition"] == Transition.APPROVAL_PENDING
+        assert len(result.rejected) == 1
+        assert result.transition == Transition.APPROVAL_PENDING
 
     async def test_audit_logged_for_rejected(self):
         from src.agent.nodes import review_node
@@ -212,7 +212,7 @@ class TestReviewNode:
             audit_logger=MockAuditLogger(),
         )
 
-        assert result["transition"] == Transition.APPROVAL_GRANTED
+        assert result.transition == Transition.APPROVAL_GRANTED
 
     async def test_transition_when_all_rejected(self):
         from src.agent.nodes import review_node
@@ -227,7 +227,7 @@ class TestReviewNode:
             audit_logger=MockAuditLogger(),
         )
 
-        assert result["transition"] == Transition.APPROVAL_REJECTED
+        assert result.transition == Transition.APPROVAL_REJECTED
 
     async def test_no_tool_calls_returns_empty(self):
         from src.agent.nodes import review_node
@@ -239,8 +239,8 @@ class TestReviewNode:
             audit_logger=MockAuditLogger(),
         )
 
-        assert result["approved_tool_calls"] == []
-        assert result["rejected_tool_calls"] == []
+        assert result.approved == []
+        assert result.rejected == []
 
     async def test_mutable_tool_calls_classify(self):
         """Mutable tool triggers executor.classify_companion() for dynamic classification."""
@@ -260,4 +260,4 @@ class TestReviewNode:
         assert len(executor.classify_calls) == 1
         assert executor.classify_calls[0]["tool_name"] == "bash"
         assert executor.classify_calls[0]["server_name"] == "tool-server"
-        assert len(result["pending_approval"]) == 1
+        assert len(result.pending) == 1

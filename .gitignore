@@ -7,3 +7,4 @@ web-server/config/llm.json
 rag-server/chroma_data/
 logs/
 *.png
+

@@ -142,7 +142,7 @@ async function handle_reject(requestId: string, message?: string) {
         </div>
       </template>
       <template v-else>
-        <template v-for="item in timeline" :key="item.type + '-' + (item.type === 'message' ? item.data.message_id : item.type === 'reasoning' ? (item.data as ReasoningEntry).message_id : item.type === 'tool_call' ? (item.data as ToolCallInfo).message_id : (item.data as ApprovalEvent).request_id)">
+        <template v-for="item in timeline" :key="item.type + '-' + (item.type === 'message' ? item.data.message_id : item.type === 'reasoning' ? (item.data as ReasoningEntry).message_id : item.type === 'tool_call' ? (item.data as ToolCallInfo).call_id : (item.data as ApprovalEvent).request_id)">
           <ReasoningBubble v-if="item.type === 'reasoning'" :reasoning="item.data as ReasoningEntry" />
           <MessageItem v-else-if="item.type === 'message'" :message="item.data as Message" />
           <ToolCallInline v-else-if="item.type === 'tool_call'" :tool_call="item.data as ToolCallInfo" />

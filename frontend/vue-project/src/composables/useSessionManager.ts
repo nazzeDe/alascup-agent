@@ -32,7 +32,6 @@ export interface ApprovalEvent {
 
 export interface ReasoningEntry {
   message_id: string
-  chat_id: string
   content: string
   done: boolean
   timestamp: string
@@ -212,12 +211,10 @@ export function useSessionManager(deps?: ManagerDeps) {
 
       abortController = new AbortController()
 
-      let currentAssistantMsgId = ''
-      let assistantBuffer = ''
+      let sessionChatId = chatId.value ?? ''
       let currentReasoningId = ''
       let reasoningBuffer = ''
-      let streamingBuffer = ''
-      const STREAMING_PLACEHOLDER_ID = '__streaming__'
+      let assistantBuffer = ''
 
       let newChatId: string | null = null
 
@@ -225,30 +222,12 @@ export function useSessionManager(deps?: ManagerDeps) {
         { chat_id: chatId.value ?? undefined, message: text },
         {
           on_session_init(data: any) {
+            sessionChatId = data.chat_id
             if (isNewChat) newChatId = data.chat_id
           },
 
           on_reasoning(data: any) {
             const delta = data.delta
-            if (data.done) {
-              agentPhase.value = 'responding'
-              const msgId = data.message_id ?? ''
-              const existing = msgId ? reasonings.value.find(r => r.message_id === msgId) : undefined
-              if (existing) {
-                reasonings.value = reasonings.value.map(r =>
-                  r.message_id === msgId ? { ...r, done: true } : r
-                )
-              } else {
-                reasonings.value = [...reasonings.value, {
-                  message_id: data.message_id ?? crypto.randomUUID(),
-                  chat_id: data.chat_id ?? chatId.value ?? '',
-                  content: delta,
-                  done: true,
-                  timestamp: new Date().toISOString(),
-                }]
-              }
-              return
-            }
             if (!currentReasoningId) {
               currentReasoningId = crypto.randomUUID()
               reasoningBuffer = ''
@@ -262,12 +241,22 @@ export function useSessionManager(deps?: ManagerDeps) {
             } else {
               reasonings.value = [...reasonings.value, {
                 message_id: currentReasoningId,
-                chat_id: data.chat_id ?? chatId.value ?? '',
                 content: reasoningBuffer,
                 done: false,
                 timestamp: new Date().toISOString(),
               }]
             }
+          },
+
+          on_thinking_done(_data: any) {
+            if (currentReasoningId) {
+              reasonings.value = reasonings.value.map(r =>
+                r.message_id === currentReasoningId ? { ...r, done: true } : r
+              )
+              currentReasoningId = ''
+              reasoningBuffer = ''
+            }
+            agentPhase.value = 'responding'
           },
 
           on_assistant(data: any) {
@@ -279,55 +268,20 @@ export function useSessionManager(deps?: ManagerDeps) {
               reasoningBuffer = ''
             }
             agentPhase.value = 'responding'
+            assistantBuffer += data.delta
+          },
 
-            if (data.message_id) {
-              // Formal message from emit_events (has message_id).
-              // Replace streaming placeholder if it exists.
-              streamingBuffer = ''
-              const placeholderIdx = messages.value.findIndex(m => m.message_id === STREAMING_PLACEHOLDER_ID)
-              if (data.message_id !== currentAssistantMsgId) {
-                currentAssistantMsgId = data.message_id
-                assistantBuffer = ''
-                const newMsg: Message = {
-                  message_id: data.message_id,
-                  chat_id: data.chat_id ?? chatId.value ?? '',
-                  timestamp: new Date().toISOString(),
-                  type: 'assistant',
-                  content: '',
-                }
-                if (placeholderIdx !== -1) {
-                  // Replace placeholder with formal message.
-                  const updated = [...messages.value]
-                  updated[placeholderIdx] = newMsg
-                  messages.value = updated
-                } else {
-                  messages.value = [...messages.value, newMsg]
-                }
+          on_assistant_done(_data: any) {
+            if (assistantBuffer) {
+              const msg: Message = {
+                message_id: crypto.randomUUID(),
+                chat_id: sessionChatId,
+                timestamp: new Date().toISOString(),
+                type: 'assistant',
+                content: assistantBuffer,
               }
-              assistantBuffer += data.delta
-              const idx = messages.value.findIndex(m => m.message_id === currentAssistantMsgId)
-              if (idx !== -1) {
-                const updated = [...messages.value]
-                updated[idx] = { ...updated[idx]!, content: assistantBuffer }
-                messages.value = updated
-              }
-            } else {
-              // Streaming delta (no message_id) — show as temporary placeholder.
-              streamingBuffer += data.delta
-              const placeholderIdx = messages.value.findIndex(m => m.message_id === STREAMING_PLACEHOLDER_ID)
-              if (placeholderIdx === -1) {
-                messages.value = [...messages.value, {
-                  message_id: STREAMING_PLACEHOLDER_ID,
-                  chat_id: chatId.value ?? '',
-                  timestamp: new Date().toISOString(),
-                  type: 'assistant',
-                  content: streamingBuffer,
-                }]
-              } else {
-                const updated = [...messages.value]
-                updated[placeholderIdx] = { ...updated[placeholderIdx]!, content: streamingBuffer }
-                messages.value = updated
-              }
+              messages.value = [...messages.value, msg]
+              assistantBuffer = ''
             }
           },
 
@@ -335,8 +289,8 @@ export function useSessionManager(deps?: ManagerDeps) {
             agentPhase.value = 'calling_tool'
 
             const tc: ToolCallInfo = {
-              message_id: data.message_id,
-              chat_id: data.chat_id,
+              call_id: data.call_id,
+              chat_id: sessionChatId,
               tool_name: data.tool_name,
               server: data.server,
               is_read_only: data.is_read_only,
@@ -345,7 +299,7 @@ export function useSessionManager(deps?: ManagerDeps) {
               timestamp: new Date().toISOString(),
             }
             const updated = new Map(toolCalls.value)
-            updated.set(data.message_id, tc)
+            updated.set(data.call_id, tc)
             toolCalls.value = updated
 
             if (_toolTimeout) clearTimeout(_toolTimeout)
@@ -359,10 +313,10 @@ export function useSessionManager(deps?: ManagerDeps) {
           on_tool_result(data: any) {
             agentPhase.value = 'thinking'
             if (_toolTimeout) { clearTimeout(_toolTimeout); _toolTimeout = null }
-            const existing = toolCalls.value.get(data.message_id)
+            const existing = toolCalls.value.get(data.call_id)
             if (existing) {
               const updated = new Map(toolCalls.value)
-              updated.set(data.message_id, {
+              updated.set(data.call_id, {
                 ...existing,
                 execution_status: data.execution_status,
                 output: data.output,
@@ -389,6 +343,19 @@ export function useSessionManager(deps?: ManagerDeps) {
             agentPhase.value = 'done'
             isStreaming.value = false
             connectionError.value = null
+            // Clean up any RUNNING tools that never finished (Bug 3: guard
+            // against backend bugs that leave tool calls in RUNNING state).
+            const updated = new Map(toolCalls.value)
+            for (const [id, tc] of updated) {
+              if (tc.execution_status === 'RUNNING') {
+                updated.set(id, {
+                  ...tc,
+                  execution_status: 'FAILED',
+                  error: { message: 'Connection closed before tool completed' },
+                })
+              }
+            }
+            toolCalls.value = updated
             if (isNewChat && newChatId) {
               _transitionDraftToReal(newChatId, _self)
               sessions.value = [{
@@ -495,7 +462,7 @@ export function useSessionManager(deps?: ManagerDeps) {
         const map = new Map<string, ToolCallInfo>()
         if (session.executed_tool_list) {
           for (const tc of session.executed_tool_list) {
-            map.set(tc.message_id, tc)
+            map.set(tc.call_id, tc)
           }
         }
         toolCalls.value = map

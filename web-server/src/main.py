@@ -5,7 +5,6 @@ from pathlib import Path
 from fastapi import FastAPI
 from loguru import logger
 
-from src.agent.graph import build_graph
 from src.api import api_router
 from src.config.loader import load_rules_config, load_servers_config
 from src.config.models import Settings
@@ -54,13 +53,6 @@ def _build_services(settings: Settings) -> Services:
     rule_engine = RuleEngine(rules_config)
 
     lifecycle = ToolCallLifecycle(session_mgr)
-    graph = build_graph(
-        llm=llm_adapter,
-        executor=tool_executor,
-        rule_engine=rule_engine,
-        audit_logger=audit_logger,
-        lifecycle=lifecycle,
-    )
 
     return Services(
         db=db,
@@ -75,9 +67,12 @@ def _build_services(settings: Settings) -> Services:
         tool_executor=tool_executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        graph=graph,
+        graph=None,
+        agent_loop=None,
         error_recovery=ErrorRecovery(),
         lifecycle=lifecycle,
+        agent_max_iterations=settings.agent_max_iterations,
+        agent_token_ceiling_ratio=settings.agent_token_ceiling_ratio,
     )
 
 

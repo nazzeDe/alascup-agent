@@ -1,7 +1,6 @@
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
-
-from langgraph.graph import MessagesState
+from typing import TypedDict
 
 ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool"}
 
@@ -22,19 +21,47 @@ class Transition(StrEnum):
     ERROR_EXIT = "error_exit"
 
 
-class AgentState(MessagesState):
-    system: str | None = None # type: ignore
+@dataclass
+class TurnScratch:
+    """Per-iteration scratch data. Recreated each iteration — no manual cleanup."""
+    tool_calls: list = field(default_factory=list)
+    pending_approval: list = field(default_factory=list)
+    approved_tool_calls: list = field(default_factory=list)
+    rejected_tool_calls: list = field(default_factory=list)
+    tool_results: list = field(default_factory=list)
+    streaming_tool_results: list = field(default_factory=list)
+    _emitted_results: list = field(default_factory=list)
+    stream_chunks: list = field(default_factory=list)
+    llm_error: dict | None = None
+    transition: str | None = None
+
+
+def init_scratch() -> TurnScratch:
+    """Return a fresh TurnScratch for a new iteration."""
+    return TurnScratch()
+
+
+def get_transition(scratch: TurnScratch) -> Transition | None:
+    """Get the current transition from scratch state."""
+    return scratch.transition
+
+
+def has_pending_approval(scratch: TurnScratch) -> bool:
+    """Check if review_node returned pending tool calls needing human approval."""
+    return bool(scratch.pending_approval)
+
+
+class AgentState(TypedDict, total=False):
+    messages: list
+    system: str | None
     available_tools: list
-    transition: Transition | None = None # type: ignore
+    transition: Transition | None
     tool_calls: list
     approved_tool_calls: list
     rejected_tool_calls: list
     pending_approval: list
     tool_results: list
-    llm_error: dict | None = None # type: ignore
+    llm_error: dict | None
     streaming_tool_results: list
     _emitted_results: list
-    # Observability: set by orchestrator before each graph invocation.
-    _turn_id: Any = None  # UUID, but Any avoids LangGraph annotation issues
-    _iteration: int | None = None
-    _model: str | None = None
+    stream_chunks: list

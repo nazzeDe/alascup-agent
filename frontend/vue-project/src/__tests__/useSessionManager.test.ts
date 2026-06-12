@@ -78,7 +78,9 @@ describe('useSessionManager', () => {
     capturedOnSessionId('new-session-1')
 
     // Simulate server events
-    capturedCallbacks.on_assistant({ chat_id: '', message_id: 'm1', delta: 'Hi there!' })
+    capturedCallbacks.on_session_init({ chat_id: 'new-session-1' })
+    capturedCallbacks.on_assistant({ delta: 'Hi there!' })
+    capturedCallbacks.on_assistant_done({})
     capturedCallbacks.on_done({})
 
     // After done, chat_id should be assigned
@@ -290,7 +292,7 @@ describe('useSessionManager', () => {
     const state = manager.get(null)
     // Pre-populate state
     state.messages.value = [{ message_id: 'm1', chat_id: '', timestamp: '', type: 'user', content: 'old' }]
-    state.toolCalls.value = new Map([['t1', { message_id: 't1', chat_id: '', tool_name: 'x', is_read_only: true, execution_status: 'SUCCEEDED', timestamp: '' }]])
+    state.toolCalls.value = new Map([['t1', { call_id: 't1', chat_id: '', tool_name: 'x', is_read_only: true, execution_status: 'SUCCEEDED', timestamp: '' }]])
 
     const ok = await state.loadHistory()
 
@@ -386,7 +388,7 @@ describe('useSessionManager', () => {
     expect(state.connectionError.value).toBeNull()
   })
 
-  it('on_reasoning with done=true updates agentPhase from thinking', async () => {
+  it('on_thinking_done transitions phase from thinking to responding', async () => {
     const mockConnect = vi.fn()
     let capturedCallbacks: any = null
 
@@ -402,11 +404,163 @@ describe('useSessionManager', () => {
 
     expect(state.agentPhase.value).toBe('thinking')
 
-    // Simulate reasoning stream ending
-    capturedCallbacks.on_reasoning({ delta: 'final thought', done: true })
+    // Simulate reasoning stream
+    capturedCallbacks.on_reasoning({ delta: 'thinking...' })
+    // thinking_done marks end of reasoning
+    capturedCallbacks.on_thinking_done({})
 
-    // Phase should transition out of thinking after reasoning completes
-    expect(state.agentPhase.value).not.toBe('thinking')
+    // Phase should transition to responding after thinking completes
+    expect(state.agentPhase.value).toBe('responding')
+    expect(state.reasonings.value).toHaveLength(1)
+    expect(state.reasonings.value[0]!.done).toBe(true)
+  })
+
+  // --- New wire contract: call_id in tool events ---
+
+  it('tool_call uses call_id as map key', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('run tool')
+
+    capturedCallbacks.on_tool_call({
+      call_id: 'call-abc',
+      tool_name: 'read_file',
+      params: { path: '/tmp/test' },
+      is_read_only: true,
+      server: 'filesystem',
+    })
+
+    const tc = state.toolCalls.value.get('call-abc')
+    expect(tc).toBeDefined()
+    expect(tc!.call_id).toBe('call-abc')
+    expect(tc!.tool_name).toBe('read_file')
+    expect(tc!.execution_status).toBe('RUNNING')
+  })
+
+  it('tool_result updates via call_id', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('run tool')
+
+    capturedCallbacks.on_tool_call({
+      call_id: 'call-xyz',
+      tool_name: 'write_file',
+      params: {},
+      is_read_only: false,
+    })
+
+    capturedCallbacks.on_tool_result({
+      call_id: 'call-xyz',
+      execution_status: 'SUCCEEDED',
+      output: { bytes_written: 42 },
+      execution_time_ms: 150,
+    })
+
+    const tc = state.toolCalls.value.get('call-xyz')
+    expect(tc!.execution_status).toBe('SUCCEEDED')
+    expect(tc!.output).toEqual({ bytes_written: 42 })
+    expect(tc!.execution_time_ms).toBe(150)
+  })
+
+  // --- New wire contract: assistant_done as message boundary ---
+
+  it('assistant_done creates a message from accumulated buffer', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('hello')
+
+    capturedCallbacks.on_session_init({ chat_id: 's1' })
+    capturedCallbacks.on_assistant({ delta: 'Hi ' })
+    capturedCallbacks.on_assistant({ delta: 'there!' })
+
+    // No message yet — delta accumulated but not committed
+    expect(state.messages.value).toHaveLength(1) // only user message
+    expect(state.agentPhase.value).toBe('responding')
+
+    capturedCallbacks.on_assistant_done({})
+
+    expect(state.messages.value).toHaveLength(2) // user + assistant
+    expect(state.messages.value[1]!.type).toBe('assistant')
+    expect(state.messages.value[1]!.content).toBe('Hi there!')
+    expect(state.messages.value[1]!.message_id).toBeTruthy()
+    expect(state.messages.value[1]!.chat_id).toBe('s1')
+  })
+
+  it('assistant handles delta-only events (no chat_id, no message_id)', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    // Simulate delta-only assistant event (new wire format)
+    capturedCallbacks.on_assistant({ delta: 'Hello' })
+    capturedCallbacks.on_assistant({ delta: ' World' })
+
+    // Buffer accumulated but no message committed until assistant_done
+    expect(state.messages.value).toHaveLength(1) // only user
+
+    capturedCallbacks.on_assistant_done({})
+    expect(state.messages.value).toHaveLength(2)
+    expect(state.messages.value[1]!.content).toBe('Hello World')
+  })
+
+  it('thinking_done marks reasoning entry done', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('think')
+
+    capturedCallbacks.on_reasoning({ delta: 'hmm' })
+    expect(state.reasonings.value).toHaveLength(1)
+    expect(state.reasonings.value[0]!.done).toBe(false)
+
+    capturedCallbacks.on_thinking_done({})
+
+    expect(state.reasonings.value[0]!.done).toBe(true)
+    expect(state.agentPhase.value).toBe('responding')
   })
 
   // --- Bug 7: loadHistory null check ---

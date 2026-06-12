@@ -48,7 +48,6 @@ class _MockToolExecutor:
 
 
 def _build_test_services():
-    from src.agent.graph import build_graph
     from src.config.models import RulesConfig
     from src.observability.audit_logger import InMemoryAuditLogger
     from src.security.pending import ApprovalBridge
@@ -63,13 +62,6 @@ def _build_test_services():
     rule_engine = RuleEngine(RulesConfig())
     audit_logger = InMemoryAuditLogger()
 
-    graph = build_graph(
-        llm=llm_adapter,
-        executor=executor,
-        rule_engine=rule_engine,
-        audit_logger=audit_logger,
-    )
-
     return Services(
         llm_adapter=llm_adapter,
         session_manager=InMemorySessionManager(),
@@ -79,7 +71,7 @@ def _build_test_services():
         tool_executor=executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        graph=graph,
+        graph=None,
         error_recovery=None,
     )
 

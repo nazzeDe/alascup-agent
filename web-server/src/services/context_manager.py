@@ -1,5 +1,7 @@
 import tiktoken
 
+from src.agent.messages import normalize_message
+
 _encoder = tiktoken.get_encoding("o200k_base")
 
 
@@ -32,9 +34,10 @@ class ContextManager:
         return current_tokens >= self.window_size * self.threshold
 
     def _truncate_tool_results(self, messages: list) -> list[dict]:
+        """Truncate long tool result content. Normalizes messages to dicts."""
         result: list[dict] = []
         for m in messages:
-            d = m if isinstance(m, dict) else _to_dict(m)
+            d = m if isinstance(m, dict) else normalize_message(m)
             if d.get("role") == "tool":
                 content = d.get("content", "")
                 if len(content) > self.max_result_chars:
@@ -72,21 +75,12 @@ class ContextManager:
         return [{"role": "system", "content": f"[Conversation summary] {summary}"}] + recent
 
 
-def _to_dict(m) -> dict:
-    role = getattr(m, "type", getattr(m, "role", ""))
-    role = {"ai": "assistant", "human": "user", "tool": "tool"}.get(role, role)
-    return {"role": role, "content": str(getattr(m, "content", ""))}
-
-
 def _format_for_summary(messages: list) -> str:
+    """Format messages for summarization. Normalizes to dicts if needed."""
     lines = []
     for m in messages:
-        if isinstance(m, dict):
-            role = m.get("role", "")
-            content = m.get("content", "")
-        else:
-            role = getattr(m, "type", getattr(m, "role", ""))
-            role = {"ai": "assistant", "human": "user", "tool": "tool"}.get(role, role)
-            content = str(getattr(m, "content", ""))
+        d = m if isinstance(m, dict) else normalize_message(m)
+        role = d.get("role", "")
+        content = d.get("content", "")
         lines.append(f"[{role}]: {content}")
     return "\n".join(lines)

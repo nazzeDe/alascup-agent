@@ -9,7 +9,6 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def app_with_bridge():
     """Build app with a real ApprovalBridge but mock everything else."""
-    from src.agent.graph import build_graph
     from src.config.models import RulesConfig
     from src.observability.audit_logger import InMemoryAuditLogger
     from src.security.pending import ApprovalBridge
@@ -43,13 +42,6 @@ def app_with_bridge():
         async def classify(self, tool_name, params, server_name=""):
             return {"is_read_only": True, "is_rollbackable": True}
 
-    graph = build_graph(
-        llm=_MockLLM(),
-        executor=_MockExecutor(),
-        rule_engine=RuleEngine(RulesConfig()),
-        audit_logger=InMemoryAuditLogger(),
-    )
-
     bridge = ApprovalBridge()
     services = Services(
         llm_adapter=_MockLLM(),
@@ -60,7 +52,7 @@ def app_with_bridge():
         tool_executor=_MockExecutor(),
         audit_logger=InMemoryAuditLogger(),
         approval_bridge=bridge,
-        graph=graph,
+        graph=None,
     )
     return services, bridge
 

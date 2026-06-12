@@ -1,3 +1,4 @@
+from src.agent.results import ObserveOutput
 from src.agent.state import Transition
 
 
@@ -33,14 +34,11 @@ def observe_node(state, *, tool_results=None):
             "name": r.get("tool_name", "unknown"),
         })
 
-    return {
-        "messages": tool_messages,
-        "streaming_tool_results": [],
-        "tool_results": [],
-        "rejected_tool_calls": [],
-        "_emitted_results": results,
-        "transition": Transition.TOOL_RESULTS,
-    }
+    return ObserveOutput(
+        tool_messages=tool_messages,
+        emitted_results=results,
+        transition=Transition.TOOL_RESULTS,
+    )
 
 
 def _format_tool_result(r: dict) -> str:

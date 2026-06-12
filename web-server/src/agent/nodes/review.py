@@ -1,31 +1,27 @@
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from langchain_core.runnables.config import RunnableConfig
 from loguru import logger
 
-from src.agent.loop.audit import _safe_uuid
-from src.agent.nodes._tool_dispatch import _parse_args
+from src.agent.nodes._helpers import _parse_args
+from src.agent.results import ReviewOutput
 from src.agent.state import Transition
-from src.models.audit import AuditActor, AuditEvent, AuditLevel
+from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
+from src.models.audit import AuditActor, AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 
-async def review_node(state, config: RunnableConfig = None, *, executor, rule_engine, audit_logger, lifecycle=None):
-    """Review all tool_calls: classify mutable tools → rule match → decide.
+async def review_node(state, ctx: TurnContext = None, *, executor, rule_engine, audit_logger, lifecycle=None):
+    """Review all tool_calls: classify mutable tools -> rule match -> decide.
 
     Returns pending_approval when human decision is needed — the orchestrator
     handles the approval loop externally (no interrupt/resume).
     """
     tool_calls = state.get("tool_calls", []) or []
-    configurable = config.get("configurable", {}) if config else {}
-    chat_id = configurable.get("_chat_id")
+    auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
+    chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     logger.debug("review_node: tc_count={count}", count=len(tool_calls))
     debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))
-    turn_id = state.get("_turn_id")
-    iteration = state.get("_iteration")
-    model = state.get("_model")
     approved: list[dict] = []
     rejected: list[dict] = []
     pending: list[dict] = []
@@ -33,9 +29,8 @@ async def review_node(state, config: RunnableConfig = None, *, executor, rule_en
     for tc in tool_calls:
         name, is_read_only, is_rollbackable, args = await _classify_tool_call(tc, executor)
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
-        await _apply_decision(tc, name, is_read_only, decision, audit_logger, approved, rejected, pending,
-                              turn_id=turn_id, iteration=iteration, args=args, model=model, lifecycle=lifecycle,
-                              chat_id=chat_id)
+        await _apply_decision(tc, name, is_read_only, decision, auditor, approved, rejected, pending,
+                              args=args, lifecycle=lifecycle, chat_id=chat_id)
 
     tool_names = [t.get("function", {}).get("name", "?") for t in tool_calls]
     debug_log("DEBUG", "Review done",
@@ -43,7 +38,7 @@ async def review_node(state, config: RunnableConfig = None, *, executor, rule_en
               tools=",".join(tool_names))
 
     if pending:
-        return await _build_pending_response(pending, approved, rejected, audit_logger, turn_id, iteration, model)
+        return await _build_pending_response(pending, approved, rejected, auditor)
 
     return _build_final_response(approved, rejected)
 
@@ -55,7 +50,8 @@ async def _classify_tool_call(tc: dict, executor) -> tuple[str, bool, bool, dict
 
     if tc.get("mutable"):
         try:
-            classification = await executor.classify_companion(name, args, tc.get("server_name", ""))
+            classify_args = {k: v for k, v in args.items() if k != "timeout"}
+            classification = await executor.classify_companion(name, classify_args, tc.get("server_name", ""))
         except Exception:
             logger.opt(exception=True).warning(
                 "classify_companion failed for tool={tool}, treating as dangerous", tool=name,
@@ -70,91 +66,69 @@ async def _apply_decision(
     name: str,
     is_read_only: bool,
     decision: str,
-    audit_logger,
+    auditor: Auditor,
     approved: list[dict],
     rejected: list[dict],
     pending: list[dict],
     *,
-    turn_id=None,
-    iteration=None,
     args: dict | None = None,
-    model: str | None = None,
     lifecycle=None,
     chat_id: str | None = None,
 ) -> None:
-    chat_id = _safe_uuid(chat_id)
+    chat_id_uuid = _safe_uuid(chat_id)
     if decision == "REJECT":
         rejected.append(tc)
-        await _audit_review_decision(audit_logger, "TOOL_REJECTED", name, decision="REJECT",
-                              turn_id=turn_id, iteration=iteration,
-                              chat_id=chat_id, request_id=_safe_uuid(tc.get("request_id", "")),
-                              params=args, model=model)
-        if lifecycle is not None and chat_id is not None:
-            await lifecycle.update(chat_id, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
+        await auditor.tool_event(
+            "TOOL_REJECTED", actor=AuditActor.POLICY, tool_name=name,
+            request_id=_safe_uuid(tc.get("request_id", "")),
+            params=args, decision="REJECT",
+        )
+        if lifecycle is not None and chat_id_uuid is not None:
+            await lifecycle.update(chat_id_uuid, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
         approved.append(tc)
-        await _audit_review_decision(audit_logger, "TOOL_AUTO_APPROVED", name, level=AuditLevel.INFO,
-                              turn_id=turn_id, iteration=iteration,
-                              chat_id=chat_id, request_id=_safe_uuid(tc["request_id"]),
-                              params=args, model=model)
-        if lifecycle is not None and chat_id is not None:
-            await lifecycle.update(chat_id, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
+        await auditor.tool_event(
+            "TOOL_AUTO_APPROVED", actor=AuditActor.POLICY, tool_name=name,
+            request_id=_safe_uuid(tc["request_id"]),
+            params=args,
+        )
+        if lifecycle is not None and chat_id_uuid is not None:
+            await lifecycle.update(chat_id_uuid, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)
-        await _audit_review_decision(audit_logger, "TOOL_REQUEST_CREATED", name, level=AuditLevel.WARN,
-                              turn_id=turn_id, iteration=iteration,
-                              chat_id=chat_id, params=args, model=model)
+        await auditor.tool_event(
+            "TOOL_REQUEST_CREATED", actor=AuditActor.POLICY, tool_name=name,
+            params=args,
+        )
 
 
-async def _build_pending_response(pending, approved, rejected, audit_logger, turn_id, iteration, model=None):
+async def _build_pending_response(pending, approved, rejected, auditor: Auditor) -> ReviewOutput:
     for tc in pending:
         tc["request_id"] = str(uuid4())
     names = ",".join(t.get("function", {}).get("name", "?") for t in pending)
     debug_log("WARN", "Tools require approval — returning to orchestrator", tools=names)
-    await _audit_review_decision(audit_logger, "TOOL_REQUEST_CREATED", names,
-                          level=AuditLevel.WARN, turn_id=turn_id, iteration=iteration,
-                          model=model)
-    return {
-        "approved_tool_calls": approved,
-        "rejected_tool_calls": rejected,
-        "pending_approval": pending,
-        "transition": Transition.APPROVAL_PENDING,
-    }
+    await auditor.tool_event(
+        "TOOL_REQUEST_CREATED", actor=AuditActor.POLICY, tool_name=names,
+        level=AuditLevel.WARN,
+    )
+    return ReviewOutput(
+        approved=approved,
+        rejected=rejected,
+        pending=pending,
+        transition=Transition.APPROVAL_PENDING,
+    )
 
 
-def _build_final_response(approved, rejected):
+def _build_final_response(approved, rejected) -> ReviewOutput:
     transition = (
         Transition.APPROVAL_GRANTED if approved
         else Transition.APPROVAL_REJECTED
     ) if (approved or rejected) else None
-    return {"approved_tool_calls": approved, "rejected_tool_calls": rejected, "transition": transition}
-
-
-async def _audit_review_decision(audit_logger, event: str, tool_name: str, level=None,
-                      turn_id=None, iteration=None,
-                      chat_id: UUID | None = None,
-                      request_id: UUID | None = None,
-                      params: dict | None = None,
-                      model: str | None = None,
-                      **kwargs) -> None:
-    if audit_logger is None:
-        return
-    if level is None:
-        level = AuditLevel.WARN if "REJECT" in event else AuditLevel.INFO
-    await audit_logger.log(AuditEvent(
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        chat_id=chat_id,
-        request_id=request_id,
-        level=level,
-        actor=AuditActor.POLICY.value,
-        event=event,
-        tool_name=tool_name or None,
-        params=params,
-        model=model,
-        turn_id=turn_id,
-        iteration=iteration,
-        **{k: v for k, v in kwargs.items() if v is not None},
-    ))
+    return ReviewOutput(
+        approved=approved,
+        rejected=rejected,
+        transition=transition,
+    )
