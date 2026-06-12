@@ -1,26 +1,45 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
+import { ToastStore } from '@/application/toast-store'
+import { ChatStore } from '@/application/chat-store'
+import { SessionListStore } from '@/application/session-list-store'
+import { SessionService } from '@/application/session-service'
+import { FetchSessionApi } from '@/infrastructure/session-api'
+import { FetchApprovalApi } from '@/infrastructure/approval-api'
 
 const mockFetch = vi.fn()
 global.fetch = mockFetch as unknown as typeof fetch
 
 describe('SessionList', () => {
-  it('renders session items', async () => {
+  it('renders session items when injected with SessionListStore', async () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')
+    const sessionListStore = new SessionListStore()
+    sessionListStore.setSessions([
+      { chat_id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: new Date().toISOString() },
+      { chat_id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: new Date().toISOString() },
+    ])
+    sessionListStore.setActive('c1')
+
     const wrapper = mount(SessionList, {
-      props: {
-        sessions: [
-          { chat_id: 'c1', title: 'Session 1', messages: [], executed_tool_list: [], timestamp: '' },
-          { chat_id: 'c2', title: 'Session 2', messages: [], executed_tool_list: [], timestamp: '' },
-        ],
-        active_chat_id: 'c1',
+      global: {
+        provide: {
+          sessionListStore,
+          chatStore: ref(new ChatStore()),
+          sessionService: new SessionService(
+            new FetchSessionApi(), new FetchApprovalApi(), sessionListStore
+          ),
+        },
       },
     })
     expect(wrapper.text()).toContain('Session 1')
     expect(wrapper.text()).toContain('Session 2')
-  })
 
+    // active_chat_id reactivity: active session gets 'active' class
+    const activeItem = wrapper.find('.session-item.active')
+    expect(activeItem.exists()).toBe(true)
+    expect(activeItem.text()).toContain('Session 1')
+  })
 })
 
 describe('App', () => {
@@ -73,43 +92,56 @@ describe('MessageItem isMeta', () => {
 })
 
 describe('SessionList loading states', () => {
-  it('shows spinner on new session button when creating', async () => {
+  it('shows spinner when sessions are loading', async () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')
+    const sessionListStore = new SessionListStore()
+    sessionListStore.setLoading(true)
+
     const wrapper = mount(SessionList, {
-      props: {
-        sessions: [],
-        active_chat_id: undefined,
-        is_creating: true,
-        is_loading: false,
+      global: {
+        provide: {
+          sessionListStore,
+          chatStore: ref(new ChatStore()),
+          sessionService: new SessionService(
+            new FetchSessionApi(), new FetchApprovalApi(), sessionListStore
+          ),
+        },
       },
     })
-    const btn = wrapper.find('.btn-new-session')
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Loading sessions')
   })
 })
 
 describe('ToastContainer', () => {
   it('renders toast items from useToast composable', async () => {
-    const { useToast } = await import('@/composables/useToast')
-    const { toasts, showToast } = useToast()
-    toasts.value = []
-    showToast('error', 'Test error')
+    const toastStore = new ToastStore()
+    toastStore.show('error', 'Test error')
 
     const { default: ToastContainer } = await import('@/components/ToastContainer.vue')
-    const wrapper = mount(ToastContainer)
+    const wrapper = mount(ToastContainer, {
+      global: {
+        provide: {
+          toastStore,
+        },
+      },
+    })
     expect(wrapper.text()).toContain('Test error')
     expect(wrapper.find('.toast').exists()).toBe(true)
   })
 
   it('renders multiple toasts', async () => {
-    const { useToast } = await import('@/composables/useToast')
-    const { toasts, showToast } = useToast()
-    toasts.value = []
-    showToast('error', 'First')
-    showToast('success', 'Second')
+    const toastStore = new ToastStore()
+    toastStore.show('error', 'First')
+    toastStore.show('success', 'Second')
 
     const { default: ToastContainer } = await import('@/components/ToastContainer.vue')
-    const wrapper = mount(ToastContainer)
+    const wrapper = mount(ToastContainer, {
+      global: {
+        provide: {
+          toastStore,
+        },
+      },
+    })
     const items = wrapper.findAll('.toast')
     expect(items).toHaveLength(2)
   })

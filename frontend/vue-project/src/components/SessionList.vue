@@ -1,14 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import type { ChatSession } from '@/types'
-
-const props = defineProps<{
-  sessions: ChatSession[]
-  active_chat_id?: string
-  is_creating?: boolean
-  is_loading?: boolean
-  error?: string
-}>()
+import type { ChatSession } from '@/domain/models'
+import { useSessionList } from '@/presentation/composables/use-session-list'
 
 const emit = defineEmits<{
   select: [chatId: string]
@@ -42,6 +35,8 @@ function onDocClick() {
 onMounted(() => document.addEventListener('click', onDocClick))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 
+const { sessions, activeChatId, isLoading, error } = useSessionList()
+
 interface Group {
   label: string
   sessions: ChatSession[]
@@ -62,7 +57,7 @@ const groups = computed<Group[]>(() => {
     { label: 'Older', sessions: [] },
   ]
 
-  for (const s of props.sessions) {
+  for (const s of sessions.value) {
     const d = new Date(s.timestamp)
     if (d >= todayStart) {
       result[0]!.sessions.push(s)
@@ -86,15 +81,13 @@ const groups = computed<Group[]>(() => {
     <div class="p-2 border-bottom">
       <button
         class="btn btn-primary btn-sm w-100 btn-new-session"
-        :disabled="is_creating"
         @click="emit('create')"
       >
-        <span v-if="is_creating" class="spinner-border spinner-border-sm me-1"></span>
         + New Session
       </button>
     </div>
     <div class="flex-grow-1 overflow-auto">
-      <div v-if="is_loading" class="p-3 text-muted small text-center">
+      <div v-if="isLoading" class="p-3 text-muted small text-center">
         <div class="spinner-border spinner-border-sm" role="status">
           <span class="visually-hidden">Loading...</span>
         </div>
@@ -106,7 +99,7 @@ const groups = computed<Group[]>(() => {
           <div
             v-for="session in group.sessions"
             :key="session.chat_id"
-            :class="['session-item p-2 border-bottom', { active: session.chat_id === active_chat_id }]"
+            :class="['session-item p-2 border-bottom', { active: session.chat_id === activeChatId }]"
             @click="emit('select', session.chat_id)"
             @contextmenu="onContextMenu($event, session.chat_id)"
           >

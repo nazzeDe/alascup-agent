@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { ReasoningEntry } from '@/composables/useSessionManager'
+import type { ReasoningEntry } from '@/domain/models'
 
 const props = defineProps<{ reasoning: ReasoningEntry }>()
 

@@ -1,52 +1,30 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick } from 'vue'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-import type { Message } from '@/types'
+import type { Message } from '@/domain/models'
+import { renderMarkdown } from '@/infrastructure/markdown'
 
 const props = defineProps<{ message: Message }>()
 
 const contentRef = ref<HTMLElement | null>(null)
 
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node instanceof HTMLAnchorElement) {
-    const href = node.getAttribute('href')
-    if (href && !/^(https?:|\/|mailto:|#)/.test(href)) {
-      node.removeAttribute('href')
-    }
-  }
-})
-
 const renderedHtml = computed(() => {
   if (props.message.type === 'assistant' && !props.message.is_meta) {
-    const raw = marked.parse(props.message.content, { async: false }) as string
-    return DOMPurify.sanitize(raw)
+    return renderMarkdown(props.message.content)
   }
   return ''
 })
 
-let hljsLoaded = false
-
+// Highlight code blocks after each render (highlight.js is loaded lazily by renderMarkdown)
 async function highlightCodeBlocks() {
   await nextTick()
   if (!contentRef.value) return
   const codeBlocks = contentRef.value.querySelectorAll('pre code')
   if (codeBlocks.length === 0) return
   try {
-    if (!hljsLoaded) {
-      const hljs = (await import('highlight.js/lib/core')).default
-      const bash = (await import('highlight.js/lib/languages/bash')).default
-      const json = (await import('highlight.js/lib/languages/json')).default
-      const python = (await import('highlight.js/lib/languages/python')).default
-      hljs.registerLanguage('bash', bash)
-      hljs.registerLanguage('json', json)
-      hljs.registerLanguage('python', python)
-      hljsLoaded = true
-    }
-    const hljs = (await import('highlight.js/lib/core')).default
+    const hljs = (await import('highlight.js')).default
     codeBlocks.forEach(block => hljs.highlightElement(block as HTMLElement))
   } catch {
-    console.warn('highlight.js not available, code blocks will not be syntax-highlighted')
+    // highlight.js not available, code blocks will not be syntax-highlighted
   }
 }
 

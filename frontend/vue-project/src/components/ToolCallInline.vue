@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ToolCallInfo } from '@/types'
+import type { ToolCallInfo } from '@/domain/models'
 
 const props = defineProps<{
   tool_call: ToolCallInfo

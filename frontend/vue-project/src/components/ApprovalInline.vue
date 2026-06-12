@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { ApprovalEvent } from '@/composables/useSessionManager'
+import type { ApprovalEvent } from '@/domain/models'
 
 const props = defineProps<{
   event: ApprovalEvent
