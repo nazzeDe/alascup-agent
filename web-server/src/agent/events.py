@@ -113,9 +113,27 @@ class EventChannel:
             logger.debug("EventChannel.receive(await) id={} event={} qsize={}",
                          self._instance_id, type(event).__name__ if event else 'None', self._queue.qsize())
             return event
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.error("EventChannel.receive ERROR id={} exc={}", self._instance_id, exc)
             return None
+
+    def drain_nowait(self):
+        """Yield all remaining events without blocking. For use after close().
+
+        After close(), no new events can be added (send_nowait is a no-op),
+        so a simple get_nowait() loop drains everything deterministically.
+        """
+        while True:
+            try:
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if event is None:
+                # Sentinel reached — stop
+                break
+            yield event
 
     def close(self) -> None:
         """Close the channel. Subsequent sends are no-ops, receive returns None."""

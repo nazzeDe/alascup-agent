@@ -142,21 +142,14 @@ class ChatTurn:
                         if await self._is_disconnected():
                             disconnected = True
                         # Drain any remaining events
-                        if orch_task.done() and not channel.is_closed():
+                        if not channel.is_closed():
                             channel.close()
-                        # Drain
+                        # After close(), drain_nowait() deterministically
+                        # drains all queued events without timeout risk.
                         logger.debug("ChatTurn drain start: orch_done={} channel_closed={}",
                                      orch_task.done(), channel.is_closed())
                         drained_count = 0
-                        while True:
-                            ev = channel.receive()
-                            try:
-                                ev = await asyncio.wait_for(ev, timeout=0.05)
-                            except asyncio.TimeoutError:
-                                break
-                            if ev is None:
-                                logger.debug("ChatTurn exiting: received None sentinel")
-                                break
+                        for ev in channel.drain_nowait():
                             drained_count += 1
                             if isinstance(ev, AssistantDelta):
                                 collected_text.append(ev.delta)
