@@ -178,6 +178,7 @@ class AgentLoop:
             # 3. Run think -> route -> review -> act -> observe cycle
             # This replaces graph.ainvoke() with direct node calls
             # Yield event loop so side-channel streaming can propagate
+            state["_emitted_results"] = []
             for _ in range(25):
                 # STEP: Think
                 think_out = await self._think(state, ctx)
@@ -222,6 +223,7 @@ class AgentLoop:
 
                 # STEP 3: Act (execute approved tools)
                 if route == "act":
+                    emitter.emit_tools_started(state.get("approved_tool_calls", []))
                     exec_out = await self._act(state, ctx)
                     state["tool_results"] = exec_out.results
                     state["approved_tool_calls"] = []
@@ -233,7 +235,7 @@ class AgentLoop:
                 state["streaming_tool_results"] = []
                 state["tool_results"] = []
                 state["rejected_tool_calls"] = []
-                state["_emitted_results"] = obs_out.emitted_results
+                state["_emitted_results"].extend(obs_out.emitted_results)
                 state["transition"] = obs_out.transition
 
             profiler.checkpoint("graph_ainvoke")
@@ -278,11 +280,14 @@ class AgentLoop:
                     break
 
                 # Emit ToolCallStarted for approved tools BEFORE execution
-                logger.debug("runner emit_tools_started(approval) count={}", len(scratch.approved_tool_calls))
+                logger.debug("runner emit_tools_started(approval) count={} ids={}",
+                             len(scratch.approved_tool_calls),
+                             [tc.get("id") for tc in scratch.approved_tool_calls])
                 emitter.emit_tools_started(scratch.approved_tool_calls)
                 logger.debug("runner emit_tools_started(approval) done")
 
                 # Re-enter cycle to execute approved/rejected tool decisions
+                state["_emitted_results"] = []
                 for _ in range(25):
                     # Think first — think_node skips if approved_tool_calls present
                     think_out = await self._think(state, ctx)
@@ -325,6 +330,7 @@ class AgentLoop:
                             break
 
                     if route == "act":
+                        emitter.emit_tools_started(state.get("approved_tool_calls", []))
                         exec_out = await self._act(state, ctx)
                         state["tool_results"] = exec_out.results
                         state["approved_tool_calls"] = []
@@ -335,7 +341,7 @@ class AgentLoop:
                     state["streaming_tool_results"] = []
                     state["tool_results"] = []
                     state["rejected_tool_calls"] = []
-                    state["_emitted_results"] = obs_out.emitted_results
+                    state["_emitted_results"].extend(obs_out.emitted_results)
                     state["transition"] = obs_out.transition
 
                 profiler.checkpoint("graph_resume")
@@ -362,7 +368,9 @@ class AgentLoop:
                 result_sources = (
                     scratch._emitted_results or scratch.streaming_tool_results
                 )
-                logger.debug("runner emit_tools_finished(approval) count={}", len(result_sources))
+                logger.debug("runner emit_tools_finished(approval) count={} ids={}",
+                             len(result_sources),
+                             [r.get("tool_call_id") for r in result_sources])
                 emitter.emit_tools_finished(result_sources)
                 logger.debug("runner emit_tools_finished(approval) done")
                 # Prevent re-emission

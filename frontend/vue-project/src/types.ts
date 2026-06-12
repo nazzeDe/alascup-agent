@@ -85,6 +85,7 @@ export interface ToolApprovalRequiredEvent {
   tool_name: string;
   params: Record<string, unknown>;
   reason: string;
+  call_id: string;
 }
 
 export interface SessionInitEvent {

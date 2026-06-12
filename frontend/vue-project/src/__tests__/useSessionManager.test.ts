@@ -190,12 +190,21 @@ describe('useSessionManager', () => {
 
     state.sendMessage('do something dangerous')
 
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-1',
+      tool_name: 'rm',
+      params: { path: '/etc/hosts' },
+      is_read_only: false,
+      server: 'filesystem',
+    })
+
     capturedCallbacks.on_tool_approval_required({
       chat_id: 's1',
       request_id: 'req-1',
       tool_name: 'rm',
       params: { path: '/etc/hosts' },
       reason: 'needs to delete system file',
+      call_id: 'tc-1',
     })
 
     expect(state.approvalEvent.value).not.toBeNull()
@@ -709,6 +718,142 @@ describe('useSessionManager', () => {
     const tc = state.toolCalls.value.get('tc-1')
     expect(tc!.execution_status).toBe('FAILED')
     expect(tc!.error).toEqual({ message: 'Connection closed before tool completed' })
+  })
+
+  // ── Bug 1: on_tool_approval_required transitions RUNNING → PENDING_APPROVAL ──
+
+  it('on_tool_approval_required sets tool execution_status to PENDING_APPROVAL', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('do something dangerous')
+
+    // tool_call first — sets RUNNING
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-pending',
+      tool_name: 'rm',
+      params: { path: '/etc/hosts' },
+      is_read_only: false,
+      server: 'filesystem',
+    })
+
+    expect(state.toolCalls.value.get('tc-pending')!.execution_status).toBe('RUNNING')
+
+    // approval_required — should transition to PENDING_APPROVAL
+    capturedCallbacks.on_tool_approval_required({
+      chat_id: 's1',
+      request_id: 'req-1',
+      tool_name: 'rm',
+      params: { path: '/etc/hosts' },
+      reason: 'needs approval',
+      call_id: 'tc-pending',
+    })
+
+    const tc = state.toolCalls.value.get('tc-pending')
+    expect(tc!.execution_status).toBe('PENDING_APPROVAL')
+  })
+
+  it('on_done does NOT force-fail tools with PENDING_APPROVAL status', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('test')
+
+    // tool_call
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-waiting',
+      tool_name: 'write_file',
+      params: { path: '/tmp/out' },
+      is_read_only: false,
+      server: 'filesystem',
+    })
+
+    // approval_required — sets PENDING_APPROVAL
+    capturedCallbacks.on_tool_approval_required({
+      chat_id: 's1',
+      request_id: 'req-1',
+      tool_name: 'write_file',
+      params: { path: '/tmp/out' },
+      reason: 'needs approval',
+      call_id: 'tc-waiting',
+    })
+
+    // done — should NOT force-fail the PENDING_APPROVAL tool
+    capturedCallbacks.on_done({})
+
+    const tc = state.toolCalls.value.get('tc-waiting')
+    expect(tc!.execution_status).toBe('PENDING_APPROVAL')
+    expect(tc!.error).toBeUndefined()
+  })
+
+  // ── Full approval flow: tool_call → approval_required → tool_result → done ──
+
+  it('approval flow: tool survives done when approval followed by tool_result', async () => {
+    const mockConnect = vi.fn()
+    let capturedCallbacks: any = null
+
+    mockConnect.mockImplementation((_body: unknown, callbacks: unknown) => {
+      capturedCallbacks = callbacks
+      return new Promise(() => {})
+    })
+
+    const manager = await freshManager({ _connect: mockConnect })
+    manager.activeChatId.value = 's1'
+    const state = manager.get('s1')
+    state.sendMessage('run bash')
+
+    // 1. tool_call — RUNNING
+    capturedCallbacks.on_tool_call({
+      call_id: 'tc-full',
+      tool_name: 'bash',
+      params: { command: 'ls' },
+      is_read_only: false,
+      server: 'tool-server',
+    })
+
+    // 2. approval_required — PENDING_APPROVAL
+    capturedCallbacks.on_tool_approval_required({
+      chat_id: 's1',
+      request_id: 'req-full',
+      tool_name: 'bash',
+      params: { command: 'ls' },
+      reason: 'needs approval',
+      call_id: 'tc-full',
+    })
+
+    expect(state.toolCalls.value.get('tc-full')!.execution_status).toBe('PENDING_APPROVAL')
+
+    // 3. tool_result arrives (after approval) — SUCCEEDED
+    capturedCallbacks.on_tool_result({
+      call_id: 'tc-full',
+      execution_status: 'SUCCEEDED',
+      output: { stdout: 'file1\nfile2' },
+      execution_time_ms: 100,
+    })
+
+    // 4. done — should NOT force-fail
+    capturedCallbacks.on_done({})
+
+    const tc = state.toolCalls.value.get('tc-full')
+    expect(tc!.execution_status).toBe('SUCCEEDED')
+    expect(tc!.error).toBeUndefined()
+    expect(tc!.output).toEqual({ stdout: 'file1\nfile2' })
   })
 
   // --- Bug 7: loadHistory null check ---

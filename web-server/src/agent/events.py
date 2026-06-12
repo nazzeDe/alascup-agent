@@ -58,6 +58,7 @@ class ApprovalRequired:
     tool_name: str
     params: dict
     reason: str
+    call_id: str = ""
 
 
 @dataclass(frozen=True)

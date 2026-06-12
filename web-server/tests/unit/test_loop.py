@@ -616,6 +616,192 @@ class TestOrchestratorRecoveryEmission:
         assert len(turn_failures) == 0, f"Expected no TurnFailed, got: {turn_failures}"
 
 
+# ── Tool call ID consistency in approval flow ──────────────────────────
+
+
+class MockApprovalBridge:
+    """Auto-approving bridge for tests."""
+    def __init__(self):
+        self.created: list[tuple] = []
+
+    def create(self, request_id: str, chat_id: str) -> None:
+        self.created.append((request_id, chat_id))
+
+    def get_chat_id(self, request_id: str) -> str | None:
+        return "test-chat"
+
+    def complete(self, request_id: str, status: str, reason: str | None = None) -> None:
+        pass
+
+    async def gather_decisions(self, request_id: str, expected_count: int, timeout: float = 300) -> list[str]:
+        return ["APPROVED"] * expected_count
+
+
+class TestApprovalFlowCallIdConsistency:
+    """Bug: ToolCallStarted and ToolCallFinished call_ids mismatch in approval flow.
+
+    When the inner for loop in the approval re-entry path iterates more than
+    once (e.g., LLM generates a second tool call after the approved tool
+    executes), observe_node overwrites state["_emitted_results"], losing
+    the first tool's result. This causes:
+    - First tool: ToolCallStarted emitted, but ToolCallFinished NEVER emitted
+    - Second tool: ToolCallFinished emitted, but ToolCallStarted NEVER emitted
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_ids_match_when_llm_generates_second_tool_after_approval(self):
+        from src.agent.events import (
+            EventChannel,
+            ToolCallStarted,
+            ToolCallFinished,
+        )
+        from src.agent.loop.orchestrator import LoopOrchestrator
+        from src.agent.results import ThinkOutput, ReviewOutput, ExecuteOutput
+        from src.agent.state import Transition
+
+        channel = EventChannel()
+
+        # call_id for the tool that needs approval
+        approved_call_id = "call_00_nNSjXEtOVrx56jJtjddX9744"
+        # call_id for the tool LLM generates after seeing the first result
+        second_call_id = "call_00_NIBvwJmKaPUiLrEffghM7971"
+
+        think_calls = 0
+
+        async def mock_think(state, ctx=None):
+            nonlocal think_calls
+            think_calls += 1
+            approved = state.get("approved_tool_calls", [])
+
+            if approved:
+                # approved_tool_calls present → return early (think_node skips)
+                return ThinkOutput()
+
+            if think_calls == 1:
+                # First call: generate a mutable tool that needs approval
+                return ThinkOutput(
+                    assistant_message={"role": "assistant", "content": "Creating tmp file"},
+                    tool_calls=[{
+                        "id": approved_call_id,
+                        "type": "function",
+                        "function": {"name": "bash", "arguments": '{"command": "mkdir -p ~/tmp"}'},
+                        "mutable": True,
+                        "is_read_only": None,
+                        "server_name": "tool-server",
+                    }],
+                    is_done=False,
+                )
+            elif think_calls == 3:
+                # Third real call: LLM generates another tool after seeing
+                # the first tool's result. This triggers the bug — causes
+                # _emitted_results overwrite in observe_node.
+                return ThinkOutput(
+                    assistant_message={"role": "assistant", "content": "Verifying"},
+                    tool_calls=[{
+                        "id": second_call_id,
+                        "type": "function",
+                        "function": {"name": "ls", "arguments": '{"path": "~/tmp"}'},
+                        "is_read_only": True,
+                        "server_name": "tool-server",
+                    }],
+                    is_done=False,
+                )
+            else:
+                # Fourth (or subsequent) call: text response, done
+                return ThinkOutput(
+                    assistant_message={"role": "assistant", "content": "Done"},
+                    is_done=True,
+                )
+
+        async def mock_review(state, ctx=None):
+            tool_calls = state.get("tool_calls", [])
+            approved = []
+            pending = []
+            rejected = []
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                if name == "bash":
+                    # Needs approval
+                    pending.append(tc)
+                else:
+                    # Auto-approve everything else
+                    tc["is_read_only"] = tc.get("is_read_only", False)
+                    tc["request_id"] = "req-auto"
+                    approved.append(tc)
+            if pending:
+                return ReviewOutput(
+                    approved=approved,
+                    rejected=rejected,
+                    pending=pending,
+                    transition=Transition.APPROVAL_PENDING,
+                )
+            return ReviewOutput(approved=approved, rejected=rejected)
+
+        async def mock_act(state, ctx=None):
+            tcs = state.get("approved_tool_calls", [])
+            results = []
+            for tc in tcs:
+                fn = tc.get("function", {})
+                results.append({
+                    "tool_name": fn.get("name", "?"),
+                    "tool_call_id": tc.get("id", "?"),
+                    "result": {"execution_status": "SUCCEEDED", "output": "ok"},
+                    "is_read_only": tc.get("is_read_only", False),
+                    "is_rollbackable": tc.get("is_rollbackable", False),
+                })
+            return ExecuteOutput(results=results)
+
+        orch = LoopOrchestrator(
+            context_manager=_NoopCtx(),
+            bridge=MockApprovalBridge(),
+            audit_logger=MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test-callid-consistency",
+            think_fn=mock_think,
+            review_fn=mock_review,
+            act_fn=mock_act,
+        )
+        state = {
+            "messages": [{"role": "user", "content": "create tmp file in home dir"}],
+            "transition": None,
+            "tool_calls": [],
+            "tool_results": [],
+            "streaming_tool_results": [],
+        }
+
+        await orch.run(state, channel=channel)
+        events = await collect_channel_events(channel)
+
+        # Collect ToolCallStarted and ToolCallFinished events
+        started = [e for e in events if isinstance(e, ToolCallStarted)]
+        finished = [e for e in events if isinstance(e, ToolCallFinished)]
+
+        started_ids = {e.call_id for e in started}
+        finished_ids = {e.call_id for e in finished}
+
+        # Every ToolCallFinished must have a matching ToolCallStarted
+        orphan_finished = finished_ids - started_ids
+        assert not orphan_finished, (
+            f"ToolCallFinished without ToolCallStarted: {orphan_finished}. "
+            f"Started IDs: {started_ids}, Finished IDs: {finished_ids}"
+        )
+
+        # Every ToolCallStarted must have a matching ToolCallFinished
+        orphan_started = started_ids - finished_ids
+        assert not orphan_started, (
+            f"ToolCallStarted without ToolCallFinished: {orphan_started}. "
+            f"Started IDs: {started_ids}, Finished IDs: {finished_ids}"
+        )
+
+        # Both tools should be accounted for
+        assert approved_call_id in started_ids, f"First tool {approved_call_id} should have ToolCallStarted"
+        assert approved_call_id in finished_ids, f"First tool {approved_call_id} should have ToolCallFinished"
+
+        assert channel.is_closed()
+
+
 class TestCircuitBreaker:
     """Verify safety circuit breaker (max_iterations + token_ceiling)."""
 

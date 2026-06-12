@@ -365,6 +365,16 @@ export function useSessionManager(deps?: ManagerDeps) {
               message: '',
             }
             agentPhase.value = 'awaiting_approval'
+            // Transition the specific tool to PENDING_APPROVAL by call_id
+            // so on_done won't force-fail it while waiting for user decision.
+            if (data.call_id) {
+              const existing = toolCalls.value.get(data.call_id)
+              if (existing && existing.execution_status === 'RUNNING') {
+                const updated = new Map(toolCalls.value)
+                updated.set(data.call_id, { ...existing, execution_status: 'PENDING_APPROVAL' })
+                toolCalls.value = updated
+              }
+            }
           },
 
           on_done(_data: any) {
@@ -381,8 +391,10 @@ export function useSessionManager(deps?: ManagerDeps) {
             if (!connectionError.value) {
               connectionError.value = null
             }
-            // Clean up any RUNNING tools that never finished (Bug 3: guard
+            // Clean up any RUNNING tools that never finished (guard
             // against backend bugs that leave tool calls in RUNNING state).
+            // Skip PENDING_APPROVAL tools — they are waiting for user decision,
+            // not actually executing.
             const updated = new Map(toolCalls.value)
             for (const [id, tc] of updated) {
               if (tc.execution_status === 'RUNNING') {

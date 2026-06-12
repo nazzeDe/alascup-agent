@@ -102,6 +102,7 @@ class ApprovalHandler:
                     tool_name=fn.get("name", ""),
                     params=params,
                     reason=fn.get("name", "") + " needs your approval to execute",
+                    call_id=tc.get("id", ""),
                 )
             if profiler:
                 profiler.checkpoint("approval_events_emitted")

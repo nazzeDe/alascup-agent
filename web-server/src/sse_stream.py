@@ -102,6 +102,7 @@ class SSEStream:
                 "tool_name": event.tool_name,
                 "params": event.params,
                 "reason": event.reason,
+                "call_id": event.call_id,
             })}
         elif isinstance(event, TurnFailed):
             logger.debug("sse_stream TurnFailed code={code} msg={msg}", code=event.code, msg=event.message)

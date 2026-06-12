@@ -49,8 +49,12 @@ class EventEmitter:
                 params = json.loads(params)
             except (json.JSONDecodeError, TypeError):
                 params = {}
+        call_id = tc.get("id") or str(uuid4())
+        from loguru import logger
+        logger.debug("emit_tool_started: id={id} tool={tool} tc_keys={keys}",
+                     id=call_id, tool=fn.get("name", ""), keys=list(tc.keys()))
         self._channel.send_nowait(ToolCallStarted(
-            call_id=tc.get("id") or str(uuid4()),
+            call_id=call_id,
             tool_name=fn.get("name", ""),
             params=params,
             is_read_only=tc.get("is_read_only", False),
@@ -61,8 +65,14 @@ class EventEmitter:
         res = r.get("result", {})
         if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
             res = res["result"]
+        call_id = r.get("tool_call_id") or str(uuid4())
+        from loguru import logger
+        logger.debug("emit_tool_finished: tool_call_id={id} status={status} r_keys={keys}",
+                     id=call_id,
+                     status=res.get("execution_status", "SUCCEEDED"),
+                     keys=list(r.keys()))
         d = {
-            "call_id": r.get("tool_call_id") or str(uuid4()),
+            "call_id": call_id,
             "execution_status": res.get("execution_status", "SUCCEEDED"),
         }
         output = res.get("output")
@@ -78,13 +88,14 @@ class EventEmitter:
 
     # ── Approval ──
 
-    def emit_approval_required(self, chat_id: str, request_id: str, tool_name: str, params: dict, reason: str) -> None:
+    def emit_approval_required(self, chat_id: str, request_id: str, tool_name: str, params: dict, reason: str, *, call_id: str = "") -> None:
         self._channel.send_nowait(ApprovalRequired(
             chat_id=chat_id,
             request_id=request_id,
             tool_name=tool_name,
             params=params,
             reason=reason,
+            call_id=call_id,
         ))
 
     # ── Batch helpers used by orchestrator ──
