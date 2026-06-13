@@ -8,6 +8,7 @@ function flushMicrotasks(): Promise<void> {
 }
 import { ChatStore } from '@/application/chat-store'
 import { SessionListStore } from '@/application/session-list-store'
+import { ToastStore } from '@/application/toast-store'
 import type { SseClient } from '@/application/ports'
 import type { SSECallbacks } from '@/domain/sse-events'
 import { useChat } from '@/presentation/composables/use-chat'
@@ -71,6 +72,7 @@ function mountUseChat(
   sessionListStore: SessionListStore,
 ) {
   let chat: ReturnType<typeof useChat> | undefined
+  const toastStore = new ToastStore()
 
   const Child = defineComponent({
     setup() {
@@ -86,6 +88,7 @@ function mountUseChat(
       provide('sseClient', fakeSse)
       provide('chatStore', storeRef)
       provide('sessionListStore', sessionListStore)
+      provide('toastStore', toastStore)
       return {}
     },
     template: '<Child />',
@@ -241,39 +244,6 @@ describe('useChat', () => {
     expect(tc!.execution_status).toBe('PENDING_APPROVAL')
   })
 
-  // --- 10. on_done force-fails RUNNING tools ---
-  it('on_done force-fails RUNNING tools, preserves PENDING_APPROVAL', () => {
-    const { getChat } = mountUseChat(fakeSse, chatStore, sessionListStore)
-    getChat().setChatId('c1')
-    getChat().send('test')
-
-    // RUNNING tool
-    fakeSse.emit('on_tool_call', {
-      call_id: 'tc-run', tool_name: 'slow', params: {}, is_read_only: true,
-    } as ToolCallEvent)
-
-    // PENDING_APPROVAL tool
-    fakeSse.emit('on_tool_call', {
-      call_id: 'tc-approve', tool_name: 'sudo', params: {}, is_read_only: false,
-    } as ToolCallEvent)
-    fakeSse.emit('on_tool_approval_required', {
-      chat_id: 'c1', request_id: 'req-2', tool_name: 'sudo', params: {},
-      reason: 'root', call_id: 'tc-approve',
-    } as ToolApprovalRequiredEvent)
-
-    fakeSse.emit('on_done', {})
-
-    expect(chatStore.isStreaming.value).toBe(false)
-    expect(chatStore.agentPhase.value).toBe('done')
-
-    const running = chatStore.toolCalls.value.get('tc-run')
-    expect(running!.execution_status).toBe('FAILED')
-    expect(running!.error!.message).toBe('Connection closed before tool completed')
-
-    const pending = chatStore.toolCalls.value.get('tc-approve')
-    expect(pending!.execution_status).toBe('PENDING_APPROVAL')
-  })
-
   // --- 11. on_done preserves connectionError set by preceding on_error ---
   it('on_done preserves connectionError from preceding on_error', () => {
     const { getChat } = mountUseChat(fakeSse, chatStore, sessionListStore)
@@ -284,17 +254,19 @@ describe('useChat', () => {
     expect(chatStore.connectionError.value!.code).toBe('TIMEOUT')
   })
 
-  // --- 12. draft -> real transition ---
-  it('draft session transitions to real on done, adds to session list', () => {
+  // --- 12. new chat: session added at session_init with first-message title ---
+  it('new chat adds session to list at session_init with first-message title', () => {
     const { getChat } = mountUseChat(fakeSse, chatStore, sessionListStore)
-    // chatId starts null (draft)
     getChat().setChatId(null)
     getChat().send('first message')
     fakeSse.emit('on_session_init', { chat_id: 'real-abc' } as SessionInitEvent)
-    fakeSse.emit('on_done', {})
     expect(sessionListStore.activeChatId.value).toBe('real-abc')
     expect(sessionListStore.sessions.value).toHaveLength(1)
     expect(sessionListStore.sessions.value[0]!.chat_id).toBe('real-abc')
+    expect(sessionListStore.sessions.value[0]!.title).toBe('first message')
+    fakeSse.emit('on_done', {})
+    // Still only one session, not duplicated
+    expect(sessionListStore.sessions.value).toHaveLength(1)
   })
 
   // --- 13. on_error sets connectionError ---

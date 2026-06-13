@@ -44,15 +44,9 @@ async function handleSelectSession(chatId: string) {
   activeChatStore.value = newStore
 }
 
-async function handleCreateSession() {
+function handleCreateSession() {
   sessionListStore.setActive(null)
   activeChatStore.value = new ChatStore()
-  // Pre-create backend session in background for sidebar visibility
-  const chatId = await sessionService.createDraft()
-  if (chatId) {
-    activeChatStore.value.chatId.value = chatId
-    sessionListStore.setActive(chatId)
-  }
 }
 
 async function handleDeleteSession(chatId: string) {

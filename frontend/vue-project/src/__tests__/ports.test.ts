@@ -30,9 +30,6 @@ describe('application/ports — interface structure verification', () => {
         timestamp: '',
       }
     }
-    async createSession(): Promise<{ chat_id: string }> {
-      return { chat_id: 'new-session' }
-    }
     async deleteSession(chatId: string): Promise<void> {
       // no-op
     }
@@ -63,12 +60,6 @@ describe('application/ports — interface structure verification', () => {
     })
 
     expect(capturedId).toBe('mock-chat-id')
-  })
-
-  it('SessionApi.createSession returns chat_id', async () => {
-    const api = new MockSessionApi()
-    const result = await api.createSession()
-    expect(result.chat_id).toBe('new-session')
   })
 
   it('SessionApi.listSessions returns ChatSession array', async () => {

@@ -1,6 +1,7 @@
 import { computed, inject, onUnmounted, type Ref } from 'vue'
 import { ChatStore } from '@/application/chat-store'
 import type { SessionListStore } from '@/application/session-list-store'
+import type { ToastStore } from '@/application/toast-store'
 import type { SseClient } from '@/application/ports'
 import type { Message, ToolCallInfo } from '@/domain/models'
 
@@ -14,6 +15,7 @@ export function useChat() {
   const sseClient = inject<SseClient>('sseClient')!
   const storeRef = inject<Ref<ChatStore>>('chatStore')!
   const sessionListStore = inject<SessionListStore>('sessionListStore')!
+  const toastStore = inject<ToastStore>('toastStore')!
 
   let abortController: AbortController | null = null
   let toolTimeout: ReturnType<typeof setTimeout> | null = null
@@ -44,13 +46,25 @@ export function useChat() {
     let reasoningBuffer = ''
     let assistantBuffer = ''
     let newChatId: string | null = null
+    const firstMessageTitle = text.length > 30 ? text.slice(0, 30) + '...' : text
 
     sseClient.connect(
       { chat_id: store.chatId.value ?? undefined, message: text },
       {
         on_session_init(data: any) {
           sessionChatId = data.chat_id
-          if (isNewChat) newChatId = data.chat_id
+          if (isNewChat) {
+            newChatId = data.chat_id
+            store.chatId.value = newChatId
+            sessionListStore.addSession({
+              chat_id: newChatId,
+              title: firstMessageTitle,
+              messages: [],
+              executed_tool_list: [],
+              timestamp: new Date().toISOString(),
+            })
+            sessionListStore.setActive(newChatId)
+          }
         },
 
         on_reasoning(data: any) {
@@ -167,15 +181,9 @@ export function useChat() {
           if (!store.connectionError.value) {
             store.setConnectionError(null)
           }
-          if (isNewChat && newChatId) {
-            store.chatId.value = newChatId
-            sessionListStore.addSession({
-              chat_id: newChatId,
-              messages: store.messages.value,
-              executed_tool_list: [],
-              timestamp: new Date().toISOString(),
-            })
-            sessionListStore.setActive(newChatId)
+          if (isNewChat && !newChatId) {
+            // session_init never arrived
+            toastStore.show('error', '发送失败，请刷新页面重试')
           }
         },
 
@@ -186,10 +194,26 @@ export function useChat() {
             code: data.code || 'UNKNOWN',
             message: data.message || String(data),
           })
+          if (isNewChat) {
+            toastStore.show('error', '发送失败，请刷新页面重试')
+          }
         },
       },
       abortController.signal,
-      (sid: string) => { if (isNewChat) newChatId = sid },
+      (sid: string) => {
+        if (isNewChat && !newChatId) {
+          newChatId = sid
+          store.chatId.value = sid
+          sessionListStore.addSession({
+            chat_id: sid,
+            title: firstMessageTitle,
+            messages: [],
+            executed_tool_list: [],
+            timestamp: new Date().toISOString(),
+          })
+          sessionListStore.setActive(sid)
+        }
+      },
     ).then(() => {
       if (store.isStreaming.value) {
         store.setStreaming(false)
@@ -202,6 +226,9 @@ export function useChat() {
         code: 'NETWORK_ERROR',
         message: err instanceof Error ? err.message : 'Connection lost',
       })
+      if (isNewChat) {
+        toastStore.show('error', '发送失败，请刷新页面重试')
+      }
     })
   }
 

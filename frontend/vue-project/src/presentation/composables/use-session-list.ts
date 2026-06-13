@@ -16,7 +16,6 @@ export function useSessionList() {
     isLoading: store.isLoadingSessions,
     error: store.loadError,
     select: (chatId: string) => service.loadHistory(chatId, chatStoreRef.value),
-    create: () => service.createDraft(),
     delete: (chatId: string) => service.deleteSession(chatId),
   }
 }

@@ -10,23 +10,6 @@ export class SessionService {
     private sessionListStore: SessionListStore,
   ) {}
 
-  async createDraft(): Promise<string | null> {
-    try {
-      const result = await this.sessionApi.createSession()
-      const chatId = result.chat_id
-      this.sessionListStore.setActive(chatId)
-      this.sessionListStore.addSession({
-        chat_id: chatId,
-        messages: [],
-        executed_tool_list: [],
-        timestamp: new Date().toISOString(),
-      })
-      return chatId
-    } catch {
-      return null
-    }
-  }
-
   async loadSessions(): Promise<void> {
     this.sessionListStore.setLoading(true)
     this.sessionListStore.setError('')

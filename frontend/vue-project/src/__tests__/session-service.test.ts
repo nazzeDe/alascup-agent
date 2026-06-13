@@ -10,13 +10,11 @@ class FakeSessionApi implements SessionApi {
   private _sessions: ChatSession[] = []
   private _sessionMap: Map<string, ChatSession> = new Map()
   private _nextId = 1
-  private _failOnCreate = false
   private _failOnList = false
   private _failOnGet = false
   private _failOnDelete = false
 
   // Config helpers
-  setFailOnCreate(v: boolean) { this._failOnCreate = v }
   setFailOnList(v: boolean) { this._failOnList = v }
   setSessions(sessions: ChatSession[]) {
     this._sessions = sessions
@@ -37,12 +35,6 @@ class FakeSessionApi implements SessionApi {
     const session = this._sessionMap.get(chatId)
     if (!session) throw new Error('Session not found')
     return session
-  }
-
-  async createSession(): Promise<{ chat_id: string }> {
-    if (this._failOnCreate) throw new Error('Create failed')
-    const chatId = `new-${this._nextId++}`
-    return { chat_id: chatId }
   }
 
   async deleteSession(_chatId: string): Promise<void> {
@@ -94,23 +86,7 @@ describe('SessionService', () => {
     service = new SessionService(sessionApi, approvalApi, sessionListStore)
   })
 
-  // --- 1. createDraft returns chat_id, adds to sessionListStore ---
-  it('createDraft returns chat_id and adds to sessionListStore', async () => {
-    const chatId = await service.createDraft()
-    expect(chatId).toBe('new-1')
-    expect(sessionListStore.sessions.value).toHaveLength(1)
-    expect(sessionListStore.sessions.value[0]!.chat_id).toBe('new-1')
-  })
-
-  // --- 2. createDraft handles network error gracefully ---
-  it('createDraft handles network error gracefully (returns null)', async () => {
-    sessionApi.setFailOnCreate(true)
-    const chatId = await service.createDraft()
-    expect(chatId).toBeNull()
-    expect(sessionListStore.sessions.value).toEqual([])
-  })
-
-  // --- 3. loadSessions fetches and sets sessions ---
+  // --- 1. loadSessions fetches and sets sessions ---
   it('loadSessions fetches and sets sessions', async () => {
     const sessions: ChatSession[] = [
       { chat_id: 's1', messages: [], executed_tool_list: [], timestamp: 't1' },

@@ -13,7 +13,6 @@ export interface SseClient {
 export interface SessionApi {
   listSessions(): Promise<ChatSession[]>
   getSession(chatId: string): Promise<ChatSession>
-  createSession(): Promise<{ chat_id: string }>
   deleteSession(chatId: string): Promise<void>
 }
 

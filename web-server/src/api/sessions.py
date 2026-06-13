@@ -12,12 +12,6 @@ async def list_sessions(mgr=Depends(session_manager)):
     return await mgr.list_sessions()
 
 
-@router.post("/sessions", status_code=201)
-async def create_session(mgr=Depends(session_manager)):
-    session = await mgr.create_session()
-    return session
-
-
 @router.get("/sessions/{chat_id}")
 async def get_session(chat_id: UUID, mgr=Depends(session_manager)):
     try:

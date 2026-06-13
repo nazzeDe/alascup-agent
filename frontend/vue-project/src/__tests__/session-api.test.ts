@@ -70,27 +70,6 @@ describe('infrastructure/session-api — FetchSessionApi', () => {
     await expect(api.getSession('missing')).rejects.toThrow('HTTP 404')
   })
 
-  it('createSession calls POST /api/sessions', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ chat_id: 'new-session-id' }),
-    })
-
-    const result = await api.createSession()
-
-    expect(mockFetch).toHaveBeenCalledWith('/api/sessions', { method: 'POST' })
-    expect(result.chat_id).toBe('new-session-id')
-  })
-
-  it('createSession throws on non-ok response', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-    })
-
-    await expect(api.createSession()).rejects.toThrow('HTTP 500')
-  })
-
   it('deleteSession calls DELETE /api/sessions/:chatId', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
