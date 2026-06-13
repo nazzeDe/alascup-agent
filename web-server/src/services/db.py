@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 
 -- Soft migrations for existing databases
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls JSONB;
 ALTER TABLE tool_calls ADD COLUMN IF NOT EXISTS llm_trace_id UUID;
 ALTER TABLE tool_calls ALTER COLUMN message_id DROP NOT NULL;
 ALTER TABLE tool_calls DROP CONSTRAINT IF EXISTS tool_calls_message_id_fkey;

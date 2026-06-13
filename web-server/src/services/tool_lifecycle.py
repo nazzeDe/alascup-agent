@@ -8,6 +8,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from src.models.message import Message, MessageType
 from src.models.tool import ApprovalStatus, ExecutionStatus, ServerName, ToolCall
 
 
@@ -16,6 +17,30 @@ class ToolCallLifecycle:
 
     def __init__(self, session_manager):
         self._sm = session_manager
+
+    async def persist_assistant_message(
+        self,
+        chat_id: UUID | None,
+        assistant_msg: dict,
+    ) -> None:
+        """Persist assistant message with tool_calls to messages table.
+
+        Only called when the assistant message contains tool_calls, so that
+        history reconstruction on page reload can pair tool results with
+        their triggering assistant message.
+        """
+        if self._sm is None or chat_id is None:
+            return
+        now = datetime.now(timezone.utc)
+        msg = Message(
+            message_id=uuid4(),
+            chat_id=chat_id,
+            timestamp=now.isoformat(),
+            type=MessageType.ASSISTANT,
+            content=assistant_msg.get("content", ""),
+            tool_calls=assistant_msg.get("tool_calls"),
+        )
+        await self._sm.add_message(chat_id, msg)
 
     async def register(
         self,

@@ -126,13 +126,14 @@ class PostgresSessionManager:
         now = datetime.now(timezone.utc)
         msg_ts = datetime.fromisoformat(msg.timestamp)
         await self._db.execute(
-            "INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta) VALUES ($1,$2,$3,$4,$5,$6)",
+            "INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta, tool_calls) VALUES ($1,$2,$3,$4,$5,$6,$7)",
             msg.message_id,
             chat_id,
             msg_ts,
             msg.type.value,
             msg.content,
             msg.is_meta,
+            json.dumps(msg.tool_calls) if msg.tool_calls else None,
         )
         await self._db.execute(
             "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
@@ -231,6 +232,12 @@ class PostgresSessionManager:
 
 
 def _message_from_row(row) -> Message:
+    raw_tc = row.get("tool_calls")
+    tool_calls = (
+        json.loads(raw_tc)
+        if isinstance(raw_tc, str)
+        else raw_tc
+    )
     return Message(
         message_id=row["id"],
         chat_id=row["chat_id"],
@@ -238,6 +245,7 @@ def _message_from_row(row) -> Message:
         type=MessageType(row["type"]),
         content=row["content"],
         is_meta=row["is_meta"],
+        tool_calls=tool_calls,
     )
 
 

@@ -113,10 +113,13 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
         pending_tool_calls = tool_call_blocks
         pre_executed = []
 
-    # Persist discovered tool calls to database.
+    # Persist assistant message (with or without tool_calls) so history
+    # reconstruction on page reload can pair tool results correctly.
     llm_trace_id = getattr(llm, "_last_trace_id", None) if llm else None
     if lifecycle is not None:
         chat_id = ctx.chat_id if ctx else None
+        if assistant_msg:
+            await lifecycle.persist_assistant_message(chat_id, assistant_msg)
         await lifecycle.register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
 
     return ThinkOutput(

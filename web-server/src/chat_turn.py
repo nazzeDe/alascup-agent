@@ -8,8 +8,6 @@ from uuid import UUID, uuid4
 from loguru import logger
 
 from src.agent.events import (
-    AssistantDelta,
-    AssistantDone,
     DomainEvent,
     EventChannel,
     ToolCallFinished,
@@ -26,6 +24,8 @@ def _build_history(session: ChatSession) -> list[dict]:
 
     Tool calls with results are interleaved as role=tool messages ordered by
     timestamp, so the LLM sees tool execution output in multi-turn conversations.
+    Assistant messages with tool_calls are included so tool messages have valid
+    preceding tool_calls (Anthropic API requirement).
     """
     from datetime import datetime, timezone
 
@@ -51,7 +51,10 @@ def _build_history(session: ChatSession) -> list[dict]:
         if kind == "msg":
             m = obj
             role = m.type.value if isinstance(m.type, MessageType) else m.type
-            history.append({"role": role, "content": m.content})
+            entry: dict = {"role": role, "content": m.content}
+            if m.tool_calls:
+                entry["tool_calls"] = m.tool_calls
+            history.append(entry)
         else:
             tc = obj
             history.append({
@@ -124,7 +127,6 @@ class ChatTurn:
         """Read domain events from the channel.
 
         First event is always TurnStarted.
-        Accumulates AssistantDelta deltas and persists on AssistantDone.
         """
         # 1. Session management
         if self._chat_id is None:
@@ -183,8 +185,8 @@ class ChatTurn:
             orchestrator.run(state, channel=channel)
         )
 
-        # 10. Read from channel, accumulate assistant deltas, persist on AssistantDone
-        collected_text: list[str] = []
+        # 10. Read from channel, yield events to SSE stream.
+        # Assistant message persistence is handled by think_node → lifecycle.persist_assistant_message().
         disconnected = False
 
         try:
@@ -210,8 +212,6 @@ class ChatTurn:
                         drained_count = 0
                         for ev in channel.drain_nowait():
                             drained_count += 1
-                            if isinstance(ev, AssistantDelta):
-                                collected_text.append(ev.delta)
                             yield ev
                         logger.debug("ChatTurn drain done: drained_events={}", drained_count)
                         break
@@ -221,22 +221,8 @@ class ChatTurn:
                     # Channel closed
                     break
 
-                # Accumulate assistant deltas
-                if isinstance(event, AssistantDelta):
-                    collected_text.append(event.delta)
-                elif isinstance(event, AssistantDone):
-                    # Persist accumulated assistant text
-                    full_text = "".join(collected_text)
-                    collected_text.clear()
-                    if full_text:
-                        assistant_msg = Message(
-                            message_id=uuid4(),
-                            chat_id=chat_id_uuid,
-                            timestamp=datetime.now(timezone.utc).isoformat(),
-                            type=MessageType.ASSISTANT,
-                            content=full_text,
-                        )
-                        await self._session_manager.add_message(chat_id_uuid, assistant_msg)
+                # AssistantDelta events are yielded directly to SSE stream.
+                # Persistence is handled by think_node → lifecycle.persist_assistant_message()
 
                 cid = getattr(event, 'call_id', 'N/A')
                 logger.debug("ChatTurn yielding: type={} call_id={}", type(event).__name__, cid)

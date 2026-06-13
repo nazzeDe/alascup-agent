@@ -76,15 +76,17 @@ def _build_test_services():
     from src.services.context_manager import ContextManager
     from src.services.prompt_manager import PromptManager
     from src.services.session_manager import InMemorySessionManager
+    from src.services.tool_lifecycle import ToolCallLifecycle
 
     llm_adapter = _MockLLMAdapter()
     executor = _MockToolExecutor()
     rule_engine = RuleEngine(RulesConfig())
     audit_logger = InMemoryAuditLogger()
+    session_mgr = InMemorySessionManager()
 
     return Services(
         llm_adapter=llm_adapter,
-        session_manager=InMemorySessionManager(),
+        session_manager=session_mgr,
         prompt_manager=PromptManager(),
         context_manager=ContextManager(),
         rule_engine=rule_engine,
@@ -93,6 +95,7 @@ def _build_test_services():
         approval_bridge=ApprovalBridge(),
         graph=None,
         error_recovery=None,
+        lifecycle=ToolCallLifecycle(session_mgr),
     )
 
 

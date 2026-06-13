@@ -882,3 +882,81 @@ class TestHistoryReconstruction:
         history = _build_history(session)
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant"]  # tool without result not included
+
+    async def test_build_history_assistant_with_tool_calls(self):
+        """Assistant message with tool_calls → output dict includes tool_calls field."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+        from src.models.tool import (
+            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
+        )
+
+        chat_id = uuid4()
+        ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
+        ts_assist = datetime(2026, 6, 13, 12, 0, 1, tzinfo=timezone.utc)
+        ts_tool = datetime(2026, 6, 13, 12, 0, 1, 500000, tzinfo=timezone.utc)
+        ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
+
+        tool_use_id = str(uuid4())
+        tool_calls_data = [
+            {"id": tool_use_id, "type": "function",
+             "function": {"name": "get_cpu", "arguments": "{}"}},
+        ]
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    content="check CPU",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    content="Let me check.",
+                    tool_calls=tool_calls_data,
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
+                    content="CPU is fine.",
+                ),
+            ],
+            executed_tool_list=[
+                ToolCall(
+                    name="get_cpu", server=ServerName.TOOL_SERVER,
+                    description="", is_read_only=True, is_rollbackable=False,
+                    params_schema={}, chat_id=chat_id,
+                    message_id=UUID(tool_use_id), params={},
+                    approval_status=ApprovalStatus.APPROVED,
+                    execution_status=ExecutionStatus.SUCCEEDED,
+                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+                    timestamp=ts_tool.isoformat(),
+                ),
+            ],
+            timestamp=ts3.isoformat(),
+        )
+
+        history = _build_history(session)
+
+        # Expected order: user → assistant(with tool_calls) → tool → assistant(final)
+        assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant", "tool", "assistant"], f"got {roles}"
+
+        # Assistant message with tool_calls
+        assist_with_tc = history[1]
+        assert assist_with_tc["role"] == "assistant"
+        assert "tool_calls" in assist_with_tc, "assistant message must include tool_calls field"
+        assert len(assist_with_tc["tool_calls"]) == 1
+        assert assist_with_tc["tool_calls"][0]["id"] == tool_use_id
+
+        # Tool message matches tool_call_id
+        tool_msg = history[2]
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["tool_call_id"] == tool_use_id
+        assert "CPU: 45%" in tool_msg["content"]
