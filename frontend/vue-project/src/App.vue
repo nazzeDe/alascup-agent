@@ -39,6 +39,7 @@ onMounted(() => {
 async function handleSelectSession(chatId: string) {
   sessionListStore.setActive(chatId)
   const newStore = new ChatStore()
+  newStore.chatId.value = chatId
   await sessionService.loadHistory(chatId, newStore)
   activeChatStore.value = newStore
 }
@@ -49,6 +50,7 @@ async function handleCreateSession() {
   // Pre-create backend session in background for sidebar visibility
   const chatId = await sessionService.createDraft()
   if (chatId) {
+    activeChatStore.value.chatId.value = chatId
     sessionListStore.setActive(chatId)
   }
 }

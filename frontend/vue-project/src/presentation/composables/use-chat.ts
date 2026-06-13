@@ -17,18 +17,17 @@ export function useChat() {
 
   let abortController: AbortController | null = null
   let toolTimeout: ReturnType<typeof setTimeout> | null = null
-  let currentChatId: string | null = null
 
   function sendMessage(text: string): void {
     const store = storeRef.value
-    const isNewChat = currentChatId === null
+    const isNewChat = store.chatId.value === null
 
     store.setApprovalEvent(null)
     store.setConnectionError(null)
 
     const userMsg: Message = {
       message_id: crypto.randomUUID(),
-      chat_id: currentChatId ?? '',
+      chat_id: store.chatId.value ?? '',
       timestamp: new Date().toISOString(),
       type: 'user',
       content: text,
@@ -40,14 +39,14 @@ export function useChat() {
 
     abortController = new AbortController()
 
-    let sessionChatId = currentChatId ?? ''
+    let sessionChatId = store.chatId.value ?? ''
     let currentReasoningId = ''
     let reasoningBuffer = ''
     let assistantBuffer = ''
     let newChatId: string | null = null
 
     sseClient.connect(
-      { chat_id: currentChatId ?? undefined, message: text },
+      { chat_id: store.chatId.value ?? undefined, message: text },
       {
         on_session_init(data: any) {
           sessionChatId = data.chat_id
@@ -190,7 +189,7 @@ export function useChat() {
           }
           store.toolCalls.value = updated
           if (isNewChat && newChatId) {
-            currentChatId = newChatId
+            store.chatId.value = newChatId
             sessionListStore.addSession({
               chat_id: newChatId,
               messages: store.messages.value,
@@ -255,7 +254,7 @@ export function useChat() {
     connectionError:  computed(() => storeRef.value.connectionError.value),
     send: sendMessage,
     abort,
-    setChatId: (id: string | null) => { currentChatId = id },
+    setChatId: (id: string | null) => { storeRef.value.chatId.value = id },
   }
 }
 

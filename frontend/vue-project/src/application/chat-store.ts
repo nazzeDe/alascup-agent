@@ -2,6 +2,7 @@ import type { Message, ToolCallInfo, ReasoningEntry, ApprovalEvent, AgentPhase, 
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 
 export class ChatStore {
+  readonly chatId: Ref<string | null> = ref(null)
   readonly messages: Ref<Message[]> = ref([])
   readonly toolCalls: Ref<Map<string, ToolCallInfo>> = ref(new Map())
   readonly reasonings: Ref<ReasoningEntry[]> = ref([])
@@ -121,6 +122,7 @@ export class ChatStore {
 
   // Full reset
   reset(): void {
+    this.chatId.value = null
     this.messages.value = []
     this.toolCalls.value = new Map()
     this.reasonings.value = []
