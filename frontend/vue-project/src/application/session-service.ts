@@ -40,15 +40,7 @@ export class SessionService {
 
     try {
       const session = await this.sessionApi.getSession(chatId)
-      chatStore.messages.value = session.messages ?? []
-      const map = new Map<string, ToolCallInfo>()
-      if (session.executed_tool_list) {
-        for (const tc of session.executed_tool_list) {
-          map.set(tc.call_id, tc)
-        }
-      }
-      chatStore.setToolCalls(map)
-      chatStore.clearReasonings()
+      chatStore.loadFromSession(session)
       chatStore.setLoadingHistory(false)
       return true
     } catch {

@@ -157,4 +157,19 @@ describe('useTimeline', () => {
     expect(timeline.value).toHaveLength(1)
     expect(timeline.value[0]!.type).toBe('message')
   })
+
+  it('sorts reasoning before message when timestamps are equal', () => {
+    const ts = '2025-01-01T00:00:00Z'
+    const msgs = ref<Message[]>([
+      makeMsg({ message_id: 'm1', timestamp: ts, type: 'assistant', content: 'CPU is fine.' }),
+    ])
+    const reasonings = ref<ReasoningEntry[]>([
+      makeReasoning({ message_id: 'm1', timestamp: ts, content: 'Let me think...' }),
+    ])
+
+    const timeline = useTimeline(msgs, ref(new Map()), reasonings, ref(null))
+    expect(timeline.value).toHaveLength(2)
+    expect(timeline.value[0]!.type).toBe('reasoning')
+    expect(timeline.value[1]!.type).toBe('message')
+  })
 })

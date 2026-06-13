@@ -25,8 +25,7 @@ CREATE TABLE IF NOT EXISTS messages (
     chat_id UUID NOT NULL REFERENCES chat_sessions(id),
     timestamp TIMESTAMPTZ NOT NULL,
     type msg_type NOT NULL,
-    content TEXT NOT NULL,
-    is_meta BOOLEAN NOT NULL DEFAULT false
+    content TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat_time ON messages(chat_id, timestamp);
 
@@ -50,7 +49,9 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 );
 
 -- Soft migrations for existing databases
+ALTER TABLE messages DROP COLUMN IF EXISTS is_meta;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_calls JSONB;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reasoning_content TEXT;
 ALTER TABLE tool_calls ADD COLUMN IF NOT EXISTS llm_trace_id UUID;
 ALTER TABLE tool_calls ALTER COLUMN message_id DROP NOT NULL;
 ALTER TABLE tool_calls DROP CONSTRAINT IF EXISTS tool_calls_message_id_fkey;

@@ -18,5 +18,5 @@ class Message(BaseModel):
     timestamp: str
     type: MessageType
     content: str
-    is_meta: bool = Field(default=False)
     tool_calls: list[dict] | None = Field(default=None)
+    reasoning_content: str | None = Field(default=None)

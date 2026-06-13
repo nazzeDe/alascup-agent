@@ -8,7 +8,7 @@ const props = defineProps<{ message: Message }>()
 const contentRef = ref<HTMLElement | null>(null)
 
 const renderedHtml = computed(() => {
-  if (props.message.type === 'assistant' && !props.message.is_meta) {
+  if (props.message.type === 'assistant') {
     return renderMarkdown(props.message.content)
   }
   return ''
@@ -32,19 +32,13 @@ watch(renderedHtml, highlightCodeBlocks)
 </script>
 
 <template>
-  <div v-if="message.is_meta" class="d-flex justify-content-center mb-2">
-    <div class="chat-meta text-muted small">
-      {{ message.content }}
-    </div>
-  </div>
-
-  <div v-else-if="message.type === 'user'" class="d-flex justify-content-end mb-3">
+  <div v-if="message.type === 'user'" class="d-flex justify-content-end mb-3">
     <div class="chat-bubble chat-bubble-user bg-primary text-white rounded-3 px-3 py-2" style="max-width: 75%">
       {{ message.content }}
     </div>
   </div>
 
-  <div v-else-if="message.type === 'assistant'" class="d-flex mb-3">
+  <div v-else-if="message.type === 'assistant' && message.content" class="d-flex mb-3">
     <div class="chat-bubble chat-bubble-assistant bg-light rounded-3 px-3 py-2" style="max-width: 85%">
       <div ref="contentRef" v-html="renderedHtml"></div>
     </div>

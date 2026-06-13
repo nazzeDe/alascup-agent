@@ -35,8 +35,6 @@ def _build_history(session: ChatSession) -> list[dict]:
     entries: list[tuple[datetime, str, object]] = []
 
     for m in session.messages:
-        if m.is_meta:
-            continue
         # TOOL_RESULT messages are synthesized from executed_tool_list below
         # with proper tool_call_id/name fields that the Message model lacks
         if m.type == MessageType.TOOL_RESULT:
@@ -60,6 +58,8 @@ def _build_history(session: ChatSession) -> list[dict]:
             entry: dict = {"role": role, "content": m.content}
             if m.tool_calls:
                 entry["tool_calls"] = m.tool_calls
+            if m.reasoning_content:
+                entry["reasoning_content"] = m.reasoning_content
             history.append(entry)
         else:
             tc = obj

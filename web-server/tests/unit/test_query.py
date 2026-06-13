@@ -1038,3 +1038,70 @@ class TestHistoryReconstruction:
         assert tool_msg["tool_call_id"] == llm_tool_call_id, (
             f"tool_call_id mismatch: {tool_msg['tool_call_id']} != {llm_tool_call_id}"
         )
+
+    async def test_build_history_preserves_reasoning_content(self):
+        """Assistant messages with reasoning_content include it in history dicts."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+
+        chat_id = uuid4()
+        ts = datetime.now(timezone.utc)
+
+        reasoning = "Let me think about which tool to use..."
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts.isoformat(), type=MessageType.USER,
+                    content="check CPU",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
+                    content="Let me check.",
+                    reasoning_content=reasoning,
+                ),
+            ],
+            executed_tool_list=[],
+            timestamp=ts.isoformat(),
+        )
+
+        history = _build_history(session)
+        assert len(history) == 2
+        assistant_entry = history[1]
+        assert assistant_entry["role"] == "assistant"
+        assert assistant_entry["reasoning_content"] == reasoning
+
+    async def test_build_history_omits_reasoning_content_when_none(self):
+        """Assistant messages without reasoning_content omit it from history."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+
+        chat_id = uuid4()
+        ts = datetime.now(timezone.utc)
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
+                    content="Hello.",
+                    reasoning_content=None,
+                ),
+            ],
+            executed_tool_list=[],
+            timestamp=ts.isoformat(),
+        )
+
+        history = _build_history(session)
+        assert len(history) == 1
+        assert "reasoning_content" not in history[0]

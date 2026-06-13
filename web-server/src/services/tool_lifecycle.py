@@ -39,6 +39,7 @@ class ToolCallLifecycle:
             type=MessageType.ASSISTANT,
             content=assistant_msg.get("content", ""),
             tool_calls=assistant_msg.get("tool_calls"),
+            reasoning_content=assistant_msg.get("reasoning_content"),
         )
         await self._sm.add_message(chat_id, msg)
 

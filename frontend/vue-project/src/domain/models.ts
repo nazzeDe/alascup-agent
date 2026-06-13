@@ -11,7 +11,12 @@ export interface Message {
   timestamp: string;
   type: MessageType;
   content: string;
-  is_meta?: boolean;
+  reasoning_content?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: string;
+    function: { name: string; arguments: string };
+  }>;
 }
 
 export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";

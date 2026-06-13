@@ -52,45 +52,6 @@ describe('App', () => {
   })
 })
 
-describe('MessageItem isMeta', () => {
-  it('renders meta message as small muted text', async () => {
-    const { default: MessageItem } = await import('@/components/MessageItem.vue')
-    const wrapper = mount(MessageItem, {
-      props: {
-        message: {
-          message_id: 'm-meta',
-          chat_id: 'c1',
-          timestamp: new Date().toISOString(),
-          type: 'system',
-          content: 'Tool execution approved',
-          is_meta: true,
-        },
-      },
-    })
-    expect(wrapper.text()).toContain('Tool execution approved')
-    expect(wrapper.find('.chat-meta').exists()).toBe(true)
-    expect(wrapper.find('.chat-bubble').exists()).toBe(false)
-  })
-
-  it('isMeta takes precedence over message type', async () => {
-    const { default: MessageItem } = await import('@/components/MessageItem.vue')
-    const wrapper = mount(MessageItem, {
-      props: {
-        message: {
-          message_id: 'm-meta2',
-          chat_id: 'c1',
-          timestamp: new Date().toISOString(),
-          type: 'assistant',
-          content: 'Operation completed',
-          is_meta: true,
-        },
-      },
-    })
-    expect(wrapper.find('.chat-meta').exists()).toBe(true)
-    expect(wrapper.find('.chat-bubble-assistant').exists()).toBe(false)
-  })
-})
-
 describe('SessionList loading states', () => {
   it('shows spinner when sessions are loading', async () => {
     const { default: SessionList } = await import('@/components/SessionList.vue')

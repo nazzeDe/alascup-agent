@@ -20,6 +20,33 @@ class TestMessage:
                 content="x",
             )
 
+    def test_message_with_reasoning_content(self):
+        """Message model preserves reasoning_content for multi-turn tool-call conversations."""
+        from src.models.message import Message, MessageType
+
+        msg = Message(
+            message_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            type=MessageType.ASSISTANT,
+            content="I'll check the CPU.",
+            reasoning_content="Let me think about which tool to use...",
+        )
+        assert msg.reasoning_content == "Let me think about which tool to use..."
+
+    def test_message_reasoning_content_none_by_default(self):
+        """reasoning_content defaults to None when not provided."""
+        from src.models.message import Message, MessageType
+
+        msg = Message(
+            message_id=uuid.uuid4(),
+            chat_id=uuid.uuid4(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            type=MessageType.USER,
+            content="hello",
+        )
+        assert msg.reasoning_content is None
+
 
 class TestToolRequest:
     def test_tool_request_with_rejected_reason(self):

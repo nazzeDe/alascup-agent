@@ -7,6 +7,13 @@ export type TimelineItem =
   | { type: 'reasoning'; data: ReasoningEntry; ts: number }
   | { type: 'approval'; data: ApprovalEvent; ts: number }
 
+const TYPE_ORDER: Record<TimelineItem['type'], number> = {
+  reasoning: 0,
+  message: 1,
+  tool_call: 2,
+  approval: 3,
+}
+
 export function useTimeline(
   messages: Ref<Message[]>,
   toolCalls: Ref<Map<string, ToolCallInfo>>,
@@ -27,7 +34,7 @@ export function useTimeline(
     if (approvalEvent.value) {
       items.push({ type: 'approval', data: approvalEvent.value, ts: Date.now() })
     }
-    items.sort((a, b) => a.ts - b.ts)
+    items.sort((a, b) => a.ts - b.ts || TYPE_ORDER[a.type] - TYPE_ORDER[b.type])
     return items
   })
 }

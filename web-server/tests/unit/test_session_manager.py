@@ -21,14 +21,13 @@ class _FakeRecord:
 
 
 def _make_msg_row(msg_id=None, chat_id=None, ts=None, msg_type="user",
-                  content="hello", is_meta=False):
+                  content="hello"):
     return _FakeRecord({
         "id": msg_id or uuid.uuid4(),
         "chat_id": chat_id or uuid.uuid4(),
         "timestamp": ts or datetime.now(timezone.utc),
         "type": msg_type,
         "content": content,
-        "is_meta": is_meta,
     })
 
 
@@ -68,21 +67,53 @@ class TestMessageFromRow:
         ts = datetime.now(timezone.utc)
 
         row = _make_msg_row(msg_id=msg_id, chat_id=chat_id, ts=ts,
-                            msg_type="user", content="hello", is_meta=False)
+                            msg_type="user", content="hello")
         msg = _message_from_row(row)
         assert msg.message_id == msg_id
         assert msg.chat_id == chat_id
         assert msg.type == MessageType.USER
         assert msg.content == "hello"
-        assert msg.is_meta is False
 
-    def test_is_meta_true(self):
+    def test_reads_reasoning_content_from_row(self):
+        """_message_from_row preserves reasoning_content for multi-turn context reconstruction."""
         from src.services.session_manager import _message_from_row
+        from src.models.message import MessageType
 
-        row = _make_msg_row(msg_type="assistant", content="thinking...", is_meta=True)
+        msg_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        ts = datetime.now(timezone.utc)
+
+        row = _FakeRecord({
+            "id": msg_id,
+            "chat_id": chat_id,
+            "timestamp": ts,
+            "type": "assistant",
+            "content": "Let me check.",
+            "tool_calls": None,
+            "reasoning_content": "Let me think about which tool to use...",
+        })
         msg = _message_from_row(row)
-        assert msg.is_meta is True
+        assert msg.reasoning_content == "Let me think about which tool to use..."
 
+    def test_reasoning_content_none_when_missing_from_row(self):
+        """_message_from_row returns None for reasoning_content when column is absent."""
+        from src.services.session_manager import _message_from_row
+        from src.models.message import MessageType
+
+        msg_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        ts = datetime.now(timezone.utc)
+
+        row = _FakeRecord({
+            "id": msg_id,
+            "chat_id": chat_id,
+            "timestamp": ts,
+            "type": "assistant",
+            "content": "hello",
+            "tool_calls": None,
+        })
+        msg = _message_from_row(row)
+        assert msg.reasoning_content is None
 
 class TestToolCallFromRow:
     def test_converts_row_to_tool_call(self):
@@ -302,30 +333,6 @@ class TestPostgresSessionManagerAddMessage:
         await mgr.add_message(chat_id, msg)
         assert db.execute.call_count == 2
 
-    @pytest.mark.asyncio
-    async def test_add_message_passes_is_meta(self):
-        from src.services.session_manager import PostgresSessionManager
-        from src.models.message import Message, MessageType
-
-        db = MagicMock()
-        db.execute = AsyncMock()
-        mgr = PostgresSessionManager(db)
-
-        msg = Message(
-            message_id=uuid.uuid4(),
-            chat_id=uuid.uuid4(),
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            type=MessageType.ASSISTANT,
-            content="thinking...",
-            is_meta=True,
-        )
-        await mgr.add_message(msg.chat_id, msg)
-
-        # INSERT INTO messages (id, chat_id, timestamp, type, content, is_meta)
-        insert_args = db.execute.call_args_list[0][0]
-        assert insert_args[6] is True  # is_meta is 7th positional arg ($6)
-
-
 class TestPostgresSessionManagerAddToolCall:
     @pytest.mark.asyncio
     async def test_add_tool_call_inserts_and_updates(self):
@@ -422,3 +429,60 @@ class TestPostgresSessionManagerUpdateToolCall:
         )
         update_sql = db.execute.call_args_list[0][0][0]
         assert "result" not in update_sql
+
+
+class TestPersistAssistantMessage:
+    """ToolCallLifecycle.persist_assistant_message must preserve reasoning_content."""
+
+    @pytest.mark.asyncio
+    async def test_persists_reasoning_content(self):
+        """persist_assistant_message passes reasoning_content to Message constructor."""
+        from src.services.tool_lifecycle import ToolCallLifecycle
+        from src.models.message import Message, MessageType
+        import json
+
+        sm = MagicMock()
+        sm.add_message = AsyncMock()
+
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+
+        assistant_msg = {
+            "content": "Let me check.",
+            "reasoning_content": "Let me think about which tool to use...",
+            "tool_calls": [
+                {"id": "call_001", "type": "function",
+                 "function": {"name": "get_cpu", "arguments": "{}"}},
+            ],
+        }
+
+        await lifecycle.persist_assistant_message(chat_id, assistant_msg)
+
+        sm.add_message.assert_called_once()
+        call_args = sm.add_message.call_args
+        msg_arg = call_args[0][1]  # second positional arg is the Message
+        assert isinstance(msg_arg, Message)
+        assert msg_arg.reasoning_content == "Let me think about which tool to use..."
+
+    @pytest.mark.asyncio
+    async def test_persists_none_reasoning_content(self):
+        """persist_assistant_message passes None when reasoning_content absent."""
+        from src.services.tool_lifecycle import ToolCallLifecycle
+        from src.models.message import Message
+
+        sm = MagicMock()
+        sm.add_message = AsyncMock()
+
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+
+        assistant_msg = {
+            "content": "Hello.",
+            "tool_calls": None,
+        }
+
+        await lifecycle.persist_assistant_message(chat_id, assistant_msg)
+
+        sm.add_message.assert_called_once()
+        msg_arg = sm.add_message.call_args[0][1]
+        assert msg_arg.reasoning_content is None

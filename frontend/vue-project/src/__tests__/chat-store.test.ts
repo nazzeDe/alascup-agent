@@ -292,4 +292,52 @@ describe('ChatStore', () => {
     expect(store.toolCalls.value.size).toBe(1)
     expect(store.toolCalls.value.get('tc1')!.tool_name).toBe('read')
   })
+
+  it('loadFromSession extracts reasoning_content from assistant messages', () => {
+    const msgs: Message[] = [
+      { message_id: 'm1', chat_id: 'c1', timestamp: 't1', type: 'user', content: 'check CPU' },
+      {
+        message_id: 'm2', chat_id: 'c1', timestamp: 't2', type: 'assistant', content: '',
+        reasoning_content: 'Let me think about which tool to use...',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_cpu', arguments: '{}' } },
+        ],
+      },
+      { message_id: 'm3', chat_id: 'c1', timestamp: 't3', type: 'assistant', content: 'CPU is fine.' },
+    ]
+    const tcs: ToolCallInfo[] = [
+      {
+        call_id: 'call_1', chat_id: 'c1', tool_name: 'get_cpu',
+        is_read_only: true, execution_status: 'SUCCEEDED', timestamp: 't2.5',
+      },
+    ]
+
+    store.loadFromSession({ messages: msgs, executed_tool_list: tcs })
+
+    // Messages restored
+    expect(store.messages.value).toHaveLength(3)
+    // Reasoning extracted from assistant message m2
+    expect(store.reasonings.value).toHaveLength(1)
+    expect(store.reasonings.value[0]!.message_id).toBe('m2')
+    expect(store.reasonings.value[0]!.content).toBe('Let me think about which tool to use...')
+    expect(store.reasonings.value[0]!.done).toBe(true)
+    expect(store.reasonings.value[0]!.timestamp).toBe('t2')
+  })
+
+  it('loadFromSession clears previous reasonings before extracting', () => {
+    store.addReasoningEntry({
+      message_id: 'old', content: 'stale', done: true, timestamp: 't0',
+    })
+
+    const msgs: Message[] = [
+      {
+        message_id: 'm1', chat_id: 'c1', timestamp: 't1', type: 'assistant', content: 'ok',
+        reasoning_content: 'hmm',
+      },
+    ]
+
+    store.loadFromSession({ messages: msgs, executed_tool_list: [] })
+    expect(store.reasonings.value).toHaveLength(1)
+    expect(store.reasonings.value[0]!.message_id).toBe('m1')
+  })
 })

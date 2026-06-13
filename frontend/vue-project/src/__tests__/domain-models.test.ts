@@ -27,19 +27,23 @@ describe('domain/models — type-level compilation', () => {
       content: 'hello',
     }
     expect(msg.message_id).toBe('m1')
-    expect(msg.is_meta).toBeUndefined()
   })
 
-  it('Message can have is_meta optional flag', () => {
+  it('Message has optional reasoning_content and tool_calls', () => {
     const msg: Message = {
-      message_id: 'm1',
-      chat_id: 'c1',
-      timestamp: '',
+      message_id: 'm2',
+      chat_id: 'c2',
+      timestamp: '2024-01-01T00:00:00Z',
       type: 'assistant',
       content: '',
-      is_meta: true,
+      reasoning_content: 'Let me think...',
+      tool_calls: [
+        { id: 'call_1', type: 'function', function: { name: 'get_cpu', arguments: '{}' } },
+      ],
     }
-    expect(msg.is_meta).toBe(true)
+    expect(msg.reasoning_content).toBe('Let me think...')
+    expect(msg.tool_calls).toHaveLength(1)
+    expect(msg.tool_calls![0]!.function.name).toBe('get_cpu')
   })
 
   it('ApprovalStatus is PENDING | APPROVED | REJECTED | EXPIRED', () => {

@@ -137,5 +137,16 @@ export class ChatStore {
       map.set(tc.call_id, tc)
     }
     this.toolCalls.value = map
+    this.reasonings.value = []
+    for (const m of session.messages) {
+      if (m.reasoning_content && m.type === 'assistant') {
+        this.reasonings.value = [...this.reasonings.value, {
+          message_id: m.message_id,
+          content: m.reasoning_content,
+          done: true,
+          timestamp: m.timestamp,
+        }]
+      }
+    }
   }
 }
