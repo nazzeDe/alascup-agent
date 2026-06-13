@@ -12,7 +12,7 @@ TAG="${TAG:-latest}"
 REGISTRY="${REGISTRY:-}"
 
 # ---------- 基础镜像 ----------
-BASE_PYTHON="ghcr.io/loong64/python:3.13.13-slim-trixie"
+BASE_PYTHON="ghcr.io/loong64/python:3.13.13-trixie"
 BASE_NGINX="ghcr.io/loong64/nginx:1.29.8-debian-perl"
 BASE_POSTGRES="ghcr.io/loong64/postgres:18-trixie"
 
