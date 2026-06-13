@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field, computed_field
 
 class ServerName(StrEnum):
     TOOL_SERVER = "tool-server"
-    RAG_SERVER = "rag-server"
 
 
 class ApprovalStatus(StrEnum):

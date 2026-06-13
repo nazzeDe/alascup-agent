@@ -52,23 +52,18 @@ class TestServerRegistryDiscover:
             _make_tool("get_cpu_info", mutable=False, is_read_only=True),
             _make_tool("bash_classify", mutable=False, is_read_only=True, hidden=True),
         ])
-        rag_client = _make_client([
-            _make_tool("search_experience", mutable=False, is_read_only=True),
-        ])
 
         registry = ServerRegistry([
             ServerEntry(name="tool-server", url="http://tool:8001"),
-            ServerEntry(name="rag-server", url="http://rag:8002"),
         ])
 
         with patch("src.mcp_client.registry.Client") as MockClient:
-            MockClient.side_effect = [tool_client, rag_client]
+            MockClient.side_effect = [tool_client]
             tools = await registry.discover()
 
-        assert len(tools) == 2
+        assert len(tools) == 1
         tool_names = {t["name"] for t in tools}
         assert "get_cpu_info" in tool_names
-        assert "search_experience" in tool_names
         assert "bash_classify" not in tool_names
 
     @pytest.mark.asyncio

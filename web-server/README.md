@@ -1,12 +1,12 @@
 # web-server
 
-核心编排层。接收用户消息，驱动 Agent 循环（ReAct 模式），作为 MCP Client 调用 tool-server 和 rag-server。
+核心编排层。接收用户消息，驱动 Agent 循环（ReAct 模式），作为 MCP Client 调用 tool-server。
 
 ## 职责
 
 - 管理聊天会话生命周期
 - 驱动 Agent 循环（ReAct：Thought → Action → Observation）
-- 作为 MCP Client 调用 tool-server（感知 + 操作）和 rag-server（经验检索）
+- 作为 MCP Client 调用 tool-server
 - 执行审查层：规则匹配 + ToolRequest 审批流转
 - 记录全链路审计日志到 PostgreSQL
 - 自定义 Tracer 记录 LLM 调用追踪（token 消耗、延迟、响应内容）
@@ -26,7 +26,7 @@
 |------|------|
 | FastAPI | HTTP 框架 + OpenAPI 自动生成 |
 | AgentLoop | Agent ReAct 循环（纯 Python while-loop） |
-| fastmcp | MCP Client，连接 tool-server 和 rag-server |
+| fastmcp | MCP Client，连接 tool-server |
 | Pydantic | 数据校验（FastAPI 内置） |
 | httpx | LLM API 调用（OpenAI 兼容） |
 | asyncpg | PostgreSQL 异步驱动（会话、审计、LLM 追踪） |
@@ -239,7 +239,7 @@ LLM 流式输出 token
 
 - **内存环形缓冲**：保留最近 N 条错误，支持运行时查询和 bug report
 - **持久化文件**：每次错误追加写入文件，按日期滚动
-- **MCP 错误独立存储**：tool-server / rag-server 的通信错误单独记录，方便排查连接问题
+- **MCP 错误独立存储**：tool-server 的通信错误单独记录，方便排查连接问题
 
 错误日志在依赖注入就绪之前即可安全调用（消息先入队列，sink 就绪后 drain）。
 

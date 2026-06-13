@@ -18,18 +18,16 @@ BASE_POSTGRES="ghcr.io/loong64/postgres:18-trixie"
 FRONTEND_IMAGE="alascup-frontend:${TAG}"
 WEB_SERVER_IMAGE="alascup-web-server:${TAG}"
 TOOL_SERVER_IMAGE="alascup-tool-server:${TAG}"
-RAG_SERVER_IMAGE="alascup-rag-server:${TAG}"
 
 # 容器名
 POSTGRES_CONTAINER="postgres"
 TOOL_SERVER_CONTAINER="tool-server"
-RAG_SERVER_CONTAINER="rag-server"
 WEB_SERVER_CONTAINER="web-server"
 FRONTEND_CONTAINER="alascup-frontend"
 
 # ---------- 清理旧容器 (可选) ----------
 cleanup_old() {
-    local containers=("$POSTGRES_CONTAINER" "$TOOL_SERVER_CONTAINER" "$RAG_SERVER_CONTAINER" "$WEB_SERVER_CONTAINER" "$FRONTEND_CONTAINER")
+    local containers=("$POSTGRES_CONTAINER" "$TOOL_SERVER_CONTAINER" "$WEB_SERVER_CONTAINER" "$FRONTEND_CONTAINER")
     for c in "${containers[@]}"; do
         if docker ps -a --format '{{.Names}}' | grep -qx "$c"; then
             echo "==> 移除旧容器: $c"
@@ -58,12 +56,10 @@ create_volume() {
     fi
 }
 create_volume "pgdata"
-create_volume "rag-data"
 
 # ---------- 创建日志目录 ----------
 mkdir -p "$PROJECT_DIR/logs/web-server"
 mkdir -p "$PROJECT_DIR/logs/tool-server"
-mkdir -p "$PROJECT_DIR/logs/rag-server"
 
 # ---------- 启动 postgres ----------
 echo "==> 启动 PostgreSQL..."
@@ -118,27 +114,6 @@ docker run -d \
     --cpus 1.00 \
     "$TOOL_SERVER_IMAGE"
 
-# ---------- 启动 rag-server ----------
-echo "==> 启动 RAG Server..."
-docker run -d \
-    --name "$RAG_SERVER_CONTAINER" \
-    --network "$NETWORK" \
-    --restart "$RESTART" \
-    --platform linux/loong64 \
-    --workdir /app \
-    -e EMBEDDING_API_BASE="${EMBEDDING_API_BASE:-}" \
-    -e EMBEDDING_API_KEY="${EMBEDDING_API_KEY:-}" \
-    -v "rag-data:/app/data:Z" \
-    -v "$PROJECT_DIR/logs/rag-server:/app/logs:Z" \
-    --read-only \
-    --tmpfs /tmp:size=128m,mode=1777 \
-    --security-opt no-new-privileges:true \
-    --cap-drop ALL \
-    --pids-limit 128 \
-    --memory 512m \
-    --cpus 0.50 \
-    "$RAG_SERVER_IMAGE"
-
 # ---------- 等待 postgres 就绪 ----------
 echo "==> 等待 PostgreSQL 就绪..."
 for i in $(seq 1 30); do
@@ -162,19 +137,6 @@ for i in $(seq 1 15); do
     fi
     if [ "$i" -eq 15 ]; then
         echo "[WARN] Tool Server health check 超时，继续启动..."
-    fi
-    sleep 2
-done
-
-# ---------- 等待 rag-server 就绪 ----------
-echo "==> 等待 RAG Server 就绪..."
-for i in $(seq 1 15); do
-    if docker exec "$RAG_SERVER_CONTAINER" curl -sf http://localhost:11452/health &>/dev/null; then
-        echo "    RAG Server 就绪"
-        break
-    fi
-    if [ "$i" -eq 15 ]; then
-        echo "[WARN] RAG Server health check 超时，继续启动..."
     fi
     sleep 2
 done

@@ -20,12 +20,10 @@ BASE_POSTGRES="ghcr.io/loong64/postgres:18-trixie"
 FRONTEND_IMAGE="${REGISTRY}alascup-frontend:${TAG}"
 WEB_SERVER_IMAGE="${REGISTRY}alascup-web-server:${TAG}"
 TOOL_SERVER_IMAGE="${REGISTRY}alascup-tool-server:${TAG}"
-RAG_SERVER_IMAGE="${REGISTRY}alascup-rag-server:${TAG}"
 
 # 镜像名 -> 构建上下文目录 的映射 (供 build-images.sh 使用)
 declare -A IMAGE_CONTEXT=(
     ["$TOOL_SERVER_IMAGE"]="$PROJECT_DIR/tool-server"
-    ["$RAG_SERVER_IMAGE"]="$PROJECT_DIR/rag-server"
     ["$WEB_SERVER_IMAGE"]="$PROJECT_DIR/web-server"
     ["$FRONTEND_IMAGE"]="$PROJECT_DIR/frontend"
 )
@@ -35,7 +33,6 @@ ALL_IMAGES=(
     "$FRONTEND_IMAGE"
     "$WEB_SERVER_IMAGE"
     "$TOOL_SERVER_IMAGE"
-    "$RAG_SERVER_IMAGE"
 )
 
 # 构建所需的基础镜像列表

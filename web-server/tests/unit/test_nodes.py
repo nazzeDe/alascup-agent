@@ -345,13 +345,13 @@ class TestStreamingThink:
         """Server prefix is parsed once and attached to the tool_call dict (Q24)."""
         llm = MockLLM([
             {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "rag-server__search_experience", "arguments": "{}"}
+                "function": {"name": "tool-server__get_cpu_info", "arguments": "{}"}
             })},
             {"event": "done", "data": "{}"},
         ])
         executor = MockExecutor()
         state = self._state_with_tools([
-            {"name": "search_experience", "server_name": "rag-server", "mutable": False, "is_read_only": True},
+            {"name": "get_cpu_info", "server_name": "tool-server", "mutable": False, "is_read_only": True},
         ])
 
         result = await think_node(state, llm=llm, executor=executor)

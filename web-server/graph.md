@@ -50,7 +50,6 @@ flowchart TD
     %% ── MCP 工具执行层 ──
     mcp_client["MCP Client (fastmcp)<br/>懒连接 JSON-RPC"]
     mcp_tool_server["调用 tool-server"]
-    mcp_rag_server["调用 rag-server<br/>"]
     mcp_conn_retry{"连接成功？"}
     mcp_retry["重试 2 次<br/>间隔 1s / 2s"]
     mcp_result{"ToolResult<br/>execution_status？"}
@@ -78,7 +77,6 @@ flowchart TD
     %% ── 外部系统 ──
     ext_llm["LLM Provider<br/>OpenAI 兼容 API"]
     ext_tool["tool-server<br/>系统感知 + 运维操作"]
-    ext_rag["rag-server<br/>运维经验库"]
 
 
     %% ============================================================
@@ -144,16 +142,13 @@ flowchart TD
     agent_act --> mcp_client
     mcp_client --> mcp_conn_retry
     mcp_conn_retry -- "成功" --> mcp_tool_server
-    mcp_conn_retry -- "成功" --> mcp_rag_server
     mcp_conn_retry -- "失败" --> mcp_retry
     mcp_retry -- "重试成功" --> mcp_tool_server
     mcp_retry -- "2 次仍失败" --> obs_audit
     mcp_retry -- "2 次仍失败<br/>反馈 LLM: tool unavailable" --> agent_observe
 
     mcp_tool_server --> ext_tool
-    mcp_rag_server --> ext_rag
     ext_tool --> mcp_result
-    ext_rag --> mcp_result
 
     mcp_result -- "SUCCEEDED" --> mcp_success
     mcp_result -- "FAILED" --> mcp_failed
@@ -334,7 +329,7 @@ flowchart TD
     write_init["初始消息<br/>来自 Session + Prompt Manager"]
     write_text["AssistantMessage<br/>LLM 文本回复"]
     write_toolcall["ToolCallMessage<br/>LLM 工具调用请求"]
-    write_toolresult["ToolResult<br/>tool-server / rag-server 执行结果"]
+    write_toolresult["ToolResult<br/>tool-server 执行结果"]
     write_meta["Meta Message<br/>审批通过/拒绝/超时通知"]
 
     %% ── Agent State 内部 ──

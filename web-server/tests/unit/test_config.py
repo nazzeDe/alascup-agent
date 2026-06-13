@@ -48,17 +48,14 @@ class TestServersConfig:
 
         cfg = [
             {"name": "tool-server", "url": "http://tool-server:8001"},
-            {"name": "rag-server", "url": "http://rag-server:8002", "transport": "streamable-http"},
         ]
         (tmp_config_dir / "servers.json").write_text(json.dumps(cfg))
 
         result = load_servers_config(tmp_config_dir / "servers.json")
-        assert len(result) == 2
+        assert len(result) == 1
         assert result[0].name == "tool-server"
         assert result[0].url == "http://tool-server:8001"
         assert result[0].transport == "streamable-http"
-        assert result[1].name == "rag-server"
-        assert result[1].url == "http://rag-server:8002"
 
     def test_load_empty_servers(self, tmp_config_dir):
         from src.config.loader import load_servers_config

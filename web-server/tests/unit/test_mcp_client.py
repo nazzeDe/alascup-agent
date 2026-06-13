@@ -8,7 +8,7 @@ pytestmark = pytest.mark.unit
 
 class FakeRegistry:
     def __init__(self, servers: dict[str, str] | None = None):
-        self._urls = servers or {"tool-server": "http://tool:8001", "rag-server": "http://rag:8002"}
+        self._urls = servers or {"tool-server": "http://tool:8001"}
 
     def url_for(self, server_name: str) -> str:
         return self._urls[server_name]
@@ -278,16 +278,9 @@ class TestToolExecutorExecuteParallel:
                     "approval_status": "APPROVED",
                     "request_id": "req-1",
                 },
-                {
-                    "tool_name": "search_experience",
-                    "arguments": {"query": "cpu high"},
-                    "server_name": "rag-server",
-                    "approval_status": "APPROVED",
-                    "request_id": "req-2",
-                },
             ])
 
-        assert len(results) == 2
+        assert len(results) == 1
         assert all(r["execution_status"] == "SUCCEEDED" for r in results)
 
 

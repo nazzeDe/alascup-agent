@@ -35,7 +35,6 @@ services:
     depends_on:
       - postgres
       - tool-server
-      - rag-server
 
   # 工具执行层（临时文件系统，无宿主机挂载）
   tool-server:

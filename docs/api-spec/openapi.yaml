@@ -101,7 +101,7 @@ paths:
   /tools:
     get:
       summary: 列出全部可用工具
-      description: 返回 tool-server 和 rag-server 注册的全部 MCP 工具元数据
+      description: 返回 tool-server 注册的全部 MCP 工具元数据
       responses:
         "200":
           description: 工具列表
@@ -172,7 +172,7 @@ components:
           description: 工具唯一名称
         server:
           type: string
-          enum: [tool-server, rag-server]
+          enum: [tool-server]
           description: 所属 MCP Server
         description:
           type: string

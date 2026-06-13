@@ -95,7 +95,7 @@ class ToolCallLifecycle:
 
             call = ToolCall(
                 name=name,
-                server=ServerName(server_name) if server_name in {"tool-server", "rag-server"} else ServerName.TOOL_SERVER,
+                server=ServerName(server_name) if server_name == "tool-server" else ServerName.TOOL_SERVER,
                 description="",
                 is_read_only=bool(tc.get("is_read_only", False)),
                 is_rollbackable=bool(tc.get("is_rollbackable", False)),
