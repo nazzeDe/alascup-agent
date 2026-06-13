@@ -13,6 +13,8 @@ from src.agent.events import (
     ToolCallFinished,
     ToolCallStarted,
 )
+from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
 
 
 class EventEmitter:
@@ -50,9 +52,8 @@ class EventEmitter:
             except (json.JSONDecodeError, TypeError):
                 params = {}
         call_id = tc.get("id") or str(uuid4())
-        from loguru import logger
-        logger.debug("emit_tool_started: id={id} tool={tool} tc_keys={keys}",
-                     id=call_id, tool=fn.get("name", ""), keys=list(tc.keys()))
+        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
+                  id=call_id, tool=fn.get("name", ""), tc_keys=list(tc.keys()))
         self._channel.send_nowait(ToolCallStarted(
             call_id=call_id,
             tool_name=fn.get("name", ""),
@@ -66,11 +67,10 @@ class EventEmitter:
         if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
             res = res["result"]
         call_id = r.get("tool_call_id") or str(uuid4())
-        from loguru import logger
-        logger.debug("emit_tool_finished: tool_call_id={id} status={status} r_keys={keys}",
-                     id=call_id,
-                     status=res.get("execution_status", "SUCCEEDED"),
-                     keys=list(r.keys()))
+        debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
+                  id=call_id,
+                  status=res.get("execution_status", "SUCCEEDED"),
+                  r_keys=list(r.keys()))
         d = {
             "call_id": call_id,
             "execution_status": res.get("execution_status", "SUCCEEDED"),

@@ -121,6 +121,7 @@ class LoopOrchestrator:
             context_manager=self._context_manager,
             error_recovery=self._error_recovery,
             llm=self._llm,
+            lifecycle=self._lifecycle,
         )
 
         try:

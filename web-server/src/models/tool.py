@@ -35,9 +35,10 @@ class Tool(BaseModel):
 
 class ToolCall(Tool):
     chat_id: UUID
-    message_id: UUID
+    message_id: UUID | None = None
     call_id: UUID | None = Field(default=None)
     llm_trace_id: UUID | None = None
+    llm_tool_call_id: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     request_id: UUID | None = None
     approval_status: ApprovalStatus

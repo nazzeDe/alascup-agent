@@ -147,8 +147,8 @@ class PostgresSessionManager:
         await self._db.execute(
             """INSERT INTO tool_calls (id, chat_id, message_id, tool_name, server_name,
                is_read_only, is_rollbackable, params, request_id, approval_status,
-               execution_status, created_at, llm_trace_id)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+               execution_status, created_at, llm_trace_id, llm_tool_call_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)""",
             call_id,
             chat_id,
             call.message_id,
@@ -162,6 +162,7 @@ class PostgresSessionManager:
             call.execution_status.value,
             now,
             call.llm_trace_id,
+            call.llm_tool_call_id,
         )
         await self._db.execute(
             "UPDATE chat_sessions SET updated_at = $1 WHERE id = $2",
@@ -265,7 +266,8 @@ def _tool_call_from_row(row) -> ToolCall:
         is_rollbackable=row["is_rollbackable"],
         params_schema={},
         chat_id=row["chat_id"],
-        message_id=row["message_id"],
+        message_id=row.get("message_id"),
+        llm_tool_call_id=row.get("llm_tool_call_id"),
         params=json.loads(row["params"])
         if isinstance(row["params"], str)
         else row["params"],

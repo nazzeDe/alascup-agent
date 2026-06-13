@@ -42,6 +42,28 @@ class ToolCallLifecycle:
         )
         await self._sm.add_message(chat_id, msg)
 
+    async def persist_tool_result(
+        self,
+        chat_id: UUID | None,
+        tool_messages: list[dict],
+    ) -> None:
+        """Persist role=tool messages to messages table so history
+        reconstruction can read them directly without synthesizing from
+        tool_calls table.
+        """
+        if self._sm is None or chat_id is None:
+            return
+        now = datetime.now(timezone.utc)
+        for tm in tool_messages:
+            msg = Message(
+                message_id=uuid4(),
+                chat_id=chat_id,
+                timestamp=now.isoformat(),
+                type=MessageType.TOOL_RESULT,
+                content=tm.get("content", ""),
+            )
+            await self._sm.add_message(chat_id, msg)
+
     async def register(
         self,
         chat_id: UUID | None,
@@ -67,11 +89,7 @@ class ToolCallLifecycle:
                 params = json.loads(args_str) if isinstance(args_str, str) else args_str
             except json.JSONDecodeError:
                 params = {}
-            tc_id_str = tc.get("id", str(uuid4()))
-            try:
-                msg_id = UUID(tc_id_str)
-            except (ValueError, AttributeError):
-                msg_id = uuid4()
+            tc_id_str = tc.get("id", "")
             server_name = tc.get("server_name", "tool-server")
 
             call = ToolCall(
@@ -82,7 +100,8 @@ class ToolCallLifecycle:
                 is_rollbackable=bool(tc.get("is_rollbackable", False)),
                 params_schema={},
                 chat_id=chat_id,
-                message_id=msg_id,
+                message_id=None,
+                llm_tool_call_id=tc_id_str,
                 params=params,
                 request_id=None,
                 approval_status=ApprovalStatus.PENDING,
@@ -94,11 +113,7 @@ class ToolCallLifecycle:
             tc["call_id"] = call_id
 
         for pe in pre_executed:
-            tc_id_str = pe.get("tool_call_id", str(uuid4()))
-            try:
-                msg_id = UUID(tc_id_str)
-            except (ValueError, AttributeError):
-                msg_id = uuid4()
+            tc_id_str = pe.get("tool_call_id", "")
             result = pe.get("result", {})
             exec_status_str = result.get("execution_status", "SUCCEEDED")
 
@@ -110,7 +125,8 @@ class ToolCallLifecycle:
                 is_rollbackable=False,
                 params_schema={},
                 chat_id=chat_id,
-                message_id=msg_id,
+                message_id=None,
+                llm_tool_call_id=tc_id_str,
                 params={},
                 request_id=None,
                 approval_status=ApprovalStatus.APPROVED,

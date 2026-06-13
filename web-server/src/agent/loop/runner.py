@@ -14,6 +14,7 @@ from src.agent.state import Transition, TurnScratch, get_transition, init_scratc
 from src.agent.turn_context import TurnContext, Auditor
 from src.models.audit import AuditActor
 from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
 from src.observability.timing import (
     FeatureTimeTracker,
     write_profile,
@@ -56,6 +57,7 @@ class AgentLoop:
         context_manager,
         error_recovery,
         llm,
+        lifecycle=None,
     ):
         self._think = think_fn
         self._review = review_fn
@@ -68,6 +70,7 @@ class AgentLoop:
         self._context_manager = context_manager
         self._error_recovery = error_recovery
         self._llm = llm
+        self._lifecycle = lifecycle
 
     async def run(self, state: dict, channel: EventChannel) -> None:
         """Drive the ReAct while-loop. channel.close() in finally."""
@@ -167,7 +170,8 @@ class AgentLoop:
             # This replaces graph.ainvoke() which would return state as-is.
             if state.get("transition") == Transition.DONE:
                 scratch.transition = Transition.DONE
-                logger.debug("graph_done pending_approval=0 tool_calls=0 approved=0 transition=done")
+                debug_log("DEBUG", tp.TRANSITION, reason="graph_done_terminal",
+                          pending_approval=0, tool_calls=0, approved=0)
                 action = await self._handle_transition(scratch, auditor)
                 if action not in ("continue",):
                     _finalize_iteration(profiler, loop_feature)
@@ -204,12 +208,29 @@ class AgentLoop:
                 state["transition"] = Transition.DONE if think_out.is_done else None
 
                 route = route_after_think(state)
+                debug_log(
+                    "DEBUG",
+                    "Route after think",
+                    chat_id=str(state.get("_chat_id", "")),
+                    route=route,
+                    tool_calls_count=len(state.get("tool_calls", [])),
+                    streaming_results_count=len(state.get("streaming_tool_results", [])),
+                    approved_count=len(state.get("approved_tool_calls", [])),
+                    llm_error=bool(state.get("llm_error")),
+                    is_done=think_out.is_done,
+                )
                 if route == "__end__":
                     state["transition"] = Transition.DONE
                     break
 
                 # STEP 2: Review (only if there are tool_calls needing review)
                 if route == "review":
+                    debug_log(
+                        "DEBUG",
+                        "Enter review",
+                        chat_id=str(state.get("_chat_id", "")),
+                        tool_calls_count=len(state.get("tool_calls", [])),
+                    )
                     review_out = await self._review(state, ctx)
                     state["approved_tool_calls"] = review_out.approved
                     state["rejected_tool_calls"] = review_out.rejected
@@ -217,21 +238,60 @@ class AgentLoop:
                     state["transition"] = review_out.transition
 
                     route = route_after_review(state)
+                    debug_log(
+                        "DEBUG",
+                        "Route after review",
+                        chat_id=str(state.get("_chat_id", "")),
+                        route=route,
+                        approved_count=len(state.get("approved_tool_calls", [])),
+                        pending_count=len(state.get("pending_approval", [])),
+                        rejected_count=len(state.get("rejected_tool_calls", [])),
+                    )
                     if route == "__end__":
                         # pending_approval — approval loop handles it below
                         break
 
                 # STEP 3: Act (execute approved tools)
                 if route == "act":
-                    emitter.emit_tools_started(state.get("approved_tool_calls", []))
+                    approved = state.get("approved_tool_calls", [])
+                    debug_log(
+                        "DEBUG",
+                        "Enter act_node",
+                        chat_id=str(state.get("_chat_id", "")),
+                        approved_count=len(approved),
+                        approved_ids=[tc.get("id", "?") for tc in approved],
+                    )
+                    emitter.emit_tools_started(approved)
                     exec_out = await self._act(state, ctx)
                     state["tool_results"] = exec_out.results
                     state["approved_tool_calls"] = []
+                    debug_log(
+                        "DEBUG",
+                        "act_node done",
+                        chat_id=str(state.get("_chat_id", "")),
+                        results_count=len(exec_out.results),
+                    )
+                elif route == "observe":
+                    debug_log(
+                        "DEBUG",
+                        "Skip act_node — route=observe (streaming/pre-executed tools only)",
+                        chat_id=str(state.get("_chat_id", "")),
+                        streaming_results_count=len(state.get("streaming_tool_results", [])),
+                    )
+                elif route not in ("__end__",):
+                    debug_log(
+                        "WARN",
+                        "Unexpected route after think — no act/review/observe",
+                        chat_id=str(state.get("_chat_id", "")),
+                        route=route,
+                    )
 
                 # STEP 4: Observe — format results as tool messages
                 obs_out = self._observe(state)
                 for tm in obs_out.tool_messages:
                     state.setdefault("messages", []).append(tm)
+                if self._lifecycle and obs_out.tool_messages:
+                    await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
                 state["streaming_tool_results"] = []
                 state["tool_results"] = []
                 state["rejected_tool_calls"] = []
@@ -252,12 +312,14 @@ class AgentLoop:
             scratch.llm_error = state.get("llm_error")
             scratch.transition = state.get("transition")
 
-            logger.debug(
-                "graph_done pending_approval={p} tool_calls={t} approved={a} transition={r}",
-                p=bool(scratch.pending_approval),
-                t=len(scratch.tool_calls),
-                a=len(scratch.approved_tool_calls),
-                r=get_transition(scratch),
+            debug_log(
+                "DEBUG",
+                tp.TRANSITION,
+                reason="graph_done",
+                pending_approval=bool(scratch.pending_approval),
+                tool_calls=len(scratch.tool_calls),
+                approved=len(scratch.approved_tool_calls),
+                transition=get_transition(scratch),
             )
 
             # 3-3.5. Approval loop — re-enter when there are pending tools
@@ -280,11 +342,11 @@ class AgentLoop:
                     break
 
                 # Emit ToolCallStarted for approved tools BEFORE execution
-                logger.debug("runner emit_tools_started(approval) count={} ids={}",
-                             len(scratch.approved_tool_calls),
-                             [tc.get("id") for tc in scratch.approved_tool_calls])
+                debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
+                          count=len(scratch.approved_tool_calls),
+                          ids=[tc.get("id") for tc in scratch.approved_tool_calls],
+                          phase="approval")
                 emitter.emit_tools_started(scratch.approved_tool_calls)
-                logger.debug("runner emit_tools_started(approval) done")
 
                 # Re-enter cycle to execute approved/rejected tool decisions
                 state["_emitted_results"] = []
@@ -315,6 +377,15 @@ class AgentLoop:
                     )
 
                     route = route_after_think(state)
+                    debug_log(
+                        "DEBUG",
+                        "Route after think (approval re-entry)",
+                        chat_id=str(state.get("_chat_id", "")),
+                        route=route,
+                        tool_calls_count=len(state.get("tool_calls", [])),
+                        streaming_results_count=len(state.get("streaming_tool_results", [])),
+                        approved_count=len(state.get("approved_tool_calls", [])),
+                    )
                     if route == "__end__":
                         state["transition"] = Transition.DONE
                         break
@@ -326,18 +397,49 @@ class AgentLoop:
                         state["pending_approval"] = review_out.pending
                         state["transition"] = review_out.transition
                         route = route_after_review(state)
+                        debug_log(
+                            "DEBUG",
+                            "Route after review (approval re-entry)",
+                            chat_id=str(state.get("_chat_id", "")),
+                            route=route,
+                            approved_count=len(state.get("approved_tool_calls", [])),
+                            pending_count=len(state.get("pending_approval", [])),
+                        )
                         if route == "__end__":
                             break
 
                     if route == "act":
-                        emitter.emit_tools_started(state.get("approved_tool_calls", []))
+                        approved = state.get("approved_tool_calls", [])
+                        debug_log(
+                            "DEBUG",
+                            "Enter act_node (approval re-entry)",
+                            chat_id=str(state.get("_chat_id", "")),
+                            approved_count=len(approved),
+                            approved_ids=[tc.get("id", "?") for tc in approved],
+                        )
+                        emitter.emit_tools_started(approved)
                         exec_out = await self._act(state, ctx)
                         state["tool_results"] = exec_out.results
                         state["approved_tool_calls"] = []
+                        debug_log(
+                            "DEBUG",
+                            "act_node done (approval re-entry)",
+                            chat_id=str(state.get("_chat_id", "")),
+                            results_count=len(exec_out.results),
+                        )
+                    elif route == "observe":
+                        debug_log(
+                            "DEBUG",
+                            "Skip act_node (approval re-entry) — route=observe",
+                            chat_id=str(state.get("_chat_id", "")),
+                            streaming_results_count=len(state.get("streaming_tool_results", [])),
+                        )
 
                     obs_out = self._observe(state)
                     for tm in obs_out.tool_messages:
                         state.setdefault("messages", []).append(tm)
+                    if self._lifecycle and obs_out.tool_messages:
+                        await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
                     state["streaming_tool_results"] = []
                     state["tool_results"] = []
                     state["rejected_tool_calls"] = []
@@ -358,28 +460,31 @@ class AgentLoop:
                 scratch.llm_error = state.get("llm_error")
                 scratch.transition = state.get("transition")
 
-                logger.debug(
-                    "graph_resumed pending_approval={p} transition={r}",
-                    p=bool(scratch.pending_approval),
-                    r=get_transition(scratch),
+                debug_log(
+                    "DEBUG",
+                    tp.TRANSITION,
+                    reason="graph_resumed",
+                    pending_approval=bool(scratch.pending_approval),
+                    transition=get_transition(scratch),
                 )
 
                 # Emit ToolCallFinished for executed tools
                 result_sources = (
                     scratch._emitted_results or scratch.streaming_tool_results
                 )
-                logger.debug("runner emit_tools_finished(approval) count={} ids={}",
-                             len(result_sources),
-                             [r.get("tool_call_id") for r in result_sources])
+                debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
+                          count=len(result_sources),
+                          ids=[r.get("tool_call_id") for r in result_sources],
+                          phase="approval")
                 emitter.emit_tools_finished(result_sources)
-                logger.debug("runner emit_tools_finished(approval) done")
                 # Prevent re-emission
                 scratch._emitted_results = []
                 state["_emitted_results"] = []
 
                 if not scratch.pending_approval:
-                    logger.debug("runner approval loop exit: pending_approval={}",
-                                 bool(scratch.pending_approval))
+                    debug_log("DEBUG", tp.LOOP_EXIT,
+                              reason="approval_empty",
+                              pending_approval=False)
                     break
 
             # 4. Error recovery
@@ -389,34 +494,91 @@ class AgentLoop:
             if error_event:
                 await channel.send(error_event)
             if action == "continue":
-                logger.debug("error_recovery_continue")
+                debug_log("DEBUG", tp.ERROR_RECOVERY, outcome="continue")
                 _finalize_iteration(profiler, loop_feature)
                 continue
             if action == "return":
-                logger.debug("error_recovery_return")
+                debug_log("DEBUG", tp.ERROR_RECOVERY, outcome="return")
                 _finalize_iteration(profiler, loop_feature)
                 return
 
             # 5. Emit SSE events via EventEmitter
-            logger.debug("emit_sse msgs={m}", m=len(state.get("messages", [])))
+            debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
+                      msg_count=len(state.get("messages", [])),
+                      phase="main_emit")
             pending_ids = {
                 tc.get("id")
                 for tc in scratch.pending_approval
                 if tc.get("id")
             }
+
+            # Emit ToolCallStarted for pending tool calls (excluding approval-pending)
+            tc_list = scratch.tool_calls
+            if tc_list:
+                tc_to_emit = [tc for tc in tc_list if tc.get("id") not in pending_ids]
+                debug_log(
+                    "DEBUG",
+                    "emit_tools_started",
+                    chat_id=str(state.get("_chat_id", "")),
+                    total=len(tc_list),
+                    skipped_pending=len(tc_list) - len(tc_to_emit),
+                    emitting=len(tc_to_emit),
+                    ids=[tc.get("id", "?") for tc in tc_to_emit],
+                )
+            else:
+                debug_log(
+                    "DEBUG",
+                    "emit_tools_started SKIPPED — no tool_calls in scratch",
+                    chat_id=str(state.get("_chat_id", "")),
+                )
             emitter.emit_tools_started(scratch.tool_calls, skip_ids=pending_ids)
+
+            # Emit ToolCallFinished for act_node results
+            tr_list = scratch.tool_results
+            if tr_list:
+                debug_log(
+                    "DEBUG",
+                    "emit_tools_finished",
+                    chat_id=str(state.get("_chat_id", "")),
+                    count=len(tr_list),
+                    ids=[tr.get("tool_call_id", "?") for tr in tr_list],
+                )
+            else:
+                debug_log(
+                    "DEBUG",
+                    "emit_tools_finished SKIPPED — no tool_results in scratch",
+                    chat_id=str(state.get("_chat_id", "")),
+                )
             emitter.emit_tools_finished(scratch.tool_results)
-            emitter.emit_streaming_tool_results(
-                scratch._emitted_results or scratch.streaming_tool_results
-            )
+
+            # Emit ToolCallStarted+Finished for streaming/pre-executed tools
+            stream_src = scratch._emitted_results or scratch.streaming_tool_results
+            if stream_src:
+                debug_log(
+                    "DEBUG",
+                    "emit_streaming_tool_results",
+                    chat_id=str(state.get("_chat_id", "")),
+                    count=len(stream_src),
+                    ids=[r.get("tool_call_id", "?") for r in stream_src],
+                    source="_emitted_results" if scratch._emitted_results else "streaming_tool_results",
+                )
+            else:
+                debug_log(
+                    "DEBUG",
+                    "emit_streaming_tool_results SKIPPED — no emitted_results or streaming_tool_results",
+                    chat_id=str(state.get("_chat_id", "")),
+                )
+            emitter.emit_streaming_tool_results(stream_src)
             profiler.checkpoint("emit_events")
 
             # 6-7. Transition routing
             action = await self._handle_transition(scratch, auditor)
             profiler.checkpoint("handle_transition")
-            logger.debug("transition route={r}", r=action)
+            debug_log("DEBUG", tp.TRANSITION, route=action)
             if action not in ("continue",):
-                logger.debug("runner _run_loop exiting: transition={}", get_transition(scratch))
+                debug_log("DEBUG", tp.LOOP_EXIT,
+                          reason="transition_stop",
+                          transition=get_transition(scratch))
                 _finalize_iteration(profiler, loop_feature)
                 return
             debug_log(
@@ -480,8 +642,24 @@ class AgentLoop:
         self, state: dict, channel: EventChannel, auditor: Auditor
     ) -> tuple[str | None, "TurnFailed | None"]:
         llm_error = state.get("llm_error")
-        if not llm_error or not self._error_recovery:
+        if not llm_error:
             return None, None
+
+        debug_log(
+            "WARN",
+            "LLM error detected",
+            code=llm_error.get("code", "?"),
+            msg=str(llm_error.get("message", ""))[:200],
+            chat_id=str(state.get("_chat_id", "")),
+        )
+
+        # No recovery configured — surface error directly so SSE gets 'error' event
+        if not self._error_recovery:
+            return "return", TurnFailed(
+                code=llm_error.get("code", 500),
+                message=llm_error.get("message", "LLM call failed"),
+            )
+
         debug_log(
             "WARN",
             "LLM error detected - attempting recovery",

@@ -17,6 +17,8 @@ from src.agent.events import (
 )
 from src.models.message import Message, MessageType
 from src.models.session import ChatSession
+from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
 
 
 def _build_history(session: ChatSession) -> list[dict]:
@@ -34,6 +36,10 @@ def _build_history(session: ChatSession) -> list[dict]:
 
     for m in session.messages:
         if m.is_meta:
+            continue
+        # TOOL_RESULT messages are synthesized from executed_tool_list below
+        # with proper tool_call_id/name fields that the Message model lacks
+        if m.type == MessageType.TOOL_RESULT:
             continue
         ts = datetime.fromisoformat(m.timestamp)
         entries.append((ts, "msg", m))
@@ -60,7 +66,7 @@ def _build_history(session: ChatSession) -> list[dict]:
             history.append({
                 "role": "tool",
                 "content": _format_tool_result_for_history(tc),
-                "tool_call_id": str(tc.message_id),
+                "tool_call_id": tc.llm_tool_call_id or str(tc.call_id or ""),
                 "name": tc.name,
             })
 
@@ -197,7 +203,7 @@ class ChatTurn:
                     # Wait for next event with timeout to check disconnect
                     event = await asyncio.wait_for(channel.receive(), timeout=0.1)
                     if event is not None:
-                        logger.debug("ChatTurn received: type={}", type(event).__name__)
+                        debug_log("DEBUG", tp.CHAT_TURN_RECEIVED, type=type(event).__name__)
                 except asyncio.TimeoutError:
                     if (orch_task.done() and channel.is_closed()) or await self._is_disconnected():
                         if await self._is_disconnected():
@@ -207,13 +213,13 @@ class ChatTurn:
                             channel.close()
                         # After close(), drain_nowait() deterministically
                         # drains all queued events without timeout risk.
-                        logger.debug("ChatTurn drain start: orch_done={} channel_closed={}",
-                                     orch_task.done(), channel.is_closed())
+                        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_START,
+                                  orch_done=orch_task.done(), channel_closed=channel.is_closed())
                         drained_count = 0
                         for ev in channel.drain_nowait():
                             drained_count += 1
                             yield ev
-                        logger.debug("ChatTurn drain done: drained_events={}", drained_count)
+                        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_DONE, drained_events=drained_count)
                         break
                     continue
 
@@ -225,7 +231,7 @@ class ChatTurn:
                 # Persistence is handled by think_node → lifecycle.persist_assistant_message()
 
                 cid = getattr(event, 'call_id', 'N/A')
-                logger.debug("ChatTurn yielding: type={} call_id={}", type(event).__name__, cid)
+                debug_log("DEBUG", tp.CHAT_TURN_YIELD, type=type(event).__name__, call_id=cid)
 
                 yield event
 

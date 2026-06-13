@@ -3,8 +3,6 @@
 import asyncio
 import json
 
-from loguru import logger
-
 from src.agent.events import (
     ApprovalRequired,
     AssistantDelta,
@@ -17,6 +15,8 @@ from src.agent.events import (
     TurnFailed,
     TurnStarted,
 )
+from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
 
 
 class SSEStream:
@@ -56,7 +56,7 @@ class SSEStream:
                 if await self._is_disconnected():
                     break
         finally:
-            logger.debug("SSEStream.__aiter__ yielding done event")
+            debug_log("DEBUG", tp.SSE_DONE)
             yield {"event": "done", "data": "{}"}
 
     def _to_wire(self, event: DomainEvent) -> dict | None:
@@ -72,8 +72,7 @@ class SSEStream:
         elif isinstance(event, AssistantDone):
             return {"event": "assistant_done", "data": "{}"}
         elif isinstance(event, ToolCallStarted):
-            logger.debug("SSEStream.to_wire ToolCallStarted call_id={} tool={}",
-                         event.call_id, event.tool_name)
+            debug_log("DEBUG", tp.SSE_TOOL_STARTED, call_id=event.call_id, tool=event.tool_name)
             return {"event": "tool_call", "data": json.dumps({
                 "call_id": event.call_id,
                 "tool_name": event.tool_name,
@@ -82,8 +81,7 @@ class SSEStream:
                 "server": event.server,
             })}
         elif isinstance(event, ToolCallFinished):
-            logger.debug("SSEStream.to_wire ToolCallFinished call_id={} status={}",
-                         event.call_id, event.execution_status)
+            debug_log("DEBUG", tp.SSE_TOOL_FINISHED, call_id=event.call_id, status=event.execution_status)
             data: dict = {
                 "call_id": event.call_id,
                 "execution_status": event.execution_status,
@@ -105,6 +103,8 @@ class SSEStream:
                 "call_id": event.call_id,
             })}
         elif isinstance(event, TurnFailed):
-            logger.debug("sse_stream TurnFailed code={code} msg={msg}", code=event.code, msg=event.message)
+            debug_log("DEBUG", tp.SSE_TURN_FAILED, code=event.code, msg=event.message)
             return {"event": "error", "data": json.dumps({"code": event.code, "message": event.message})}
+        # Unknown event type — not emitted to SSE wire
+        debug_log("DEBUG", tp.SSE_UNHANDLED, type=type(event).__name__)
         return None

@@ -6,6 +6,9 @@ from uuid import UUID
 
 from loguru import logger
 
+from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
+
 
 @dataclass(frozen=True)
 class TurnStarted:
@@ -87,16 +90,17 @@ class EventChannel:
         """Non-async send for use in sync contexts (e.g., node return path)."""
         if not self._closed:
             self._queue.put_nowait(event)
-            logger.debug("EventChannel.send_nowait id={} event={} closed={} qsize={}",
-                         self._instance_id, type(event).__name__, self._closed, self._queue.qsize())
+            debug_log("DEBUG", tp.EVENT_SEND,
+                      instance_id=self._instance_id, event=type(event).__name__,
+                      closed=self._closed, qsize=self._queue.qsize())
             if isinstance(event, (ToolCallStarted, ToolCallFinished)):
-                logger.debug("EventChannel.send_nowait id={} event={} call_id={} execution_status={}",
-                             self._instance_id, type(event).__name__,
-                             event.call_id,
-                             getattr(event, 'execution_status', 'N/A'))
+                debug_log("DEBUG", tp.EVENT_SEND,
+                          instance_id=self._instance_id, event=type(event).__name__,
+                          call_id=event.call_id,
+                          execution_status=getattr(event, 'execution_status', 'N/A'))
         else:
-            logger.debug("EventChannel.send_nowait DROPPED id={} event={}",
-                         self._instance_id, type(event).__name__)
+            debug_log("DEBUG", tp.EVENT_SEND_DROPPED,
+                      instance_id=self._instance_id, event=type(event).__name__)
 
     async def receive(self) -> DomainEvent | None:
         """Receive next event. Returns None only after channel is closed AND queue drained."""
@@ -104,15 +108,21 @@ class EventChannel:
             # Try non-blocking drain first
             try:
                 event = self._queue.get_nowait()
-                logger.debug("EventChannel.receive(drain) id={} event={} qsize={}",
-                             self._instance_id, type(event).__name__ if event else 'None', self._queue.qsize())
+                debug_log("DEBUG", tp.EVENT_RECEIVE,
+                          instance_id=self._instance_id,
+                          event=type(event).__name__ if event else 'None',
+                          qsize=self._queue.qsize(),
+                          mode="drain")
                 return event
             except asyncio.QueueEmpty:
                 return None
         try:
             event = await self._queue.get()
-            logger.debug("EventChannel.receive(await) id={} event={} qsize={}",
-                         self._instance_id, type(event).__name__ if event else 'None', self._queue.qsize())
+            debug_log("DEBUG", tp.EVENT_RECEIVE,
+                      instance_id=self._instance_id,
+                      event=type(event).__name__ if event else 'None',
+                      qsize=self._queue.qsize(),
+                      mode="await")
             return event
         except asyncio.CancelledError:
             raise
@@ -138,8 +148,8 @@ class EventChannel:
 
     def close(self) -> None:
         """Close the channel. Subsequent sends are no-ops, receive returns None."""
-        logger.debug("EventChannel.close id={} was_closed={} qsize={}",
-                     self._instance_id, self._closed, self._queue.qsize())
+        debug_log("DEBUG", tp.EVENT_CLOSE,
+                  instance_id=self._instance_id, was_closed=self._closed, qsize=self._queue.qsize())
         self._closed = True
         # Put sentinel to unblock any waiting receive
         try:

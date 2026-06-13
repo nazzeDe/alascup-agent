@@ -785,7 +785,8 @@ class TestHistoryReconstruction:
                     name="get_cpu", server=ServerName.TOOL_SERVER,
                     description="", is_read_only=True, is_rollbackable=False,
                     params_schema={}, chat_id=chat_id,
-                    message_id=uuid4(), params={},
+                    message_id=None, llm_tool_call_id="call_test_001",
+                    params={},
                     approval_status=ApprovalStatus.APPROVED,
                     execution_status=ExecutionStatus.SUCCEEDED,
                     result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
@@ -869,7 +870,8 @@ class TestHistoryReconstruction:
                     name="list_files", server=ServerName.TOOL_SERVER,
                     description="", is_read_only=True, is_rollbackable=False,
                     params_schema={}, chat_id=chat_id,
-                    message_id=uuid4(), params={},
+                    message_id=None, llm_tool_call_id="call_test_002",
+                    params={},
                     approval_status=ApprovalStatus.APPROVED,
                     execution_status=ExecutionStatus.SUCCEEDED,
                     result=None,  # No result stored
@@ -931,7 +933,8 @@ class TestHistoryReconstruction:
                     name="get_cpu", server=ServerName.TOOL_SERVER,
                     description="", is_read_only=True, is_rollbackable=False,
                     params_schema={}, chat_id=chat_id,
-                    message_id=UUID(tool_use_id), params={},
+                    message_id=None, llm_tool_call_id=tool_use_id,
+                    params={},
                     approval_status=ApprovalStatus.APPROVED,
                     execution_status=ExecutionStatus.SUCCEEDED,
                     result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
@@ -960,3 +963,78 @@ class TestHistoryReconstruction:
         assert tool_msg["role"] == "tool"
         assert tool_msg["tool_call_id"] == tool_use_id
         assert "CPU: 45%" in tool_msg["content"]
+
+    async def test_build_history_tool_call_id_matches_non_uuid_llm_id(self):
+        """Tool message tool_call_id must match assistant tool_calls id, even when
+        the LLM-generated id is NOT a valid UUID (e.g. OpenAI 'call_abc123')."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+        from src.models.tool import (
+            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
+        )
+
+        chat_id = uuid4()
+        llm_tool_call_id = "call_abc123XYZ"
+
+        ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
+        ts_assist = datetime(2026, 6, 13, 12, 0, 1, tzinfo=timezone.utc)
+        ts_tool = datetime(2026, 6, 13, 12, 0, 1, 500000, tzinfo=timezone.utc)
+        ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
+
+        tool_calls_data = [
+            {"id": llm_tool_call_id, "type": "function",
+             "function": {"name": "get_cpu", "arguments": "{}"}},
+        ]
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    content="check CPU",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    content="Let me check.",
+                    tool_calls=tool_calls_data,
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
+                    content="CPU is fine.",
+                ),
+            ],
+            executed_tool_list=[
+                ToolCall(
+                    name="get_cpu", server=ServerName.TOOL_SERVER,
+                    description="", is_read_only=True, is_rollbackable=False,
+                    params_schema={}, chat_id=chat_id,
+                    message_id=None,
+                    llm_tool_call_id=llm_tool_call_id,
+                    params={},
+                    approval_status=ApprovalStatus.APPROVED,
+                    execution_status=ExecutionStatus.SUCCEEDED,
+                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+                    timestamp=ts_tool.isoformat(),
+                ),
+            ],
+            timestamp=ts3.isoformat(),
+        )
+
+        history = _build_history(session)
+
+        assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant", "tool", "assistant"], f"got {roles}"
+
+        # Critical: tool message's tool_call_id must match assistant's tool_call id
+        tool_msg = history[2]
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["tool_call_id"] == llm_tool_call_id, (
+            f"tool_call_id mismatch: {tool_msg['tool_call_id']} != {llm_tool_call_id}"
+        )

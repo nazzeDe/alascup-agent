@@ -20,7 +20,6 @@ async def review_node(state, ctx: TurnContext = None, *, executor, rule_engine, 
     tool_calls = state.get("tool_calls", []) or []
     auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
-    logger.debug("review_node: tc_count={count}", count=len(tool_calls))
     debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))
     approved: list[dict] = []
     rejected: list[dict] = []

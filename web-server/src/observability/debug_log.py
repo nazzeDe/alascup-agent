@@ -3,11 +3,22 @@
 Enabled via ALASCUP_AGENT_TRACE=1. Produces logs/debug/<ts>-<session>.log
 with a logs/debug/latest symlink. When disabled, keeps a 500-line
 in-memory ring buffer for post-mortem inspection.
+
+Usage::
+
+    from src.observability.debug_log import log, traced
+    from src.observability import trace_points as tp
+
+    log("DEBUG", tp.THINK_DONE, tool_calls=3, latency_ms=120)
+    with traced(tp.LOOP_ITERATION, iteration=5):
+        ...
 """
 
 import os
 import threading
+import time
 from collections import deque
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +94,27 @@ def dump_recent(n: int = 100) -> list[str]:
     """Return the most recent ring-buffer entries for inspection."""
     with _lock:
         return list(_ring)[-n:]
+
+
+@contextmanager
+def traced(phase: str, **ctx):
+    """Auto-log enter/exit with elapsed_ms. On exception, log error and re-raise.
+
+    Usage::
+
+        with traced("act_node", tool_count=3):
+            results = await execute_tools(...)
+    """
+    log("DEBUG", f"{phase}_enter", **ctx)
+    t0 = time.monotonic()
+    try:
+        yield
+    except Exception as exc:
+        log("ERROR", f"{phase}_error", error=str(exc), **ctx)
+        raise
+    else:
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        log("DEBUG", f"{phase}_exit", elapsed_ms=round(elapsed_ms, 2), **ctx)
 
 
 _init_file()

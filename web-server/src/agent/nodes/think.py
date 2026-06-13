@@ -1,8 +1,6 @@
 import json
 from uuid import uuid4
 
-from loguru import logger
-
 from src.agent.nodes._helpers import _format_tools, _messages
 from src.agent.nodes._helpers import _dispatch_tool_calls
 from src.agent.results import ThinkOutput
@@ -48,18 +46,37 @@ async def _stream_llm(
     accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
 ) -> dict | None:
     """Drive the LLM stream. Returns error dict or None on success."""
-    async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
-        result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
-        if result is True:
-            complete_feature(feature)
-            _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
-            return None
-        if result is not None:
-            _log_stream_error(result, messages, chat_id)
-            complete_feature(feature, status="error")
-            return result
-        if event["event"] == "assistant":
-            _record_stream_chunks(event["data"], stream_chunks)
+    try:
+        async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
+            try:
+                result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
+            except Exception as exc:
+                error: dict = {
+                    "code": 0,
+                    "message": f"Stream event processing failed: {exc}",
+                    "raw_event_type": event.get("event", "?") if isinstance(event, dict) else type(event).__name__,
+                }
+                _log_stream_error(error, messages, chat_id)
+                complete_feature(feature, status="error")
+                return error
+            if result is True:
+                complete_feature(feature)
+                _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
+                return None
+            if result is not None:
+                _log_stream_error(result, messages, chat_id)
+                complete_feature(feature, status="error")
+                return result
+            if event["event"] == "assistant":
+                _record_stream_chunks(event["data"], stream_chunks)
+    except Exception as exc:
+        error = {
+            "code": 0,
+            "message": f"LLM stream failed: {exc}",
+        }
+        _log_stream_error(error, messages, chat_id)
+        complete_feature(feature, status="error")
+        return error
     return None
 
 
@@ -75,9 +92,9 @@ def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
 
 
 def _log_stream_error(result, messages, chat_id):
-    debug_log("WARN", "LLM call error", chat_id=str(chat_id), code=result.get("code", "?"))
-    logger.debug("think_node LLM error: code={code} msg={msg}",
-                 code=result.get("code", "?"), msg=json.dumps(result.get("message", ""))[:300])
+    debug_log("WARN", "LLM call error", chat_id=str(chat_id),
+              code=result.get("code", "?"),
+              msg=json.dumps(result.get("message", ""))[:300])
     # Log message structure to diagnose format issues (e.g. missing type field)
     msg_shapes = []
     for i, m in enumerate(messages):
@@ -87,7 +104,7 @@ def _log_stream_error(result, messages, chat_id):
             shape["tc_count"] = len(tcs)
             shape["tc_keys"] = [sorted(tc.keys()) for tc in tcs]
         msg_shapes.append(shape)
-    logger.debug("think_node message shapes: {shapes}", shapes=json.dumps(msg_shapes, default=str))
+    debug_log("DEBUG", "LLM message shapes", chat_id=str(chat_id), shapes=json.dumps(msg_shapes, default=str))
 
 
 def _record_stream_chunks(data_str: str, stream_chunks: list[tuple]) -> None:
@@ -146,18 +163,21 @@ def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict
 def _process_stream_event(
     event: dict, accumulated_text: list[str], accumulated_reasoning: list[str], tool_call_blocks: list[dict]
 ) -> dict | bool | None:
-    if event["event"] == "assistant":
+    if not isinstance(event, dict) or "event" not in event:
+        raise ValueError(f"Invalid stream event — expected dict with 'event' key: {type(event).__name__}")
+    event_type = event["event"]
+    if event_type == "assistant":
         data = json.loads(event["data"])
         accumulated_text.append(data.get("delta", ""))
         rc = data.get("reasoning_content", "")
         if rc:
             accumulated_reasoning.append(rc)
-    elif event["event"] == "tool_call":
+    elif event_type == "tool_call":
         data = json.loads(event["data"])
         _merge_tool_block(tool_call_blocks, data)
-    elif event["event"] == "error":
+    elif event_type == "error":
         return json.loads(event["data"])
-    elif event["event"] == "done":
+    elif event_type == "done":
         return True
     return None
 

@@ -7,6 +7,8 @@ from src.agent.results import ExecuteOutput
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor
 from src.models.tool import ExecutionStatus
+from src.observability.debug_log import log as debug_log
+from src.observability import trace_points as tp
 from src.observability.timing import start_feature, complete_feature
 
 
@@ -32,10 +34,9 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     feature = f"tool_exec:{chat_id}"
     start_feature(feature)
-    logger.debug("act_node: executing {count} tools: {names}", count=len(calls), names=[c["tool_name"] for c in calls])
-    # Trace: log input tool_call ids for approval flow debugging
-    input_ids = [tool_calls[i].get("id", "?") for i in range(len(tool_calls))]
-    logger.debug("act_node: input tool_call ids={}", input_ids)
+    debug_log("DEBUG", tp.ACT_ENTER,
+              count=len(calls), names=[c["tool_name"] for c in calls],
+              input_ids=[tool_calls[i].get("id", "?") for i in range(len(tool_calls))])
     results = await _execute_with_error_handling(executor, calls)
     complete_feature(feature)
     formatted = []
@@ -69,6 +70,6 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
             err = r.get("error", {})
             err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
             logger.warning("tool_failed tool={name} error={err}", name=calls[i]["tool_name"], err=err_msg)
-    logger.debug("act_node: output tool_call_ids={}", [f["tool_call_id"] for f in formatted])
+    debug_log("DEBUG", tp.ACT_DONE, output_ids=[f["tool_call_id"] for f in formatted])
 
     return ExecuteOutput(results=formatted)
