@@ -1,11 +1,10 @@
-ARG BASE_IMAGE=ghcr.io/loong64/python:3.13.13-slim-trixie
+ARG BASE_IMAGE=ghcr.io/loong64/python:3.13.13-trixie
 FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
 # util-linux provides nsenter; bpftrace provides dynamic kernel tracing
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     util-linux \
     bpftrace && \
     rm -rf /var/lib/apt/lists/*
