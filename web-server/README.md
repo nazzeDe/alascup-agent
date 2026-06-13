@@ -248,10 +248,10 @@ LLM 流式输出 token
 
 #### 调试日志
 
-环境变量 `ALASCUP_DEBUG=1` 启用。分级输出 Agent 决策叙事——为什么进入这个分支、为什么触发压缩、恢复策略选择原因等。非结构化数据（LLM 调用详情、工具执行结果）由 Tracer 和审计日志负责，调试日志不记录。
+环境变量 `ALASCUP_AGENT_TRACE=1` 启用。分级输出 Agent 决策叙事——为什么进入这个分支、为什么触发压缩、恢复策略选择原因等。非结构化数据（LLM 调用详情、工具执行结果）由 Tracer 和审计日志负责，调试日志不记录。
 
-- **级别**：DEBUG（高频细节）/ INFO（关键决策）/ WARN（可恢复异常）/ ERROR（不可恢复错误）。默认 INFO，`ALASCUP_DEBUG_LEVEL=DEBUG` 升到 DEBUG
-- **过滤**：`ALASCUP_DEBUG_FILTER=agent,security` 只输出含关键词的行
+- **级别**：DEBUG（高频细节）/ INFO（关键决策）/ WARN（可恢复异常）/ ERROR（不可恢复错误）。默认 INFO，`ALASCUP_AGENT_TRACE_LEVEL=DEBUG` 升到 DEBUG
+- **过滤**：`ALASCUP_AGENT_TRACE_FILTER=agent,security` 只输出含关键词的行
 - **输出**：`logs/debug/<timestamp>-<session>.log`，同时维护 `logs/debug/latest` symlink
 - **写入策略**：显式开启时同步写入（防 crash 丢数据），未开启时仅内存环形缓冲（最近 500 条）
 

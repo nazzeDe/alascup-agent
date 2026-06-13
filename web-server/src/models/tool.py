@@ -2,7 +2,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ServerName(StrEnum):
@@ -36,6 +36,7 @@ class Tool(BaseModel):
 class ToolCall(Tool):
     chat_id: UUID
     message_id: UUID
+    call_id: UUID | None = Field(default=None)
     llm_trace_id: UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     request_id: UUID | None = None
@@ -44,6 +45,12 @@ class ToolCall(Tool):
     error: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     timestamp: str
+
+    @computed_field
+    @property
+    def tool_name(self) -> str:
+        """Duplicate of name for frontend compatibility with SSE wire format."""
+        return self.name
 
 
 class ToolRequest(Tool):

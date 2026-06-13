@@ -39,6 +39,7 @@ def _make_call_row(tool_name="get_cpu", server_name="tool-server",
                    execution_status="SUCCEEDED", error=None, result=None,
                    created_at=None):
     data = {
+        "id": uuid.uuid4(),
         "tool_name": tool_name,
         "server_name": server_name,
         "is_read_only": is_read_only,
@@ -145,6 +146,7 @@ class TestToolCallFromRow:
         from src.services.session_manager import _tool_call_from_row
 
         data = {
+            "id": uuid.uuid4(),
             "tool_name": "get_cpu", "server_name": "tool-server",
             "is_read_only": True, "is_rollbackable": False,
             "chat_id": uuid.uuid4(), "message_id": uuid.uuid4(),
@@ -189,6 +191,7 @@ class TestToolCallFromRow:
         from src.services.session_manager import _tool_call_from_row
 
         data = {
+            "id": uuid.uuid4(),
             "tool_name": "get_cpu", "server_name": "tool-server",
             "is_read_only": True, "is_rollbackable": False,
             "chat_id": uuid.uuid4(), "message_id": uuid.uuid4(),

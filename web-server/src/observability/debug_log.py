@@ -1,6 +1,6 @@
 """Agent decision-narrative debug logger.
 
-Enabled via ALASCUP_DEBUG=1. Produces logs/debug/<ts>-<session>.log
+Enabled via ALASCUP_AGENT_TRACE=1. Produces logs/debug/<ts>-<session>.log
 with a logs/debug/latest symlink. When disabled, keeps a 500-line
 in-memory ring buffer for post-mortem inspection.
 """
@@ -14,10 +14,10 @@ from pathlib import Path
 LOG_DIR = Path("logs/debug")
 RING_SIZE = 500
 
-_enabled: bool = os.environ.get("ALASCUP_DEBUG", "").strip() == "1"
-_level: str = os.environ.get("ALASCUP_DEBUG_LEVEL", "INFO").strip().upper()
+_enabled: bool = os.environ.get("ALASCUP_AGENT_TRACE", "").strip() == "1"
+_level: str = os.environ.get("ALASCUP_AGENT_TRACE_LEVEL", "INFO").strip().upper()
 _filters: list[str] = [
-    f for f in os.environ.get("ALASCUP_DEBUG_FILTER", "").split(",") if f
+    f for f in os.environ.get("ALASCUP_AGENT_TRACE_FILTER", "").split(",") if f
 ]
 
 _ring: deque[str] = deque(maxlen=RING_SIZE)

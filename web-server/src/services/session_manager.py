@@ -249,6 +249,7 @@ def _tool_call_from_row(row) -> ToolCall:
         else raw_result
     )
     return ToolCall(
+        call_id=row["id"],
         name=row["tool_name"],
         server=row["server_name"],
         description="",

@@ -134,7 +134,7 @@
 
 ### OB-001 调试日志门控
 
-| 前置 | ALASCUP_DEBUG 未设置 |
+| 前置 | ALASCUP_AGENT_TRACE 未设置 |
 | 预期 | debug()/info()/warn()/error() 调用无文件输出，仅写入内存环形缓冲 |
 
 ### OB-002 剖析器门控
