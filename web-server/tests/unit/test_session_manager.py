@@ -36,8 +36,9 @@ def _make_call_row(tool_name="get_cpu", server_name="tool-server",
                    is_read_only=True, is_rollbackable=False,
                    chat_id=None, message_id=None, params=None,
                    request_id=None, approval_status="APPROVED",
-                   execution_status="SUCCEEDED", error=None, created_at=None):
-    return _FakeRecord({
+                   execution_status="SUCCEEDED", error=None, result=None,
+                   created_at=None):
+    data = {
         "tool_name": tool_name,
         "server_name": server_name,
         "is_read_only": is_read_only,
@@ -50,7 +51,10 @@ def _make_call_row(tool_name="get_cpu", server_name="tool-server",
         "execution_status": execution_status,
         "error": error,
         "created_at": created_at or datetime.now(timezone.utc),
-    })
+    }
+    if result is not None:
+        data["result"] = result
+    return _FakeRecord(data)
 
 
 class TestMessageFromRow:
@@ -151,6 +155,50 @@ class TestToolCallFromRow:
         row = _FakeRecord(data)
         tc = _tool_call_from_row(row)
         assert tc.error is None
+
+    def test_result_json_string_parsed_to_dict(self):
+        """result JSONB string is parsed to dict."""
+        from src.services.session_manager import _tool_call_from_row
+
+        row = _make_call_row(
+            execution_status="SUCCEEDED",
+            result='{"execution_status": "SUCCEEDED", "output": "CPU: 45%"}',
+        )
+        tc = _tool_call_from_row(row)
+        assert tc.result == {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}
+
+    def test_result_already_dict(self):
+        from src.services.session_manager import _tool_call_from_row
+
+        row = _make_call_row(
+            execution_status="SUCCEEDED",
+            result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+        )
+        tc = _tool_call_from_row(row)
+        assert tc.result == {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}
+
+    def test_result_none(self):
+        from src.services.session_manager import _tool_call_from_row
+
+        row = _make_call_row(result=None)
+        tc = _tool_call_from_row(row)
+        assert tc.result is None
+
+    def test_result_key_missing(self):
+        """When the result key is not in the row at all — returns None."""
+        from src.services.session_manager import _tool_call_from_row
+
+        data = {
+            "tool_name": "get_cpu", "server_name": "tool-server",
+            "is_read_only": True, "is_rollbackable": False,
+            "chat_id": uuid.uuid4(), "message_id": uuid.uuid4(),
+            "params": "{}", "request_id": None,
+            "approval_status": "APPROVED", "execution_status": "SUCCEEDED",
+            "created_at": datetime.now(timezone.utc),
+        }
+        row = _FakeRecord(data)
+        tc = _tool_call_from_row(row)
+        assert tc.result is None
 
 
 class TestPostgresSessionManagerCreate:
@@ -324,3 +372,50 @@ class TestPostgresSessionManagerKeyError:
         )
         with pytest.raises(Exception, match="foreign key violation"):
             await mgr.add_message(msg.chat_id, msg)
+
+
+class TestPostgresSessionManagerUpdateToolCall:
+    """Tests for update_tool_call with result persistence."""
+
+    @pytest.mark.asyncio
+    async def test_update_tool_call_writes_result(self):
+        """result dict is persisted to tool_calls.result JSONB column."""
+        from src.services.session_manager import PostgresSessionManager
+        from src.models.tool import ExecutionStatus
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        mgr = PostgresSessionManager(db)
+
+        call_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        await mgr.update_tool_call(
+            call_id, chat_id,
+            execution_status=ExecutionStatus.SUCCEEDED,
+            result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+        )
+        # First call: UPDATE tool_calls SET ... result = $n
+        update_sql = db.execute.call_args_list[0][0][0]
+        assert "result" in update_sql
+        # Second call: UPDATE chat_sessions SET updated_at
+        assert db.execute.call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_update_tool_call_result_none_skips(self):
+        """result=None does not add result clause to UPDATE."""
+        from src.services.session_manager import PostgresSessionManager
+        from src.models.tool import ExecutionStatus
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        mgr = PostgresSessionManager(db)
+
+        call_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        await mgr.update_tool_call(
+            call_id, chat_id,
+            execution_status=ExecutionStatus.SUCCEEDED,
+            result=None,
+        )
+        update_sql = db.execute.call_args_list[0][0][0]
+        assert "result" not in update_sql

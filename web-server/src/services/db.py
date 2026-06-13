@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
 ALTER TABLE tool_calls ADD COLUMN IF NOT EXISTS llm_trace_id UUID;
 ALTER TABLE tool_calls ALTER COLUMN message_id DROP NOT NULL;
 ALTER TABLE tool_calls DROP CONSTRAINT IF EXISTS tool_calls_message_id_fkey;
+ALTER TABLE tool_calls ADD COLUMN IF NOT EXISTS result JSONB;
 CREATE INDEX IF NOT EXISTS idx_tool_calls_trace ON tool_calls(llm_trace_id);
 
 CREATE TABLE IF NOT EXISTS audit_events (

@@ -42,6 +42,7 @@ class ToolCall(Tool):
     approval_status: ApprovalStatus
     execution_status: ExecutionStatus
     error: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
     timestamp: str
 
 

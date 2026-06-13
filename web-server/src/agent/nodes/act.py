@@ -64,7 +64,7 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
                 exec_status = ExecutionStatus(exec_status_str)
             except ValueError:
                 exec_status = ExecutionStatus.FAILED
-            await lifecycle.update(cid, call_id, execution_status=exec_status, error=r.get("error"), backup_ref=r.get("backup_ref"))
+            await lifecycle.update(cid, call_id, execution_status=exec_status, error=r.get("error"), backup_ref=r.get("backup_ref"), result=r)
         if r.get("execution_status") == "FAILED":
             err = r.get("error", {})
             err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)

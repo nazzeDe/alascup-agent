@@ -91,16 +91,18 @@ class ToolCallLifecycle:
                 approval_status=ApprovalStatus.APPROVED,
                 execution_status=ExecutionStatus(exec_status_str) if exec_status_str in {"SUCCEEDED", "FAILED", "RUNNING", "PENDING_APPROVAL"} else ExecutionStatus.SUCCEEDED,
                 error=result.get("error"),
+                result=result,
                 llm_trace_id=llm_trace_id,
                 timestamp=now.isoformat(),
             )
             pe_call_id = await self._sm.add_tool_call(chat_id, call)
             pe["call_id"] = pe_call_id
-            # Pre-executed tools are already done; mark executed_at.
+            # Pre-executed tools are already done; mark executed_at and store result.
             await self._sm.update_tool_call(
                 pe_call_id, chat_id,
                 execution_status=call.execution_status,
                 error=call.error,
+                result=result,
             )
 
     async def update(
@@ -113,6 +115,7 @@ class ToolCallLifecycle:
         error=None,
         backup_ref=None,
         llm_trace_id=None,
+        result=None,
     ) -> None:
         """UPDATE tool_call row after review/execution/approval.
 
@@ -127,4 +130,5 @@ class ToolCallLifecycle:
             error=error,
             backup_ref=backup_ref,
             llm_trace_id=llm_trace_id,
+            result=result,
         )

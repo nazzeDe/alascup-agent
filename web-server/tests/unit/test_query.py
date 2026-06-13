@@ -744,3 +744,141 @@ class TestChatTurnFullChainAudit:
         approved_idx = audit_events.index("TOOL_APPROVED")
         executed_idx = audit_events.index("TOOL_EXECUTED")
         assert created_idx < approved_idx < executed_idx
+
+
+class TestHistoryReconstruction:
+    """Slice 2: ChatTurn builds history from messages + executed_tool_list."""
+
+    async def test_build_history_includes_tool_results(self):
+        """Tool results from executed_tool_list appear as role=tool in history."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+        from src.models.tool import (
+            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
+        )
+
+        chat_id = uuid4()
+        ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
+        ts2 = datetime(2026, 6, 13, 12, 0, 1, tzinfo=timezone.utc)
+        ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
+        ts_tool = datetime(2026, 6, 13, 12, 0, 1, 500000, tzinfo=timezone.utc)
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    content="check CPU",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
+                    content="CPU is fine.",
+                ),
+            ],
+            executed_tool_list=[
+                ToolCall(
+                    name="get_cpu", server=ServerName.TOOL_SERVER,
+                    description="", is_read_only=True, is_rollbackable=False,
+                    params_schema={}, chat_id=chat_id,
+                    message_id=uuid4(), params={},
+                    approval_status=ApprovalStatus.APPROVED,
+                    execution_status=ExecutionStatus.SUCCEEDED,
+                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+                    timestamp=ts_tool.isoformat(),
+                ),
+            ],
+            timestamp=ts3.isoformat(),
+        )
+
+        history = _build_history(session)
+
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "tool", "assistant"], f"expected [user, tool, assistant], got {roles}"
+        tool_msg = history[1]
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["name"] == "get_cpu"
+        assert "CPU: 45%" in tool_msg["content"]
+        assert tool_msg["tool_call_id"] is not None
+
+    async def test_build_history_no_tool_results_empty_executed_list(self):
+        """Session with no tool results — history unchanged."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+
+        chat_id = uuid4()
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    type=MessageType.USER, content="hello",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    type=MessageType.ASSISTANT, content="hi there",
+                ),
+            ],
+            executed_tool_list=[],
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+        history = _build_history(session)
+
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant"]
+
+    async def test_build_history_tool_without_result_skipped(self):
+        """Tool calls without result field are not added to history."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.chat_turn import _build_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+        from src.models.tool import (
+            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
+        )
+
+        chat_id = uuid4()
+        ts = datetime.now(timezone.utc)
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts.isoformat(), type=MessageType.USER,
+                    content="list files",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
+                    content="Here are the files.",
+                ),
+            ],
+            executed_tool_list=[
+                ToolCall(
+                    name="list_files", server=ServerName.TOOL_SERVER,
+                    description="", is_read_only=True, is_rollbackable=False,
+                    params_schema={}, chat_id=chat_id,
+                    message_id=uuid4(), params={},
+                    approval_status=ApprovalStatus.APPROVED,
+                    execution_status=ExecutionStatus.SUCCEEDED,
+                    result=None,  # No result stored
+                    timestamp=ts.isoformat(),
+                ),
+            ],
+            timestamp=ts.isoformat(),
+        )
+
+        history = _build_history(session)
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant"]  # tool without result not included

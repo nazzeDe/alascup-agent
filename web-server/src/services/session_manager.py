@@ -54,6 +54,7 @@ class InMemorySessionManager:
         error: dict | None = None,
         backup_ref: str | None = None,
         llm_trace_id: uuid.UUID | None = None,
+        result: dict | None = None,
     ) -> None:
         """No-op for in-memory manager: tool calls are mutated in-place."""
 
@@ -178,6 +179,7 @@ class PostgresSessionManager:
         error: dict | None = None,
         backup_ref: str | None = None,
         llm_trace_id: uuid.UUID | None = None,
+        result: dict | None = None,
     ) -> None:
         """Update tool_call row after classification, approval, or execution."""
         now = datetime.now(timezone.utc)
@@ -199,6 +201,9 @@ class PostgresSessionManager:
         if llm_trace_id is not None:
             sets.append(f"llm_trace_id = ${len(args) + 1}")
             args.append(llm_trace_id)
+        if result is not None:
+            sets.append(f"result = ${len(args) + 1}")
+            args.append(json.dumps(result))
         if execution_status in (ExecutionStatus.SUCCEEDED, ExecutionStatus.FAILED):
             sets.append(f"executed_at = ${len(args) + 1}")
             args.append(now)
@@ -237,6 +242,12 @@ def _message_from_row(row) -> Message:
 
 
 def _tool_call_from_row(row) -> ToolCall:
+    raw_result = row.get("result")
+    result = (
+        json.loads(raw_result)
+        if isinstance(raw_result, str)
+        else raw_result
+    )
     return ToolCall(
         name=row["tool_name"],
         server=row["server_name"],
@@ -255,6 +266,7 @@ def _tool_call_from_row(row) -> ToolCall:
         error=json.loads(row["error"])
         if isinstance(row.get("error"), str)
         else row.get("error"),
+        result=result,
         llm_trace_id=row.get("llm_trace_id"),
         timestamp=row["created_at"].isoformat(),
     )

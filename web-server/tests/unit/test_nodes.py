@@ -229,6 +229,27 @@ class TestActNode:
         et = result.results[0]["result"].get("execution_time_ms")
         assert et is None
 
+    async def test_passes_result_to_lifecycle_update(self):
+        """act_node passes result output to lifecycle.update() for persistence."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        executor = MockExecutor({
+            "get_cpu": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+        })
+        lifecycle = MagicMock()
+        lifecycle.update = AsyncMock()
+
+        state = _state_with_tools([
+            {"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": uuid4()},
+        ])
+        await act_node(state, executor=executor, lifecycle=lifecycle)
+
+        lifecycle.update.assert_called_once()
+        call_kwargs = lifecycle.update.call_args.kwargs
+        assert call_kwargs["execution_status"] is not None
+        assert "result" in call_kwargs
+        assert call_kwargs["result"]["output"] == "CPU: 45%"
+
 
 class TestStreamingThink:
     """AG-007: think_node stream-dispatch based on tool metadata (three pools)."""

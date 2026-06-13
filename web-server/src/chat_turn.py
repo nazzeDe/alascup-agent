@@ -18,6 +18,70 @@ from src.agent.events import (
     TurnStarted,
 )
 from src.models.message import Message, MessageType
+from src.models.session import ChatSession
+
+
+def _build_history(session: ChatSession) -> list[dict]:
+    """Build conversation history from session messages AND executed_tool_list.
+
+    Tool calls with results are interleaved as role=tool messages ordered by
+    timestamp, so the LLM sees tool execution output in multi-turn conversations.
+    """
+    from datetime import datetime, timezone
+
+    # Collect entries: (timestamp, kind, data)
+    entries: list[tuple[datetime, str, object]] = []
+
+    for m in session.messages:
+        if m.is_meta:
+            continue
+        ts = datetime.fromisoformat(m.timestamp)
+        entries.append((ts, "msg", m))
+
+    for tc in session.executed_tool_list:
+        if tc.result is None:
+            continue
+        ts = datetime.fromisoformat(tc.timestamp)
+        entries.append((ts, "tool", tc))
+
+    entries.sort(key=lambda e: e[0])
+
+    history: list[dict] = []
+    for _ts, kind, obj in entries:
+        if kind == "msg":
+            m = obj
+            role = m.type.value if isinstance(m.type, MessageType) else m.type
+            history.append({"role": role, "content": m.content})
+        else:
+            tc = obj
+            history.append({
+                "role": "tool",
+                "content": _format_tool_result_for_history(tc),
+                "tool_call_id": str(tc.message_id),
+                "name": tc.name,
+            })
+
+    return history
+
+
+def _format_tool_result_for_history(tc) -> str:
+    """Format a ToolCall with result into the same string format as observe_node."""
+    result = tc.result or {}
+    status = result.get("execution_status", tc.execution_status.value)
+    output = result.get("output", "")
+    error = result.get("error", {})
+    if isinstance(error, dict):
+        error_msg = error.get("message", "")
+    else:
+        error_msg = str(error) if error else ""
+
+    parts = [f"[{tc.name}] execution_status={status}"]
+    if output:
+        parts.append(f"output={output}")
+    if error_msg:
+        parts.append(f"error={error_msg}")
+
+    return "\n".join(parts)
 
 
 class ChatTurn:
@@ -75,13 +139,8 @@ class ChatTurn:
         if await self._is_disconnected():
             return
 
-        # 3. Build history from session messages
-        history: list[dict] = []
-        for m in session.messages:
-            if m.is_meta:
-                continue
-            role = m.type.value if isinstance(m.type, MessageType) else m.type
-            history.append({"role": role, "content": m.content})
+        # 3. Build history from session messages + executed_tool_list
+        history: list[dict] = _build_history(session)
 
         # 4. Set title
         if not session.title and self._user_message:
