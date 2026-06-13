@@ -7,7 +7,6 @@ node_modules
 
 # output
 out
-dist
 *.tgz
 
 # code coverage
