@@ -88,11 +88,7 @@ class ToolExecutor:
                     result = await client.call_tool(tool_name, args)
                     output = _extract_output(result)
                     return {
-                        "execution_status": (
-                            ExecutionStatus.SUCCEEDED
-                            if not getattr(result, "isError", False)
-                            else ExecutionStatus.FAILED
-                        ),
+                        "execution_status": ToolExecutor._resolve_status(result),
                         "output": output,
                     }
             except (ConnectionError, ConnectionRefusedError) as e:
@@ -131,6 +127,24 @@ class ToolExecutor:
     @staticmethod
     def _is_connect_error(exc: Exception) -> bool:
         return isinstance(exc, (ConnectionError, ConnectionRefusedError, TimeoutError))
+
+    @staticmethod
+    def _resolve_status(result) -> ExecutionStatus:
+        """Derive execution status from structured_content or isError.
+
+        Tools like bash embed ``execution_status`` in their return dict.
+        MCP ``isError`` only reflects transport-level failure, so we
+        inspect the payload first and fall back to the protocol flag.
+        """
+        data = getattr(result, "data", None)
+        if isinstance(data, dict):
+            raw = data.get("execution_status")
+            if raw is not None:
+                try:
+                    return ExecutionStatus(raw)
+                except ValueError:
+                    pass
+        return ExecutionStatus.FAILED if getattr(result, "isError", False) else ExecutionStatus.SUCCEEDED
 
 
 def _extract_output(result) -> str | None:

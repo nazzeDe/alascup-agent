@@ -22,6 +22,60 @@ class TestToolExecutorConstruction:
         assert executor._is_connect_error(ConnectionRefusedError("test"))
         assert not executor._is_connect_error(ValueError("test"))
 
+    def test_resolve_status_from_data_execution_status(self):
+        """data.execution_status 优先于 isError"""
+        from src.mcp_client.executor import ToolExecutor
+        from src.models.tool import ExecutionStatus
+
+        result = MagicMock()
+        result.data = {"execution_status": "FAILED", "stdout": "", "stderr": "err"}
+        result.isError = False
+
+        assert ToolExecutor._resolve_status(result) == ExecutionStatus.FAILED
+
+    def test_resolve_status_fallback_to_isError_when_no_data(self):
+        """无 data 时回退到 isError"""
+        from src.mcp_client.executor import ToolExecutor
+        from src.models.tool import ExecutionStatus
+
+        result = MagicMock()
+        result.isError = True
+
+        assert ToolExecutor._resolve_status(result) == ExecutionStatus.FAILED
+
+    def test_resolve_status_data_without_execution_status_falls_back(self):
+        """data 是 dict 但无 execution_status 键，回退到 isError"""
+        from src.mcp_client.executor import ToolExecutor
+        from src.models.tool import ExecutionStatus
+
+        result = MagicMock()
+        result.data = {"other_field": "value"}
+        result.isError = False
+
+        assert ToolExecutor._resolve_status(result) == ExecutionStatus.SUCCEEDED
+
+    def test_resolve_status_invalid_execution_status_falls_back(self):
+        """data.execution_status 非法值时回退到 isError"""
+        from src.mcp_client.executor import ToolExecutor
+        from src.models.tool import ExecutionStatus
+
+        result = MagicMock()
+        result.data = {"execution_status": "INVALID_VALUE"}
+        result.isError = True
+
+        assert ToolExecutor._resolve_status(result) == ExecutionStatus.FAILED
+
+    def test_resolve_status_none_data_falls_back_to_isError_false(self):
+        """data is None 且 isError=False → SUCCEEDED"""
+        from src.mcp_client.executor import ToolExecutor
+        from src.models.tool import ExecutionStatus
+
+        result = MagicMock()
+        result.data = None
+        result.isError = False
+
+        assert ToolExecutor._resolve_status(result) == ExecutionStatus.SUCCEEDED
+
 
 class TestToolExecutorExecute:
     @pytest.mark.asyncio
