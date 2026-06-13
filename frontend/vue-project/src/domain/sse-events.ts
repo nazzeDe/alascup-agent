@@ -5,7 +5,6 @@ export interface AssistantEvent {
 }
 
 export interface AssistantDoneEvent {
-  // empty object
 }
 
 export interface ReasoningEvent {
@@ -13,7 +12,6 @@ export interface ReasoningEvent {
 }
 
 export interface ThinkingDoneEvent {
-  // empty object
 }
 
 export interface ToolCallEvent {

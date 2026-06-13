@@ -4,8 +4,10 @@
 
 | 模块 | 单元测试 | E2E |
 |------|---------|-----|
-| useSessionManager | session 创建/隔离/删除、SSE 事件处理、审批状态机 | — |
-| Toast 通知 | 显示、dismiss、自动过期、按 session 过滤 | — |
+| ChatStore | SSE 事件 → state 映射、审批状态机 | — |
+| SessionListStore | 会话列表 CRUD 反映射 | — |
+| SessionService | session CRUD + 审批编排 | — |
+| ToastStore | 显示、dismiss、自动过期 | — |
 | Markdown 渲染 | marked.js 输出 + 代码高亮 | — |
 | 消息格式化 | 时间戳、类型标签、isMeta 渲染、timeline 排序 | — |
 | 组件渲染 | SessionList、MessageItem、ToolCallInline、ApprovalInline | — |
@@ -61,12 +63,12 @@
 ### FE-010 会话切换
 
 | 输入 | 点击侧边栏另一会话 |
-| 预期 | GET /api/sessions/{chat_id}；messages/toolCalls 刷新；后台 session 的 SSE 不断开 |
+| 预期 | GET /api/sessions/{chat_id}；shallowRef 替换 active ChatStore；timeline 刷新 |
 
 ### FE-011 Session 隔离
 
 | 输入 | 在 session A 输入草稿 → 切换 B → 切回 A |
-| 预期 | 草稿保留；各自 messages 独立；各自 isStreaming 独立 |
+| 预期 | session B 重新从 API 加载历史；独立 ChatStore |
 
 ### FE-012 isMeta 消息渲染
 
@@ -88,17 +90,12 @@
 | 输入 | POST /api/tool-requests/{id}/approval 返回 500 或网络错误 |
 | 预期 | connectionError 设置；approvalEvent 保持 pending；用户可重试 |
 
-### FE-016 后台 session streaming 保持
+### FE-016 Stream 中止
 
-| 输入 | session A streaming 中 → 切换到 session B |
-| 预期 | session A 的 SSE 连接不断开；isStreaming 保持 true；列表显示活动指示 |
+| 输入 | 用户点击 "Stop" 按钮（或切换 session） |
+| 预期 | AbortController 中止 fetch；isStreaming=false；phase=idle；输入框重新启用 |
 
-### FE-017 Stream 中止
-
-| 输入 | 用户点击 "Stop" 按钮 |
-| 预期 | AbortController 中止 fetch；isStreaming=false；输入框重新启用 |
-
-### FE-018 加载状态
+### FE-017 加载状态
 
 | 输入 | 会话列表加载中 / 历史消息加载中 |
 | 预期 | 列表区 spinner；ChatView loading overlay；操作完成后恢复正常 |
@@ -111,4 +108,4 @@
 ### FE-020 Session 删除
 
 | 输入 | 调用 deleteSession(chatId)（streaming 中） |
-| 预期 | SSE abort；state 从 instances 移除；列表项删除；若为 active session 则 activeChatId=null |
+| 预期 | 列表项删除；若为 active session 则切回空白 ChatStore |

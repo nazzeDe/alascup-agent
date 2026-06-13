@@ -1,98 +1,131 @@
 # frontend
 
-对话式运维聊天界面。支持同时多个 session 并行对话。本地开发构建，Docker 仅包含构建产物。
+对话式运维聊天 UI。
 
 ## 技术栈
 
 | 依赖 | 用途 |
 |------|------|
-| Vue 3 | 组件化 UI 框架 |
-| Bootstrap 5 | UI 样式与响应式布局 |
-| marked.js | Markdown → HTML 渲染 |
-| DOMPurify | HTML 清洗，防 XSS |
+| Vue 3 + TypeScript | 组件 + 状态 |
+| Bootstrap 5 | UI 样式 + 布局 |
+| marked.js | Markdown → HTML |
+| DOMPurify | HTML 防 XSS |
 | highlight.js | 代码块语法高亮 |
-| Nginx | 静态文件 serve + `/api/*` 反向代理 |
+| fetch-event-source | SSE 客户端 |
+| Nginx | serve 静态文件 + 反向代理 `/api/*` 到 web-server |
 
-Docker 镜像仅包含构建产物，不含 Bun 和 node_modules。前端在本地构建，无需考虑 loongarch64 兼容。
+Docker 镜像只含构建产物（`dist/`）。
 
 ## 目录结构
 
 ```
 frontend/
-  .dockerignore
-  .gitignore
+  README.md
   Dockerfile
   nginx.conf
-  README.md
-  graph.md
-  test.md
   vue-project/
-    index.html          # 主页面入口
-    vite.config.ts      # Vite 构建配置
-    vitest.config.ts    # Vitest 测试配置
-    tsconfig.json
-    env.d.ts
-    package.json
-    public/
-      favicon.ico
+    index.html
+    vite.config.ts
+    vitest.config.ts
     src/
-      main.ts           # 应用入口
-      types.ts          # TypeScript 类型定义
-      App.vue           # 根组件（布局 + SessionList + ChatView）
-      assets/
-        style.css       # Bootstrap 5 主题 + 自定义样式
-      composables/
-        useSessionManager.ts  # 统一会话管理（per-session state、SSE、审批、会话列表）
-        useToast.ts           # Toast 通知队列
+      main.ts
+      App.vue
+      domain/
+        models.ts           # Message, ToolCallInfo, ChatSession, AgentPhase…
+        sse-events.ts       # SSE 事件 DTO + SSECallbacks
+      application/
+        ports.ts            # SseClient, SessionApi, ApprovalApi 接口
+        chat-store.ts       # 单会话状态（messages, toolCalls, reasonings, agentPhase…）
+        session-list-store.ts # 会话列表状态
+        session-service.ts  # 会话 CRUD + 审批（调 API + 更新 store）
+        toast-store.ts      # Toast 通知队列
+      infrastructure/
+        sse-client.ts       # fetch-event-source 封装
+        session-api.ts      # Session REST API
+        approval-api.ts     # Approval REST API
+        markdown.ts         # marked + DOMPurify + highlight.js 渲染管线
+      presentation/
+        composables/
+          use-chat.ts       # 注入 store + sseClient，接管 SSE 生命周期
+          use-session-list.ts # 注入 store + service，暴露会话列表操作
+          use-timeline.ts   # 合并 messages/toolCalls/reasonings/approval → 排序 timeline
+          use-auto-scroll.ts # 自动滚底 + 用户上滚检测
+          use-toast.ts      # 注入 toastStore
       components/
-        ChatView.vue          # 聊天界面（timeline、输入框、状态栏、错误横幅）
-        MessageItem.vue       # 单条消息渲染（user/assistant/system/meta + Markdown）
-        ToolCallInline.vue    # 工具调用内联文本（tool_name + params + 状态 + 耗时）
-        ReasoningBubble.vue   # 推理过程气泡（可折叠、流式动画）
-        ApprovalInline.vue    # 审批内联卡片（timeline 内嵌、可附带消息）
-        SessionList.vue       # 会话侧边栏（列表 + 时间分组 + 活动指示）
-        ToastContainer.vue    # Toast 通知容器（右上角叠加）
-    dist/               # Vite 构建产物（Docker 使用）
+        ChatView.vue        # 聊天面板：timeline + 输入框 + 错误横幅 + 状态指示
+        MessageItem.vue     # 消息气泡：user/assistant/system/meta 渲染
+        ToolCallInline.vue  # 工具调用行：tool_name + params + 状态 + 耗时
+        ReasoningBubble.vue # 推理气泡：可折叠 + 流式光标
+        ApprovalInline.vue  # 审批卡片：内嵌 approve/reject + 可选消息
+        SessionList.vue     # 侧边栏：会话列表 + 时间分组 + 右键删除
+        ToastContainer.vue  # Toast 容器：右上角叠加
+      assets/
+        style.css           # 自定义样式
 ```
 
 ## 架构
 
-### useSessionManager
+4 层：
 
-唯一的全局 composable，管理所有 session 的完整生命周期：
+- **domain**: 纯数据类型。`models.ts`（Message, ToolCallInfo, ChatSession…）、`sse-events.ts`（wire 格式 DTO）
+- **application**: 业务状态 + 编排。stores 是带 `Ref<>` 的 class，唯一管理状态；`SessionService` 编排多 store 操作
+- **infrastructure**: IO。`SessionApi` / `ApprovalApi`（fetch REST）、`SseClient`（fetch-event-source）、`markdown.ts`（渲染管线）
+- **presentation**: Vue 组件 + composables。composables 通过 `inject` 消费 infrastructure/application，组件只管渲染 + emit
+
+### 状态
+
+App.vue 创建单例 stores → `provide`。`activeChatStore` 用 `shallowRef<ChatStore>` 包装，交换 session 时替换整个 store。
 
 ```
-useSessionManager
-├── sessions: Ref<ChatSession[]>            # 会话列表
-├── activeChatId: Ref<string | null>        # 当前活跃 session（null = 空白草稿）
-├── isLoadingSessions / loadError           # 加载/错误状态
-├── instances: Map<chatId, SessionState>    # 懒创建的 per-session state
-│
-└── SessionState
-    ├── chatId: string | null              # 自身标识（null 表示尚未持久化）
-    ├── messages / toolCalls / reasonings   # 聊天数据
-    ├── agentPhase / currentActivity        # agent 状态（'thinking' | 'calling_tool' | ...）
-    ├── phaseLabel                          # computed: "Thinking…" / "Calling: …"
-    ├── approvalEvent                       # 审批事件（timeline 内嵌）
-    ├── draftInput                          # 输入框草稿（切换 session 保留）
-    ├── isStreaming                         # 每个 session 独立的流状态
-    ├── connectionError                     # 连接错误消息（null = 正常）
-    ├── isLoadingHistory                    # 历史消息加载中
-    ├── sendMessage(text)                   # 发送消息 + 建立 SSE
-    ├── abort()                             # 停止当前 SSE 连接
-    ├── approve(requestId, message?)        # 批准（带错误处理）
-    ├── reject(requestId, message?)         # 拒绝（带错误处理）
-    └── loadHistory()                       # 加载历史消息
+App.vue (provide)
+├── toastStore: ToastStore           # 全局 Toast
+├── sessionListStore: SessionListStore # 会话列表
+├── sessionService: SessionService   # 编排（CRUD + 审批）
+├── chatStore: Ref<ChatStore>        # shallowRef — 切换 session 替换
+└── sseClient: FetchEventSourceClient # 单例
 ```
 
-### ChatView
+### 数据流
 
-新接口只接收一个 prop：`chatId: string | null`。内部通过 `useSessionManager().get(chatId)` 获取一切状态。
+```
+用户输入 → ChatView → useChat.send(text)
+  → POST /api/chat (EventSource)
+  → on_session_init → 绑定 chatId
+  → on_reasoning   → ChatStore.appendReasoningDelta
+  → on_assistant   → ChatStore.append + on_assistant_done → addMessage
+  → on_tool_call   → ChatStore.setToolCall (RUNNING)
+  → on_tool_result → ChatStore.updateToolCall (SUCCEEDED/FAILED)
+  → on_tool_approval_required → ChatStore.setApprovalEvent
+  → on_done        → ChatStore.setPhase('done')
+  → on_error       → ChatStore.setConnectionError
+```
 
-### 设计决策
+### Session 生命周期
 
-- **Session 按第一条消息创建**：点击 "New Session" 仅清空 ChatView（本地 draft），不发 HTTP 请求。发送第一条消息时，后端在 SSE `done` 事件中带回 `chatId`。
-- **后台 session 保持连接**：切换 activeChatId 不 abort 其他 session 的 SSE。
-- **审批降级为 timeline 内嵌**：不再弹全局 modal。审批事件以 `ApprovalInline.vue` 卡片形式出现在消息流中。卡片内可直接 approve/reject，附带可选消息。
-- **Tool call 内联显示**：紧凑的单行文本（tool_name + params + 状态 + 耗时），可折叠展开输出。
-- **Toast 过滤**：全局 Toast 带 `chatId` 字段，只渲染当前活跃 session 的 toast。
+1. 点击 "New Session" → 调 API 预创建 session → 侧边栏出现条目
+2. 发消息 → useChat 建立 SSE → `on_session_init` 绑定 chatId → `on_done` 更新 chatId
+3. 切换 session → App.vue 替换 `activeChatStore`（`shallowRef`） → useChat 响应式跟随新 store
+4. 删除 session → 调 API DELETE → 本地移除 → 切回空白
+
+### SSE 事件
+
+| 事件 | data | 触发 |
+|------|------|------|
+| `session_init` | `{ chat_id }` | 连接建立 |
+| `reasoning` | `{ delta }` | 推理 delta |
+| `thinking_done` | `{}` | 推理结束 |
+| `assistant` | `{ delta }` | 回复 delta |
+| `assistant_done` | `{}` | 回复结束 |
+| `tool_call` | `ToolCallEvent` | LLM 调用工具 |
+| `tool_result` | `ToolResultEvent` | 工具执行完毕 |
+| `tool_approval_required` | `ToolApprovalRequiredEvent` | 高风险工具等审批 |
+| `done` | `{}` | SSE 流正常结束 |
+| `error` | `{ code, message }` | 错误 |
+
+### 审批
+
+`on_tool_approval_required` → `ApprovalInline.vue` 卡片嵌入 timeline → 点 approve/reject → `POST /api/tool-requests/{id}/approval`
+
+### 输入组件
+
+App.vue、ChatView.vue、SessionList.vue、MessageItem.vue、ToolCallInline.vue、ReasoningBubble.vue、ApprovalInline.vue、ToastContainer.vue

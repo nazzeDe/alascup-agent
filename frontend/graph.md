@@ -218,12 +218,13 @@ flowchart LR
         highlightjs["highlight.js<br/>代码语法高亮"]
     end
 
-    subgraph composables["Composables"]
-        manager["useSessionManager.ts<br/>统一会话管理<br/>per-session state / SSE / 审批 / 列表"]
-        toast["useToast.ts<br/>Toast 通知队列<br/>按 session 过滤"]
+    subgraph application["应用层"]
+        chatstore["ChatStore<br/>per-session 状态<br/>messages / toolCalls / reasonings"]
+        sessionliststore["SessionListStore<br/>会话列表 / activeChatId"]
+        session_service["SessionService<br/>CRUD + 审批编排"]
     end
 
-    subgraph components["Vue 组件"]
+    subgraph presentation["表现层"]
         chatview["ChatView.vue<br/>时间线渲染 + 状态栏"]
         message_item["MessageItem.vue<br/>消息渲染"]
         toolcall_inline["ToolCallInline.vue<br/>工具调用内联文本"]
@@ -231,6 +232,8 @@ flowchart LR
         approval_inline["ApprovalInline.vue<br/>审批内联卡片"]
         session_list["SessionList.vue<br/>会话侧边栏"]
         toast_container["ToastContainer.vue<br/>Toast 通知"]
+        usechat["useChat<br/>SSE 生命周期 + store 操作"]
+        usetimeline["useTimeline<br/>合并排序 timeline"]
     end
 
     subgraph external["外部依赖"]
@@ -249,17 +252,21 @@ flowchart LR
     chatview --> toolcall_inline: 工具调用渲染
     chatview --> reasoning_bubble: 推理渲染
     chatview --> approval_inline: 审批渲染
-    chatview --> manager: get(chatId)
+    chatview --> usechat
 
-    session_list --> manager: sessions / activeChatId / createDraft
+    session_list --> usechat: via inject
+    session_list --> sessionliststore: via useSessionList
 
-    approval_inline --> manager: approve / reject
+    approval_inline --> session_service: approve / reject
 
-    toast_container --> toast: toast 队列
+    usechat --> chatstore: state 读写
+    usechat --> sessionliststore: 新增 session
+    session_service --> chatstore
+    session_service --> sessionliststore
 
-    manager --> webapi: GET/POST /api/sessions
-    manager --> webapi: POST /api/chat (SSE)
-    manager --> webapi: POST /api/tool-requests/{id}/approval
+    usechat --> webapi: POST /api/chat (SSE)
+    session_service --> webapi: GET/POST/DELETE /api/sessions
+    session_service --> webapi: POST /api/tool-requests/{id}/approval
 
     nginx --> index: serve 静态文件
     nginx --> webapi: 反向代理 /api/*
@@ -271,20 +278,8 @@ flowchart LR
 
 ```mermaid
 classDiagram
-    class useSessionManager {
-        +Ref~ChatSession[]~ sessions
-        +Ref~string|null~ activeChatId
-        +Ref~boolean~ isLoadingSessions
-        +Ref~string~ loadError
-        +createDraft()
-        +get(chatId) SessionState
-        +loadSessions()
-        +loadHistory(chatId)
-        +deleteSession(chatId)
-    }
-
-    class SessionState {
-        +string chatId
+    class ChatStore {
+        +Ref~string|null~ chatId
         +Ref~Message[]~ messages
         +Ref~Map~ toolCalls
         +Ref~ReasoningEntry[]~ reasonings
@@ -292,19 +287,42 @@ classDiagram
         +Ref~string~ draftInput
         +Ref~ApprovalEvent~ approvalEvent
         +Ref~AgentPhase~ agentPhase
-        +Ref~string~ currentActivity
         +ComputedRef~string~ phaseLabel
-        +Ref~string~ connectionError
-        +sendMessage(text)
-        +abort()
-        +approve(requestId, message?)
-        +reject(requestId, message?)
-        +loadHistory() Promise~boolean~
+        +Ref~boolean~ isLoadingHistory
+        +Ref~ErrorInfo~ connectionError
+        +addMessage / addMessages
+        +setToolCall / updateToolCall / setToolCalls
+        +appendReasoningDelta / markReasoningDone
+        +setPhase / setStreaming
+        +setApprovalEvent / updateApprovalStatus
+        +loadFromSession / reset
+    }
+
+    class SessionListStore {
+        +Ref~ChatSession[]~ sessions
+        +Ref~string|null~ activeChatId
+        +Ref~boolean~ isLoadingSessions
+        +Ref~string~ loadError
+        +setSessions / addSession / removeSession
+        +setActive / setLoading / setError
+    }
+
+    class ToastStore {
+        +Ref~Toast[]~ toasts
+        +show / dismiss
+    }
+
+    class SessionService {
+        +createDraft() Promise~string|null~
+        +loadSessions()
+        +loadHistory(chatId, chatStore) Promise~boolean~
+        +deleteSession(chatId)
+        +approve / reject
     }
 
     class ChatView {
-        +props chatId: string|null
-        +computed timeline
+        +inject: chatStore, sseClient, sessionService
+        +computed timeline (useTimeline)
         +scroll / send / abort
     }
 
@@ -323,20 +341,19 @@ classDiagram
     }
 
     class SessionList {
-        +props sessions, active_chat_id, is_loading, is_creating
+        +inject: chatStore, sessionListStore, sessionService
         +emit select, create
     }
 
-    class ToastContainer {
-        +Toast[] toasts
-        +dismiss(id)
-    }
-
-    ChatView --> useSessionManager: get(chatId)
+    ChatView --> useChat: 注入 + 暴露状态
+    ChatView --> useTimeline: 合并排序
     ChatView --> MessageItem
     ChatView --> ToolCallInline
     ChatView --> ApprovalInline
-    useSessionManager --> SessionState: creates/manages
+    ChatView --> ReasoningBubble
+    useChat --> ChatStore: state 读写
+    SessionService --> ChatStore: 操作
+    SessionService --> SessionListStore: 操作
 ```
 
 ---

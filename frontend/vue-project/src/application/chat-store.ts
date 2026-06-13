@@ -26,7 +26,6 @@ export class ChatStore {
     }
   })
 
-  // Message mutations
   addMessage(msg: Message): void {
     this.messages.value = [...this.messages.value, msg]
   }
@@ -35,7 +34,6 @@ export class ChatStore {
     this.messages.value = [...this.messages.value, ...msgs]
   }
 
-  // ToolCall mutations
   setToolCall(callId: string, tc: ToolCallInfo): void {
     const updated = new Map(this.toolCalls.value)
     updated.set(callId, tc)
@@ -54,7 +52,6 @@ export class ChatStore {
     this.toolCalls.value = tcs
   }
 
-  // Reasoning mutations
   appendReasoningDelta(messageId: string, delta: string): void {
     const idx = this.reasonings.value.findIndex(r => r.message_id === messageId)
     if (idx !== -1) {
@@ -85,7 +82,6 @@ export class ChatStore {
     this.reasonings.value = []
   }
 
-  // Simple state setters
   setPhase(phase: AgentPhase): void {
     this.agentPhase.value = phase
   }
@@ -106,7 +102,6 @@ export class ChatStore {
     this.isLoadingHistory.value = v
   }
 
-  // ApprovalEvent mutations
   setApprovalEvent(ev: ApprovalEvent | null): void {
     this.approvalEvent.value = ev
   }

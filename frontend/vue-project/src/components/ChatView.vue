@@ -105,7 +105,6 @@ async function handle_reject(requestId: string, message?: string) {
             @reject="handle_reject"
           />
         </template>
-        <!-- Phase status during streaming — appears at end of message flow -->
         <div v-if="isStreaming && phaseLabel" class="d-flex justify-content-end pe-3 mb-1">
           <small class="phase-label-text">
             <span class="pulse-dot d-inline-block me-1" style="width:6px;height:6px;vertical-align:middle"></span>{{ phaseLabel }}
@@ -114,12 +113,10 @@ async function handle_reject(requestId: string, message?: string) {
       </template>
     </div>
 
-    <!-- Scroll-to-bottom floating button -->
     <div v-if="user_scrolled_up && isStreaming" class="scroll-bottom-btn" @click="user_scrolled_up = false; check_auto_scroll()">
       ↓
     </div>
 
-    <!-- Connection error banner -->
     <div v-if="connectionError" class="connection-error px-3 py-2 border-top small" :class="errorBannerClass">
       <span class="fw-semibold">{{ errorBannerTitle }}</span>
       <span class="ms-1">{{ connectionError.message }}</span>

@@ -225,9 +225,9 @@ stateDiagram-v2
 
 ---
 
-## Agent 循环：StateGraph + 编排器驱动
+## Agent 循环：编排器驱动
 
-LangGraph StateGraph 管理节点拓扑。Graph 为纯函数，编排器（LoopOrchestrator）通过 `ainvoke()` 调用图并在外部驱动审批循环。SSE 连接在审批等待期间保持存活，审批决策通过 REST 传入后由编排器合并到状态中并重新调用图。
+`AgentLoop` 纯 Python while-loop 驱动 think → review → act → observe 节点。编排器 `LoopOrchestrator` 通过 `AgentLoop.run()` 启动循环并在外部驱动审批循环。SSE 连接在审批等待期间保持存活，审批决策通过 REST 传入后由编排器合并到状态中并恢复循环。
 
 ```mermaid
 stateDiagram-v2
@@ -295,7 +295,7 @@ flowchart LR
 
 ### 审批如何处理
 
-Graph 是纯函数，不内部管理审批状态。`review_node` 返回 `pending_approval` 列表和 `Transition.APPROVAL_PENDING`，图执行结束。编排器（LoopOrchestrator）检测到 `pending_approval` 后：推送 `tool_approval_required` SSE 事件，通过 `ApprovalBridge` 等待用户决策，将决策合并到状态（`approved_tool_calls` / `rejected_tool_calls`），然后重新调用 `graph.ainvoke()`。`think_node` 检测到 `approved_tool_calls` 存在时走快速路径（跳过 LLM），直接路由到 `act_node` 执行。
+Graph 是纯函数，不内部管理审批状态。`review_node` 返回 `pending_approval` 列表和 `Transition.APPROVAL_PENDING`，图执行结束。编排器（LoopOrchestrator）检测到 `pending_approval` 后：推送 `tool_approval_required` SSE 事件，通过 `ApprovalBridge` 等待用户决策，将决策合并到状态（`approved_tool_calls` / `rejected_tool_calls`），然后重新进入 AgentLoop 的审批子循环（think → act → observe）。`think_node` 检测到 `approved_tool_calls` 存在时走快速路径（跳过 LLM），直接路由到 `act_node` 执行。
 
 ### 循环状态
 
@@ -622,12 +622,27 @@ classDiagram
             +system
             +transition
         }
-        class Query {
-            +run(messages, tools, system) AsyncGenerator[SSEEvent]
-            +resume(decisions) AsyncGenerator[SSEEvent]
+        class ChatTurn {
+            +events() AsyncIterator[DomainEvent]
         }
         class LoopOrchestrator {
-            +run(initial_state) AsyncIterator
+            +run(initial_state, channel) None
+        }
+        class AgentLoop {
+            +run(state, channel) None
+        }
+        class EventEmitter {
+            +emit_stream_chunks(chunks)
+            +emit_tools_started(tool_calls)
+            +emit_tools_finished(results)
+            +emit_streaming_tool_results(results)
+        }
+        class ApprovalHandler {
+            +resolve(scratch, profiler, turn_ctx, emitter)
+        }
+        class CircuitBreaker {
+            +check_iteration(it) bool
+            +check_token_ceiling(tokens) bool
         }
     }
 
@@ -649,12 +664,20 @@ classDiagram
     %% mcp_client
     %% ============================================================
     namespace mcp_client {
+        class ServerRegistry {
+            +discover() Tool[]
+            +url_for(server_name) str
+            +refresh(server_name)
+        }
         class ToolExecutor {
-            +execute(tool_call) ToolResult
-            +execute_parallel(tool_calls[]) ToolResult[]
+            +execute(tool_name, arguments, *, server_name, approval_status, request_id) ToolResult
+            +execute_parallel(calls[]) ToolResult[]
+            +classify_companion(tool_name, params, server_name) dict
             +list_tools() Tool[]
         }
     }
+
+    ServerRegistry --> ToolExecutor : provides tools for
 
     %% ============================================================
     %% services
@@ -664,18 +687,32 @@ classDiagram
             +create_session() ChatSession
             +get_session(chat_id) ChatSession
             +add_message(chat_id, msg)
+            +add_tool_call(chat_id, call)
+            +update_tool_call(call_id, ...)
+            +list_sessions()
+            +delete_session(chat_id)
         }
         class PromptManager {
-            +load_sections() dict
             +build_system_prompt() str
         }
         class LLMAdapter {
-            +generate(messages, tools) LLMResponse
-            +generate_stream(messages, tools) AsyncIterator
+            +generate_stream(messages, tools, system, chat_id) AsyncIterator
+            +escalate_max_tokens()
+            +switch_to_fallback()
+            +summarize(messages) str
         }
         class ContextManager {
             +count_tokens(messages) int
             +compress(messages) Message[]
+            +needs_compression(messages) bool
+        }
+        class ErrorRecovery {
+            +get_strategy(error_type) dict
+            +record_attempt(error_type, action)
+        }
+        class ToolCallLifecycle {
+            +register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
+            +update(chat_id, call_id, *, approval_status, execution_status, error, ...)
         }
     }
 
@@ -699,6 +736,7 @@ classDiagram
         class SessionRouter
         class ApprovalRouter
         class HealthRouter
+        class ToolRouter
     }
 
     %% ============================================================
@@ -724,12 +762,16 @@ classDiagram
     %% ============================================================
     ToolCall --> ToolResult : produces
 
-    ChatRouter --> Query : invokes
+    ChatRouter --> ChatTurn : invokes
     SessionRouter --> SessionManager : invokes
     ApprovalRouter --> PendingApprovalBridge : uses
 
-    Query --> LoopOrchestrator : creates
-    LoopOrchestrator --> AgentState : drives
+    ChatTurn --> LoopOrchestrator : creates
+    LoopOrchestrator --> AgentLoop : runs
+    AgentLoop --> AgentState : drives
+    AgentLoop --> ApprovalHandler : embeds
+    AgentLoop --> CircuitBreaker : guards
+    AgentLoop --> EventEmitter : emits
     AgentState --> ContextManager : uses
     AgentState "1" --> "*" Message : accumulates
     AgentState "1" --> "*" Tool : registers
@@ -777,7 +819,7 @@ flowchart TD
         api_chat["POST /api/chat<br/>SSE 入口"]
         api_approval["POST /api/tool-requests/{id}/approval<br/>审批回调"]
 
-        subgraph agent_loop["Agent 循环 (LangGraph StateGraph)"]
+        subgraph agent_loop["Agent 循环 (AgentLoop while-loop)"]
             direction TB
             think["think_node<br/>LLM 流式推理<br/>accumulate text / reasoning / tool_calls"]
             dispatch["_dispatch_tool_calls<br/>三池分配"]
@@ -789,13 +831,7 @@ flowchart TD
         end
 
         subgraph events["SSE 事件发射"]
-            emit["emit_events()"]
-        end
-
-        subgraph reasoning_channel["推理侧通道 (B2a)"]
-            ctx_var["contextvar _event_queue"]
-            reasoning_q["asyncio.Queue(maxsize=64)<br/>背压控制"]
-            drain_task["后台 drain_task<br/>持续读出 → buffered"]
+            emit["EventEmitter<br/>DomainEvent → EventChannel"]
         end
     end
 
@@ -812,15 +848,13 @@ flowchart TD
     svc --> think
 
     think <--> llm
-    llm -- "reasoning_content" --> ctx_var
-    ctx_var --> reasoning_q
-    reasoning_q --> drain_task
-    drain_task -- "buffered[]" --> emit
-    emit -- "event: reasoning" --> session_mgr
+    llm -- "reasoning_content / content" --> think
+    think -- "stream_chunks" --> emit
+    emit -- "event: reasoning / assistant<br/>+ thinking_done / assistant_done" --> session_mgr
     session_mgr --> reason_bubble
     reason_bubble --> chat_view
 
-    llm -- "assistant content" --> think
+    llm -- "tool_use blocks" --> think
     think -- "accumulated text" --> emit
     emit -- "event: assistant" --> session_mgr
     session_mgr --> msg_item
@@ -843,7 +877,7 @@ flowchart TD
     emit --> session_mgr
     session_mgr --> approval_inline
     approval_inline -- "POST /approval" --> api_approval
-    api_approval -- "编排器合并决策 → 重新调用图" --> act
+    api_approval -- "编排器合并决策 → 恢复 AgentLoop" --> act
 
     review -- "自动批准" --> act
     act --> tool_server
@@ -868,70 +902,72 @@ sequenceDiagram
     participant CV as ChatView.vue
     participant SM as useSessionManager
     participant WS as web-server /api/chat
-    participant Q as asyncio.Queue
-    participant DT as drain_task
+    participant CT as ChatTurn
+    participant CH as EventChannel
+    participant AL as AgentLoop
+    participant EM as EventEmitter
     participant TH as think_node
     participant LLM as DeepSeek V4
-    participant EM as emit_events
 
     U->>CV: 输入文字 / 点击发送
     CV->>SM: state.sendMessage(text)
     SM->>WS: POST /api/chat (SSE)
 
-    Note over WS: 创建 Queue, set contextvar
-    Note over WS: 启动 drain_task (后台)
+    WS->>CT: ChatTurn.events()
+    CT->>WS: TurnStarted(chat_id)
+    CT->>CT: 构建初始 state, 创建 EventChannel
+    CT->>AL: asyncio.create_task(orchestrator.run(state, channel))
 
-    WS->>TH: graph.ainvoke()
+    Note over WS,CT: ====== SSEStream 读取 EventChannel ======
 
-    Note over TH,LLM: ====== LLM 流式阶段 ======
-
-    TH->>LLM: generate_stream(messages, tools)
-    LLM-->>TH: delta {content, reasoning_content}
-    Note over TH: 提取 reasoning
-    TH->>Q: put({event: "reasoning", data: '{"delta":"..."}'})
-    Q->>DT: get()
-    DT->>DT: append to buffered[]
-
-    LLM-->>TH: tool_call block
-    TH->>TH: accumulate tool_call_blocks
-
-    TH->>Q: put({event: "thinking_done"})
-    Q->>DT: get() → break loop
-    Note over TH: LLM 流式结束 → dispatch tools
-
-    TH->>EM: 返回 messages, tool_calls
-
-    Note over WS,EM: ====== 事件发射 ======
-
-    loop 每个 buffered reasoning
-        DT->>EM: buffered reasoning events
-        EM-->>WS: reasoning event
-        WS-->>SM: event: reasoning\ndata: {"delta":"..."}
-        SM->>SM: on_reasoning → reasonings[]
-        SM->>CV: ReasoningBubble live update
+    loop 每次 channel.receive()
+        CT->>CH: receive()
     end
 
-    EM-->>WS: assistant event
-    WS-->>SM: event: assistant\ndata: {"delta":"...","message_id":"..."}
-    SM->>SM: on_assistant → messages[]
-    SM->>CV: update messages[]
+    alt LLM 流式阶段
+        AL->>TH: think_node(state)
+        TH->>LLM: generate_stream(messages, tools)
+        LLM-->>TH: delta {content, reasoning_content}
+        TH->>TH: accumulate text / reasoning / tool_call_blocks
+        Note over TH: 流结束后 dispatch → pending_tool_calls + pre_executed
+        TH-->>AL: ThinkOutput(stream_chunks, tool_calls)
+        AL->>EM: emit_stream_chunks(chunks)
+        EM->>CH: send_nowait(ReasoningDelta / AssistantDelta / ThinkingDone / AssistantDone)
+        CH-->>CT: receive()
+        CT-->>WS: reasoning / assistant / thinking_done / assistant_done
+        WS-->>SM: event: reasoning\ndata: {"delta":"..."}
+        WS-->>SM: event: assistant\ndata: {"delta":"..."}
+        SM->>SM: on_reasoning → reasonings[]
+        SM->>CV: ReasoningBubble live update
+        SM->>SM: on_assistant → messages[]
+        SM->>CV: update messages[]
+    else 审查阶段
+        AL->>TH: review_node(state)
+        TH-->>AL: ReviewOutput(pending, approved, rejected)
+        AL->>EM: emit_approval_required(request_id, tool_name, params)
+        EM->>CH: send_nowait(ApprovalRequired)
+        CH-->>CT: receive()
+        CT-->>WS: event: tool_approval_required\ndata: {"request_id":"...","tool_name":"bash",...}
+        WS-->>SM: event: tool_approval_required
+        SM->>SM: on_tool_approval_required → approvalEvent
+        SM->>CV: ApprovalInline.vue
+        U-->>SM: 点击"批准"
+        SM->>WS: POST /api/tool-requests/{request_id}/approval
+        WS->>CT: ApprovalBridge.complete() → 唤醒等待
+        CT->>AL: 恢复循环
+        AL->>TH: think_node (快速路径: 跳过 LLM)
+        AL->>EM: act_node → 执行工具
+        EM->>CH: send_nowait(ToolCallStarted / ToolCallFinished)
+        CH-->>CT: receive()
+        CT-->>WS: tool_call / tool_result
+        WS-->>SM: event: tool_call\ndata: {"call_id":"...","tool_name":"get_cpu",...}
+        WS-->>SM: event: tool_result\ndata: {"call_id":"...","execution_status":"SUCCEEDED","execution_time_ms":45}
+        SM->>SM: on_tool_call → toolCalls Map
+        SM->>SM: on_tool_result → update ToolCallInfo
+    end
 
-    EM-->>WS: reasoning event (batch done=true)
-    WS-->>SM: event: reasoning\ndata: {"delta":"...","done":true}
-    SM->>SM: dedup → mark existing done
-    SM->>CV: reasoning bubble → "Done"
-
-    EM-->>WS: tool_call event
-    WS-->>SM: event: tool_call\ndata: {"tool_name":"get_cpu","server":"tool-server",...}
-    SM->>SM: on_tool_call → toolCalls Map
-
-    EM-->>WS: tool_result event
-    WS-->>SM: event: tool_result\ndata: {"tool_name":"get_cpu","execution_time_ms":45}
-    SM->>SM: on_tool_result → update ToolCallInfo
-
-    EM-->>WS: done event
-    WS-->>SM: event: done\ndata: {"chat_id":"..."}
-    SM->>SM: on_done → isStreaming=false<br/>新 session: transitionDraftToReal
+    WS-->>SM: event: done\ndata: {}
+    SM->>SM: on_done → isStreaming=false
     CV->>CV: status bar disappears
 ```
 

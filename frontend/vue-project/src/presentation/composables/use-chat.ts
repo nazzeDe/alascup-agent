@@ -162,32 +162,11 @@ export function useChat() {
         },
 
         on_done(_data: any) {
-          const runningTools = [...store.toolCalls.value.values()].filter(
-            tc => tc.execution_status === 'RUNNING'
-          )
-          if (runningTools.length > 0) {
-            console.warn('[SSE] on_done: force-failing RUNNING tools:', runningTools.map(tc => `${tc.call_id}(${tc.tool_name})`))
-          } else {
-            console.log('[SSE] on_done: no RUNNING tools, clean exit')
-          }
           store.setPhase('done')
           store.setStreaming(false)
           if (!store.connectionError.value) {
             store.setConnectionError(null)
           }
-          // Force-fail RUNNING tools, skip PENDING_APPROVAL
-          const updated = new Map(store.toolCalls.value)
-          for (const [id, tc] of updated) {
-            if (tc.execution_status === 'RUNNING') {
-              console.warn('[SSE] on_done: force-failing', id, tc.tool_name)
-              updated.set(id, {
-                ...tc,
-                execution_status: 'FAILED',
-                error: { message: 'Connection closed before tool completed' },
-              } as ToolCallInfo)
-            }
-          }
-          store.toolCalls.value = updated
           if (isNewChat && newChatId) {
             store.chatId.value = newChatId
             sessionListStore.addSession({

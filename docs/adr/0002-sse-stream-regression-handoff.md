@@ -14,7 +14,7 @@ Date: 2026-06-08
 |-------|------|------|
 | 1 | `web-server/src/sse_stream.py` 新增 `SSEStream` 類 | ✅ |
 | 2 | `web-server/src/api/chat.py` 改用 `SSEStream`，移除 `X-Session-ID` header | ✅ |
-| 3 | 前端 `useSessionManager.ts` 監聽 `session_init` 事件 | ✅ |
+| 3 | 前端 `use-chat.ts` 監聽 `session_init` 事件 | ✅ |
 | 4 | `events.py:82` `is_read_only` 不再硬編碼 → `sr.get("is_read_only", False)` | ✅ |
 | 5 | `web-server/tests/unit/test_sse_stream.py` 新增 14 測試 | ✅ |
 
@@ -162,6 +162,6 @@ web-server/src/agent/loop/orchestrator.py ← 最終事件發射
 web-server/src/agent/loop/events.py       ← _emit_tool_results（is_read_only 已修復）
 web-server/src/agent/nodes/act.py         ← is_read_only 已傳入 tool_results
 web-server/src/agent/nodes/observe.py     ← _emitted_results 保留 metadata
-frontend/vue-project/src/types.ts         ← SessionInitEvent 類型新增
-frontend/vue-project/src/composables/useSessionManager.ts ← on_session_init
+frontend/vue-project/src/domain/sse-events.ts         ← SessionInitEvent 類型
+frontend/vue-project/src/presentation/composables/use-chat.ts ← on_session_init
 ```

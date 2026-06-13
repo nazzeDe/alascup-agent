@@ -28,7 +28,7 @@ paths:
     post:
       summary: LLM 聊天入口（SSE 流式响应）
       description: |
-        前端发送用户消息，web-server 驱动 LangGraph Agent 循环，
+        前端发送用户消息，web-server 驱动 Agent 循环（AgentLoop），
         通过 SSE 流式返回 assistant、reasoning、tool_call、tool_result、审批请求等全部事件。
         SSE 连接在完整对话轮次内保持不中断。
       requestBody:

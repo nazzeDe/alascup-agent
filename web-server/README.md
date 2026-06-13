@@ -25,7 +25,7 @@
 | 依赖 | 用途 |
 |------|------|
 | FastAPI | HTTP 框架 + OpenAPI 自动生成 |
-| LangGraph | Agent 状态机（StateGraph, ainvoke） |
+| AgentLoop | Agent ReAct 循环（纯 Python while-loop） |
 | fastmcp | MCP Client，连接 tool-server 和 rag-server |
 | Pydantic | 数据校验（FastAPI 内置） |
 | httpx | LLM API 调用（OpenAI 兼容） |
@@ -65,20 +65,21 @@ web-server 使用 PostgreSQL 作为唯一持久化存储：
 
 流程图详见 `graph.md`。
 
-Agent 循环以 ReAct 模式（Thought → Action → Observation）运行。每个 chat-turn 中：
+Agent 循环以 ReAct 模式（Think → Review → Act → Observe → 循环）运行。`AgentLoop` 纯 Python while-loop 驱动。每个 chat-turn 中：
 
-1. 从 Session 加载历史消息，组装 system prompt（按 section 合并，结构见 `doc/详细设计.md`），进入循环
-2. 每轮迭代中 LLM 流式输出，产出文本或 tool_call
-3. 静态只读 tool_call 在 think 节点内批量预执行（LLM 输出完成后执行），其余 tool_call 进入审查层：只读放行，高风险生成审批请求
-4. 审批通过后调用 tool-server/rag-server 执行，结果回写消息历史
-5. LLM 判断任务完成或无 tool_call 时退出循环
-6. 循环过程中通过 SSE 流式推送状态到前端
+1. `ChatTurn` 创建/加载 session、构建 history、组装 system prompt，初始化 state dict
+2. `LoopOrchestrator` 启动 `AgentLoop.run(state, channel)`，进入 while-loop
+3. 每轮迭代：context 压缩 → token 上限检查 → think（LLM 流式输出，产出文本或 tool_call）→ review（审查层）→ act（执行工具）→ observe（回写 tool 消息）
+4. 静态只读 tool_call 在 think 节点内并行预执行，其余进入审查层
+5. 审批循环由 `ApprovalHandler` 接管：`review_node` 返回 `pending_approval`，编排器推送 SSE 等待决策，合并后继续循环
+6. LLM 判断完成或无 tool_call 时退出循环
+7. 循环中通过 EventChannel → SSEStream 映射为 SSE 事件
 
 关键行为：
-- `ainvoke()` 执行完整图后返回最终状态，web-server 通过 `emit_events()` 映射为 SSE 事件；think 节点内通过 contextvar 队列实时转发 reasoning/assistant 流式 token
-- Graph 的审批循环由编排器（LoopOrchestrator）外部接管：高风险 tool_call 由 `review_node` 返回 `pending_approval`，编排器推送 SSE 事件、等待决策、合并状态后重新调用图
+- `AgentLoop` 直接调用节点函数（think/review/act/observe）；think 节点内通过 LLMAdapter.generate_stream 流式调用
+- 审批循环内嵌在 AgentLoop 中：`ApprovalHandler.resolve()` 等待用户在 ApprovalBridge 上做出决策，合并后重新进入 think → act → observe 子循环
 - 每轮 LLM 调用前主动检查 token 用量，超阈值时分层压缩
-- LLM 返回可恢复错误（prompt_too_long、max_output_tokens、model_unavailable、server_error）时逐层升级恢复
+- LLM 返回可恢复错误（prompt_too_long、max_output_tokens）时逐层升级恢复
 
 ### Prompt Section 默认值
 
@@ -132,13 +133,13 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 | `max_output_tokens_recovery` | token 上限恢复重试 |
 | `turn_limit_exceeded` | 超过最大迭代轮次，熔断停止 |
 | `token_budget_exceeded` | Token 超硬上限，熔断停止 |
-| `model_fallback` | 模型降级恢复 |
+| `model_fallback` | 模型降级恢复（动态切换 summary 模型） |
 | `done` | LLM 判断结束 |
 | `error_exit` | 异常退出 |
 
 ### 安全熔断器
 
-硬限制防止 Token 爆量和死循环。借鉴大厂做法（LangGraph `recursion_limit`=25、Anthropic `max_turns`、OpenAI token budget）——不暂停问用户，超限直接停。用户可重新发送消息继续。
+硬限制防止 Token 爆量和死循环。超限直接终止，用户可重新发送消息继续。
 
 **熔断规则：**
 
@@ -153,7 +154,7 @@ Agent State 中持久化 `transition` 字段，记录状态变更原因。每个
 
 **为什么不用交互式确认：**
 
-- Anthropic / OpenAI / Google / LangGraph 全部用硬限制，无人做交互暂停
+- Anthropic / OpenAI / Google 全部用硬限制，无人做交互暂停
 - 用户 AFK → SSE 流挂起超时，不如直接停
 - 轮次到上限时 token 已经消耗，暂停无意义
 - 真需继续 → 用户重新发送消息即可
@@ -257,19 +258,22 @@ LLM 流式输出 token
 
 ## SSE 事件契约
 
-`POST /api/chat` 返回 `text/event-stream`，事件定义：
+`POST /api/chat` 返回 `text/event-stream`。DomainEvent → SSE 映射：
 
 | event | data | 说明 |
 |-------|------|------|
-| `reasoning` | `{delta, chat_id?, message_id?, done?}` | LLM 推理内容流式输出；最终聚合事件会带 `chat_id/message_id` 与 `done=true` |
-| `assistant` | `{delta, chat_id?, message_id?}` | LLM 文本流式输出；最终聚合事件会带 `chat_id/message_id` |
-| `tool_call` | `{chat_id, message_id, tool_name, params, is_read_only, server?}` | LLM 请求调用工具 |
-| `tool_result` | `{chat_id, message_id, tool_name, execution_status, output?, error?, execution_time_ms?}` | 工具执行结果 |
-| `tool_approval_required` | `{chat_id, request_id, tool_name, params, reason}` | 高风险工具需审批，流暂停。params 对可变工具（bash）包含完整命令 |
-| `error` | `{code, message}` | 异常（code: `TURN_LIMIT_EXCEEDED`, `TOKEN_BUDGET_EXCEEDED`, 或 LLM 错误码） |
-| `done` | `{chat_id}` | 流结束 |
+| `session_init` | `{chat_id}` | 首个事件，携带 session UUID |
+| `reasoning` | `{delta}` | LLM reasoning_content 流式输出（增量）。done 信号由独立 `thinking_done` 事件发送 |
+| `thinking_done` | `{}` | LLM 推理阶段结束，后续为正式回复或 tool_call |
+| `assistant` | `{delta}` | LLM 文本流式输出（增量）。完整消息由 `assistant_done` 事件标记结束 |
+| `assistant_done` | `{}` | 一条 assistant 消息输出完毕（触发持久化到 DB） |
+| `tool_call` | `{call_id, tool_name, params, is_read_only, server}` | LLM 请求调用工具。call_id 用于关联 tool_result |
+| `tool_result` | `{call_id, execution_status, output?, error?, execution_time_ms?}` | 工具执行结果，call_id 与对应 tool_call 匹配 |
+| `tool_approval_required` | `{chat_id, request_id, tool_name, params, reason, call_id}` | 高风险工具需审批，流暂停 |
+| `error` | `{code, message}` | 异常（code: `TURN_LIMIT_EXCEEDED`, `TOKEN_BUDGET_EXCEEDED`, `AGENT_CRASH`, `SSE_CRASH` 或 LLM 错误码） |
+| `done` | `{}` | 流结束（SSEStream 在 finally 中保证发送） |
 
-只读工具在 think 阶段预执行后发送 `tool_call`/`tool_result`。高风险触发 `tool_approval_required` 后 SSE 暂停，`POST /api/tool-requests/{request_id}/approval` 回调后流继续。
+`call_id` 作为 tool_call ↔ tool_result 关联键。`reasoning`/`assistant` 增量事件不携带 `chat_id`/`message_id`——完整消息通过 `thinking_done`/`assistant_done` / `session_init` 事件标识边界。
 
 ## MCP 客户端
 
@@ -289,24 +293,37 @@ LLM 流式输出 token
 运行时需 `config/` 目录包含：
 
 - `servers.json` — MCP Server 连接配置
-- `prompt.md` — System prompt 覆盖文件（可选，按 `## <section>` 分段）
-- `rules.json` — 工具调用安全规则（可选）
 - `llm.json` — LLM 接入配置
+- `rules.json` — 工具调用安全规则（可选，不存在时使用默认空规则）
 
-环境变量：
+所有路径均可通过环境变量覆盖：
 
-- `DATABASE_URL` — PostgreSQL 连接串（必填）
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `ALASCUP_DATABASE_URL` | （必填） | PostgreSQL 连接串 |
+| `ALASCUP_SERVERS_CONFIG` | `config/servers.json` | servers.json 路径 |
+| `ALASCUP_LLM_API_KEY` | llm.json 中的值 | LLM API key |
+| `ALASCUP_LLM_API_URL` | llm.json 中的值 | LLM API 地址 |
+| `ALASCUP_LLM_MODEL` | llm.json 中的值 | 模型名 |
+| `ALASCUP_AGENT_MAX_ITERATIONS` | 30 | 最大迭代轮次 |
+| `ALASCUP_AGENT_TOKEN_CEILING_RATIO` | 0.95 | Token 硬上限比率 |
+| `ALASCUP_LOG_LEVEL` | INFO | 日志级别 |
+
+Prompt section 默认值由 `PromptManager` 内置，当前版本不支持 `prompt.md` 文件覆盖。
 
 ## API 端点
 
 | 端点 | 说明 |
 |------|------|
-| GET /api/health | 健康检查 |
+| GET /api/health | 健康检查（含 PostgreSQL + 工具发现状态） |
+| GET /api/metrics | 性能指标（工具数量、功能耗时平均值） |
 | POST /api/chat | 聊天入口（SSE 流式） |
 | GET /api/sessions | 列出全部会话 |
 | POST /api/sessions | 创建新会话（前端不再主动调用；session 由 POST /api/chat 首条消息自动创建） |
+| DELETE /api/sessions/{chat_id} | 删除会话 |
 | GET /api/sessions/{chat_id} | 获取会话详情 |
 | GET /api/tools | 列出可用 MCP 工具 |
+| POST /api/tools/refresh | 刷新工具列表（可选指定 server_name 参数单服务器刷新） |
 | POST /api/tool-requests/{request_id}/approval | 审批回调 |
 
-完整规范见 `doc/api-spec/openapi.yaml`。
+完整规范见 `docs/api-spec/openapi.yaml`。
