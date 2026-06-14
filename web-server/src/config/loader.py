@@ -13,10 +13,7 @@ def _read_json(path: Path) -> dict:
 
 
 def load_llm_config(path: Path) -> LLMConfig:
-    try:
-        return LLMConfig.model_validate(_read_json(path))
-    except FileNotFoundError:
-        return LLMConfig(api_key="", api_url="", model="")
+    return LLMConfig.model_validate(_read_json(path))
 
 
 def load_rules_config(path: Path) -> RulesConfig:
@@ -30,10 +27,7 @@ _servers_adapter = TypeAdapter(list[ServerEntry])
 
 
 def load_servers_config(path: Path) -> list[ServerEntry]:
-    try:
-        data = _read_json(path)
-    except FileNotFoundError:
-        return []
+    data = _read_json(path)
     servers = _servers_adapter.validate_python(data)
     names = [s.name for s in servers]
     if len(names) != len(set(names)):
