@@ -66,6 +66,18 @@ create_volume "pgdata"
 mkdir -p "$PROJECT_DIR/logs/web-server"
 mkdir -p "$PROJECT_DIR/logs/tool-server"
 
+# ---------- 检查必需配置文件 ----------
+echo "==> 检查配置文件..."
+WEB_CONFIG_DIR="$PROJECT_DIR/web-server/config"
+for cfg in llm.json servers.json; do
+    if [ ! -f "$WEB_CONFIG_DIR/$cfg" ]; then
+        echo "[ERROR] 缺少配置文件: $WEB_CONFIG_DIR/$cfg"
+        echo "  确保 web-server/config/ 目录存在且包含 $cfg"
+        exit 1
+    fi
+done
+echo "    配置文件就绪 ($WEB_CONFIG_DIR)"
+
 # ---------- 启动 postgres ----------
 echo "==> 启动 PostgreSQL..."
 docker run -d \
