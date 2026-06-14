@@ -91,6 +91,7 @@ docker run -d \
     -v "pgdata:/var/lib/postgresql" \
     --tmpfs /tmp:size=64m,mode=1777 \
     --tmpfs /run/postgresql:size=64m,mode=1777 \
+    --security-opt label:disable \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
     --cap-add CHOWN \
@@ -117,6 +118,7 @@ docker run -d \
     -v "$PROJECT_DIR/logs/tool-server:/app/logs" \
     --read-only \
     --tmpfs /tmp:size=128m,mode=1777 \
+    --security-opt label:disable \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
     --cap-add SYS_PTRACE \
@@ -186,6 +188,7 @@ docker run -d \
     -v "$PROJECT_DIR/logs/web-server:/app/logs" \
     --read-only \
     --tmpfs /tmp:size=64m,mode=1777 \
+    --security-opt label:disable \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
     --pids-limit 256 \
