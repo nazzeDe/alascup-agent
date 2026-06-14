@@ -118,7 +118,7 @@ class TestSettings:
         assert llm.max_tokens == 4096
 
     def test_env_prefix(self, monkeypatch):
-        monkeypatch.setenv("ALASCUP_DATABASE_URL", "postgresql://env/db")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://env/db")
         monkeypatch.setenv("ALASCUP_LOG_LEVEL", "DEBUG")
 
         from src.config.models import Settings

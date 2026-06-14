@@ -4,7 +4,6 @@ services:
     build:
       context: ./frontend
     restart: unless-stopped
-    network_mode: bridge
     ports:
       - "80:8080"
     depends_on:
@@ -34,16 +33,13 @@ services:
     pids_limit: 256
     mem_limit: 512m
     cpus: "0.50"
-    network_mode: bridge
-    ports:
-      - "11451:11451"
     depends_on:
       - postgres
       - tool-server
 
   # 数据库
   postgres:
-    image: ghcr.io/cloudnative-pg/postgresql:18
+    image: postgres:17
     container_name: postgres
     restart: unless-stopped
     environment:
@@ -68,7 +64,6 @@ services:
     pids_limit: 128
     mem_limit: 512m
     cpus: "1.00"
-    network_mode: bridge
     expose:
       - "5432"
 
@@ -85,12 +80,17 @@ services:
       - /proc:/host/proc:ro,Z
       - /sys:/host/sys:ro,Z
       - /sys/kernel/btf:/sys/kernel/btf:ro,Z
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro,Z
       - ./logs/tool-server:/app/logs:Z
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
     security_opt:
       - no-new-privileges:true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     privileged: false
     cap_add:
       # --- 进程工具 ---
@@ -111,7 +111,6 @@ services:
     pids_limit: 512
     mem_limit: 768m
     cpus: "1.00"
-    network_mode: bridge
     expose:
       - "11451"
 

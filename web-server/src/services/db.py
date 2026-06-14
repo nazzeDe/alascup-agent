@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS llm_traces (
 
 class Database:
     def __init__(self, dsn: str) -> None:
-        self._dsn = dsn
+        self._dsn = dsn.replace("+asyncpg", "")
         self._pool: asyncpg.Pool | None = None
 
     @property

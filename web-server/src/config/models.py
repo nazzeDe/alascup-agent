@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     config_dir: Path = Path("config")
 
     # ── Database ─────────────────────────────────────────────────────
-    database_url: str = ""
+    database_url: str = Field(default="", validation_alias="DATABASE_URL")
 
     # ── LLM (env-var overrides for llm.json) ─────────────────────────
     llm_api_key: str = ""

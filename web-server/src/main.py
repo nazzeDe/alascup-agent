@@ -36,7 +36,7 @@ def _build_services(settings: Settings) -> Services:
     rules_config = load_rules_config(CONFIG_DIR / "rules.json")
 
     if not settings.database_url:
-        raise RuntimeError("DATABASE_URL is required (set ALASCUP_DATABASE_URL)")
+        raise RuntimeError("DATABASE_URL is required (set DATABASE_URL)")
 
     db = Database(settings.database_url)
     session_mgr = PostgresSessionManager(db)

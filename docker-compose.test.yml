@@ -4,7 +4,6 @@ services:
     build:
       context: ./frontend
     restart: "no"
-    network_mode: bridge
     ports:
       - "80:8080"
     depends_on:
@@ -29,7 +28,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-    network_mode: bridge
     ports:
       - "11450:11450"
     depends_on:
@@ -49,18 +47,24 @@ services:
       - LOG_PATH=/tmp/test-log
       - SANDBOX_ROOT=/tmp/sandbox
       - LOG_LEVEL=DEBUG
+    volumes:
+      - /sys/kernel/tracing:/sys/kernel/tracing:ro,Z
+      - /sys/kernel/btf:/sys/kernel/btf:ro,Z
     read_only: false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     tmpfs:
       - /tmp:size=256m,mode=1777
       - /tmp/test-proc:size=16m,mode=1777
       - /tmp/test-sys:size=16m,mode=1777
       - /tmp/test-log:size=16m,mode=1777
-    network_mode: bridge
     ports:
       - "11451:11451"
 
   postgres:
-    image: ghcr.io/cloudnative-pg/postgresql:18
+    image: postgres:17
     container_name: postgres-test
     restart: "no"
     environment:
@@ -70,6 +74,5 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
       - /run/postgresql:size=16m,mode=1777
-    network_mode: bridge
     ports:
       - "5432:5432"

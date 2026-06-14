@@ -300,7 +300,7 @@ LLM 流式输出 token
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
-| `ALASCUP_DATABASE_URL` | （必填） | PostgreSQL 连接串 |
+| `DATABASE_URL` | （必填） | PostgreSQL 连接串 |
 | `ALASCUP_SERVERS_CONFIG` | `config/servers.json` | servers.json 路径 |
 | `ALASCUP_LLM_API_KEY` | llm.json 中的值 | LLM API key |
 | `ALASCUP_LLM_API_URL` | llm.json 中的值 | LLM API 地址 |
