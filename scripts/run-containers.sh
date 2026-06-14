@@ -188,6 +188,7 @@ docker run -d \
     --tmpfs /tmp:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
+    --cap-add DAC_OVERRIDE \
     --pids-limit 256 \
     --memory 512m \
     --cpus 0.50 \
