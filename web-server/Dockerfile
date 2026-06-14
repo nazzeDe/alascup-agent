@@ -15,4 +15,4 @@ COPY src/ src/
 
 EXPOSE 11450
 
-CMD ["python", "-m", "src.main"]
+CMD ["sh", "-c", "uvicorn src.main:app --host ${HOST:-0.0.0.0} --port ${PORT:-11450}"]

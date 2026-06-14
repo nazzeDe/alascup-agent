@@ -177,7 +177,7 @@ docker run -d \
     --pids-limit 256 \
     --memory 512m \
     --cpus 0.50 \
-    -p 11451:11451 \
+    -p 11450:11450 \
     "$WEB_SERVER_IMAGE"
 
 # ---------- 等待 web-server 就绪 ----------
