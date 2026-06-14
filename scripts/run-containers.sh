@@ -88,7 +88,7 @@ docker run -d \
     -e POSTGRES_USER=alascup \
     -e POSTGRES_PASSWORD=alascup \
     -e POSTGRES_DB=alascup \
-    -v "pgdata:/var/lib/postgresql:Z" \
+    -v "pgdata:/var/lib/postgresql" \
     --tmpfs /tmp:size=64m,mode=1777 \
     --tmpfs /run/postgresql:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
@@ -111,10 +111,10 @@ docker run -d \
     --restart "$RESTART" \
     --platform linux/loong64 \
     -e TOOLSERVER_HOST_EXEC=nsenter \
-    -v "/var/log:/host/var/log:ro,Z" \
-    -v "/proc:/host/proc:ro,Z" \
-    -v "/sys:/host/sys:ro,Z" \
-    -v "$PROJECT_DIR/logs/tool-server:/app/logs:Z" \
+    -v "/var/log:/host/var/log:ro" \
+    -v "/proc:/host/proc:ro" \
+    -v "/sys:/host/sys:ro" \
+    -v "$PROJECT_DIR/logs/tool-server:/app/logs" \
     --read-only \
     --tmpfs /tmp:size=128m,mode=1777 \
     --security-opt no-new-privileges:true \
@@ -182,8 +182,8 @@ docker run -d \
     -e HOST=0.0.0.0 \
     -e PORT=11450 \
     -e DATABASE_URL=postgresql+asyncpg://alascup:alascup@postgres:5432/alascup \
-    -v "$PROJECT_DIR/web-server/config:/app/config:ro,Z" \
-    -v "$PROJECT_DIR/logs/web-server:/app/logs:Z" \
+    -v "$PROJECT_DIR/web-server/config:/app/config:ro" \
+    -v "$PROJECT_DIR/logs/web-server:/app/logs" \
     --read-only \
     --tmpfs /tmp:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
