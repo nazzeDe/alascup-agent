@@ -181,6 +181,9 @@ docker run -d \
     --workdir /app \
     -e HOST=0.0.0.0 \
     -e PORT=11450 \
+    -e ALASCUP_LOG_LEVEL=DEBUG \
+    -e ALASCUP_AGENT_TRACE=1 \
+    -e ALASCUP_AGENT_TRACE_LEVEL=DEBUG \
     -e ALASCUP_DATABASE_URL=postgresql://alascup:alascup@postgres:5432/alascup \
     -v "$PROJECT_DIR/web-server/config:/app/config:ro" \
     -v "$PROJECT_DIR/logs/web-server:/app/logs" \

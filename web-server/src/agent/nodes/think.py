@@ -92,6 +92,13 @@ def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
 
 
 def _log_stream_error(result, messages, chat_id):
+    from loguru import logger
+    logger.error(
+        "LLM call error | code={code} chat_id={chat_id} | {msg}",
+        code=result.get("code", "?"),
+        chat_id=str(chat_id),
+        msg=str(result.get("message", ""))[:500],
+    )
     debug_log("WARN", "LLM call error", chat_id=str(chat_id),
               code=result.get("code", "?"),
               msg=json.dumps(result.get("message", ""))[:300])

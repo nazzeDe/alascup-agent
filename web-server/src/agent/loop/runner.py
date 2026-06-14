@@ -655,9 +655,15 @@ class AgentLoop:
 
         # No recovery configured — surface error directly so SSE gets 'error' event
         if not self._error_recovery:
+            orig_msg = llm_error.get("message", "LLM call failed")
+            logger.error(
+                "LLM error (no recovery configured) | code={code} | {msg}",
+                code=llm_error.get("code", "?"),
+                msg=str(orig_msg)[:500],
+            )
             return "return", TurnFailed(
                 code=llm_error.get("code", 500),
-                message=llm_error.get("message", "LLM call failed"),
+                message=f"LLM error (code={llm_error.get('code', '?')}): {orig_msg}",
             )
 
         debug_log(
@@ -676,12 +682,18 @@ class AgentLoop:
                 code=llm_error.get("code", "?"),
                 chat_id=str(state.get("_chat_id", "")),
             )
+            orig_msg = llm_error.get("message", "unknown")
+            logger.error(
+                "Recovery exhausted | code={code} | {msg}",
+                code=llm_error.get("code", "?"),
+                msg=str(orig_msg)[:500],
+            )
             await auditor.transition(
                 Transition.ERROR_EXIT, actor=AuditActor.SYSTEM
             )
             return "return", TurnFailed(
                 code=llm_error.get("code", 500),
-                message="Recovery exhausted",
+                message=f"Recovery exhausted (cause: code={llm_error.get('code', '?')}, {orig_msg})",
             )
         # Clear llm_error from state on success
         state["llm_error"] = None
