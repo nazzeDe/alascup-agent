@@ -75,11 +75,26 @@ class Settings(BaseSettings):
 
         This is the production entry-point.  JSON files supply defaults;
         environment variables (ALASCUP_*) override them.
-        """
-        from src.config.loader import load_llm_config, load_rules_config, load_servers_config
 
-        llm = load_llm_config(config_dir / "llm.json")
-        servers = load_servers_config(config_dir / "servers.json")
+        All config files are optional — if a file is missing, the
+        corresponding settings fall back to env vars (or empty defaults).
+        """
+        from src.config.loader import load_llm_config, load_rules_config
+
+        llm_path = config_dir / "llm.json"
+        if llm_path.is_file():
+            llm = load_llm_config(llm_path)
+            llm_kwargs = dict(
+                llm_api_key=llm.api_key,
+                llm_api_url=llm.api_url,
+                llm_model=llm.model,
+                llm_summary_model=llm.summary_model,
+                llm_fallback_model=llm.fallback_model,
+                llm_max_tokens=llm.max_tokens,
+            )
+        else:
+            llm_kwargs = {}  # env vars (ALASCUP_LLM_*) will supply values
+
         try:
             rules = load_rules_config(config_dir / "rules.json")
         except FileNotFoundError:
@@ -87,12 +102,7 @@ class Settings(BaseSettings):
 
         return cls(
             config_dir=config_dir,
-            llm_api_key=llm.api_key,
-            llm_api_url=llm.api_url,
-            llm_model=llm.model,
-            llm_summary_model=llm.summary_model,
-            llm_fallback_model=llm.fallback_model,
-            llm_max_tokens=llm.max_tokens,
+            **llm_kwargs,
             # servers_config intentionally omitted — let env var ALASCUP_SERVERS_CONFIG
             # override, or fall back to CONFIG_DIR / "servers.json" in _build_services.
         )
