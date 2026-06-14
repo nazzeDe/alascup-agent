@@ -36,8 +36,13 @@ cleanup_old() {
     done
 }
 
-if [ "${CLEAN:-0}" = "1" ]; then
+if [ "${CLEAN:-1}" = "1" ]; then
     cleanup_old
+    # 同时清理旧卷（PG18 需要空卷，否则旧格式数据会导致启动失败）
+    if docker volume inspect pgdata &>/dev/null; then
+        echo "==> 移除旧卷: pgdata"
+        docker volume rm pgdata 2>/dev/null || true
+    fi
 fi
 
 # ---------- 创建网络 ----------
@@ -71,13 +76,14 @@ docker run -d \
     -e POSTGRES_USER=alascup \
     -e POSTGRES_PASSWORD=alascup \
     -e POSTGRES_DB=alascup \
-    -v "pgdata:/var/lib/postgresql/data:Z" \
+    -v "pgdata:/var/lib/postgresql:Z" \
     --tmpfs /tmp:size=64m,mode=1777 \
-    --tmpfs /run/postgresql:size=16m,mode=1777 \
+    --tmpfs /run/postgresql:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
     --cap-add CHOWN \
     --cap-add DAC_OVERRIDE \
+    --cap-add FOWNER \
     --cap-add SETGID \
     --cap-add SETUID \
     --pids-limit 128 \
@@ -116,13 +122,23 @@ docker run -d \
 
 # ---------- 等待 postgres 就绪 ----------
 echo "==> 等待 PostgreSQL 就绪..."
-for i in $(seq 1 30); do
+POSTGRES_TIMEOUT="${POSTGRES_TIMEOUT:-60}"
+for i in $(seq 1 "$POSTGRES_TIMEOUT"); do
+    # 先确认容器还在运行
+    if ! docker inspect "$POSTGRES_CONTAINER" --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+        echo "[ERROR] PostgreSQL 容器已退出"
+        echo "--- 日志 ---"
+        docker logs "$POSTGRES_CONTAINER" 2>&1 | tail -30
+        exit 1
+    fi
     if docker exec "$POSTGRES_CONTAINER" pg_isready -U alascup &>/dev/null; then
-        echo "    PostgreSQL 就绪"
+        echo "    PostgreSQL 就绪 (${i}s)"
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        echo "[ERROR] PostgreSQL 启动超时"
+    if [ "$i" -eq "$POSTGRES_TIMEOUT" ]; then
+        echo "[ERROR] PostgreSQL 启动超时 (${POSTGRES_TIMEOUT}s)"
+        echo "--- 日志 ---"
+        docker logs "$POSTGRES_CONTAINER" 2>&1 | tail -30
         exit 1
     fi
     sleep 1
