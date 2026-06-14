@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.models.tool import ApprovalStatus
+from src.observability.debug_log import log as debug_log
 from src.services.container import approval_bridge
 
 router = APIRouter()
@@ -26,6 +27,9 @@ async def approve_tool_request(
         raise HTTPException(
             status_code=400, detail=f"invalid approval_status: {body.approval_status}"
         )
+
+    debug_log("INFO", "Tool approval decision",
+              request_id=str(request_id), status=status.value, reason=body.reason)
 
     if not bridge:
         raise HTTPException(status_code=500, detail="approval bridge not configured")

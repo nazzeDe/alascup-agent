@@ -633,8 +633,8 @@ class MockApprovalBridge:
     def complete(self, request_id: str, status: str, reason: str | None = None) -> None:
         pass
 
-    async def gather_decisions(self, request_id: str, expected_count: int, timeout: float = 300) -> list[str]:
-        return ["APPROVED"] * expected_count
+    async def gather_decisions(self, request_id: str, expected_count: int, timeout: float = 300) -> list[dict]:
+        return [{"status": "APPROVED", "reason": None}] * expected_count
 
 
 class TestApprovalFlowCallIdConsistency:

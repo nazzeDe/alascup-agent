@@ -10,6 +10,7 @@ from src.agent.events import ApprovalRequired, EventChannel
 from src.agent.loop.approval import (
     ApprovalHandler,
     _apply_decisions,
+    _format_rejection_message,
     _inject_rejection_messages,
 )
 from src.agent.loop.emitter import EventEmitter
@@ -71,32 +72,38 @@ class TestApplyDecisions:
             {"function": {"name": "get_cpu"}, "id": "1"},
             {"function": {"name": "rm_file"}, "id": "2"},
         ]
-        decisions = ["APPROVED", "REJECTED"]
+        decisions = [{"status": "APPROVED", "reason": None},
+                     {"status": "REJECTED", "reason": "not needed"}]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
         assert approved[0]["id"] == "1"
         assert approved[0]["approval_status"] == "APPROVED"
         assert len(rejected) == 1
         assert rejected[0]["id"] == "2"
+        assert rejected[0]["rejection_reason"] == "not needed"
 
     def test_missing_decisions_default_to_expired(self):
         pending = [
             {"function": {"name": "get_cpu"}, "id": "1"},
             {"function": {"name": "rm_file"}, "id": "2"},
         ]
-        decisions = ["APPROVED"]  # Only one decision for two tools
+        decisions = [{"status": "APPROVED", "reason": None}]  # Only one decision for two tools
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
         assert approved[0]["id"] == "1"
         assert len(rejected) == 1
         assert rejected[0]["id"] == "2"
+        assert "rejection_reason" in rejected[0]
 
     def test_all_approved(self):
         pending = [
             {"function": {"name": "a"}, "id": "1"},
             {"function": {"name": "b"}, "id": "2"},
         ]
-        approved, rejected = _apply_decisions(pending, ["APPROVED", "APPROVED"])
+        approved, rejected = _apply_decisions(pending, [
+            {"status": "APPROVED", "reason": None},
+            {"status": "APPROVED", "reason": None},
+        ])
         assert len(approved) == 2
         assert len(rejected) == 0
 
@@ -105,7 +112,8 @@ class TestApplyDecisions:
             {"function": {"name": "a"}, "id": "1"},
             {"function": {"name": "b"}, "id": "2"},
         ]
-        decisions = ["EXPIRED", "EXPIRED"]
+        decisions = [{"status": "EXPIRED", "reason": None},
+                     {"status": "EXPIRED", "reason": None}]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 0
         assert len(rejected) == 2
@@ -118,7 +126,7 @@ class TestInjectRejectionMessages:
     def test_appends_tool_messages(self):
         state = {"messages": [{"role": "user", "content": "hello"}]}
         rejected = [
-            {"function": {"name": "get_cpu"}, "id": "tc-1"},
+            {"function": {"name": "get_cpu"}, "id": "tc-1", "rejection_reason": "not needed"},
         ]
         _inject_rejection_messages(state, rejected)
         assert len(state["messages"]) == 2
@@ -127,6 +135,17 @@ class TestInjectRejectionMessages:
         assert tool_msg["tool_call_id"] == "tc-1"
         assert tool_msg["name"] == "get_cpu"
         assert "REJECTED" in tool_msg["content"]
+        assert "not needed" in tool_msg["content"]
+        assert "do not retry" in tool_msg["content"].lower()
+
+    def test_rejection_without_reason(self):
+        state = {"messages": [{"role": "user", "content": "hello"}]}
+        rejected = [
+            {"function": {"name": "rm_file"}, "id": "tc-x"},
+        ]
+        _inject_rejection_messages(state, rejected)
+        tool_msg = state["messages"][-1]
+        assert "rejection_reason=" not in tool_msg["content"]
         assert "do not retry" in tool_msg["content"].lower()
 
     def test_empty_rejected_no_change(self):
@@ -137,19 +156,47 @@ class TestInjectRejectionMessages:
     def test_multiple_rejected(self):
         state = {"messages": []}
         rejected = [
-            {"function": {"name": "tool_a"}, "id": "a"},
-            {"function": {"name": "tool_b"}, "id": "b"},
+            {"function": {"name": "tool_a"}, "id": "a", "rejection_reason": "nope"},
+            {"function": {"name": "tool_b"}, "id": "b", "rejection_reason": "stop"},
         ]
         _inject_rejection_messages(state, rejected)
         assert len(state["messages"]) == 2
         assert state["messages"][0]["name"] == "tool_a"
+        assert "nope" in state["messages"][0]["content"]
         assert state["messages"][1]["name"] == "tool_b"
+        assert "stop" in state["messages"][1]["content"]
 
     def test_unknown_function_name(self):
         state = {"messages": []}
         rejected = [{"id": "no-fn"}]
         _inject_rejection_messages(state, rejected)
         assert state["messages"][0]["name"] == "unknown"
+
+
+# ── _format_rejection_message ──────────────────────────────────────────────
+
+
+class TestFormatRejectionMessage:
+    def test_with_reason(self):
+        tc = {"function": {"name": "rm_file"}, "id": "tc-1",
+              "rejection_reason": "I don't want to create this"}
+        msg = _format_rejection_message(tc)
+        assert "[rm_file] execution_status=REJECTED" in msg
+        assert "rejection_reason=I don't want to create this" in msg
+        assert "Do NOT retry." in msg
+        assert "propose an alternative" not in msg
+
+    def test_without_reason(self):
+        tc = {"function": {"name": "get_cpu"}, "id": "tc-2"}
+        msg = _format_rejection_message(tc)
+        assert "[get_cpu] execution_status=REJECTED" in msg
+        assert "rejection_reason=" not in msg
+        assert "error=Tool was rejected by human. Do NOT retry." in msg
+
+    def test_unknown_tool_name(self):
+        tc = {"id": "bare"}
+        msg = _format_rejection_message(tc)
+        assert "[unknown] execution_status=REJECTED" in msg
 
 
 # ── mock helpers ────────────────────────────────────────────────────────────
@@ -166,7 +213,7 @@ class _MockAuditLogger:
 class _MockBridge:
     def __init__(self, decisions: list[str] | None = None):
         self.created: list[tuple] = []
-        self._decisions = decisions or ["APPROVED"]
+        self._decisions = [{"status": d, "reason": None} for d in (decisions or ["APPROVED"])]
 
     def create(self, request_id: str, chat_id: str) -> None:
         self.created.append((request_id, chat_id))

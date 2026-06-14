@@ -13,22 +13,45 @@ from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 
-def _apply_decisions(pending: list[dict], decisions: list[str]) -> tuple[list[dict], list[dict]]:
-    """Split pending tool calls into approved and rejected based on decisions."""
+def _apply_decisions(pending: list[dict], decisions: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split pending tool calls into approved and rejected based on decisions.
+
+    Attaches rejection_reason to rejected tool calls so _inject_rejection_messages
+    and observe_node can include the user's message in the LLM-facing tool result.
+    """
     approved = []
     rejected = []
     for i, tc in enumerate(pending):
-        decision = decisions[i] if i < len(decisions) else "EXPIRED"
-        if decision == "APPROVED":
+        d = decisions[i] if i < len(decisions) else {"status": "EXPIRED", "reason": None}
+        status = d["status"] if isinstance(d, dict) else d
+        if status == "APPROVED":
             tc["approval_status"] = "APPROVED"
             approved.append(tc)
         else:
+            tc["rejection_reason"] = d.get("reason") if isinstance(d, dict) else None
             rejected.append(tc)
     return approved, rejected
 
 
+def _format_rejection_message(tc: dict) -> str:
+    """Build the LLM-facing tool-result string for a rejected tool call.
+
+    Includes the user's rejection reason when provided, and omits the
+    "propose an alternative approach" instruction that previously caused
+    the LLM to retry with different tools.
+    """
+    fn = tc.get("function", {})
+    name = fn.get("name", "unknown")
+    reason = tc.get("rejection_reason")
+    parts = [f"[{name}] execution_status=REJECTED"]
+    if reason:
+        parts.append(f"rejection_reason={reason}")
+    parts.append("error=Tool was rejected by human. Do NOT retry.")
+    return "\n".join(parts)
+
+
 def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
-    """Append tool-role rejection messages so LLM can propose alternatives."""
+    """Append tool-role rejection messages so LLM can respond to the rejection."""
     if not rejected:
         return
     messages: list[dict] = []
@@ -39,7 +62,7 @@ def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
             "role": "tool",
             "tool_call_id": tc.get("id", "rejected"),
             "name": name,
-            "content": f"[{name}] execution_status=REJECTED\nerror=Tool was rejected by human or policy. Do NOT retry this exact call — propose an alternative approach.",
+            "content": _format_rejection_message(tc),
         })
     state["messages"] = state.get("messages", []) + messages
 
@@ -135,6 +158,7 @@ class ApprovalHandler:
             for tc in all_rejected:
                 fn = tc.get("function", {})
                 args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
+                rejection_reason = tc.get("rejection_reason")
                 await auditor.tool_event(
                     "TOOL_REJECTED",
                     actor=AuditActor.POLICY,
@@ -143,6 +167,7 @@ class ApprovalHandler:
                     params=args,
                     level=AuditLevel.WARN,
                     decision="REJECTED",
+                    error={"rejection_reason": rejection_reason} if rejection_reason else None,
                 )
         if self._lifecycle is not None:
             cid = turn_ctx.chat_id

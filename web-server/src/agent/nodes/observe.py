@@ -18,10 +18,17 @@ def observe_node(state, *, tool_results=None):
     rejected = state.get("rejected_tool_calls") or []
     for tc in rejected:
         fn = tc.get("function", {})
+        result = {
+            "execution_status": "REJECTED",
+            "error": {"message": "Tool was rejected by human. Do NOT retry."},
+        }
+        reason = tc.get("rejection_reason")
+        if reason:
+            result["rejection_reason"] = reason
         results.append({
             "tool_name": fn.get("name", "unknown"),
             "tool_call_id": tc.get("id", "rejected"),
-            "result": {"execution_status": "REJECTED", "error": {"message": "Tool was rejected by human or policy. Do NOT retry this exact tool call — propose an alternative approach."}},
+            "result": result,
         })
 
     tool_messages: list[dict] = []
@@ -46,6 +53,7 @@ def _format_tool_result(r: dict) -> str:
     result = r.get("result", {})
     status = result.get("execution_status", "UNKNOWN")
     output = result.get("output", "")
+    rejection_reason = result.get("rejection_reason", "")
     error = result.get("error", {})
     if isinstance(error, dict):
         error_msg = error.get("message", "")
@@ -55,6 +63,8 @@ def _format_tool_result(r: dict) -> str:
     parts = [f"[{name}] execution_status={status}"]
     if output:
         parts.append(f"output={output}")
+    if rejection_reason:
+        parts.append(f"rejection_reason={rejection_reason}")
     if error_msg:
         parts.append(f"error={error_msg}")
 
