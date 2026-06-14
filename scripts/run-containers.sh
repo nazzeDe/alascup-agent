@@ -147,7 +147,9 @@ done
 # ---------- 等待 tool-server 就绪 ----------
 echo "==> 等待 Tool Server 就绪..."
 for i in $(seq 1 15); do
-    if docker exec "$TOOL_SERVER_CONTAINER" curl -sf http://localhost:11451/health &>/dev/null; then
+    # tool-server 的 /health 是 MCP tool 不是 REST endpoint，
+    # 用 /mcp 端点做 HTTP 探活
+    if docker exec "$TOOL_SERVER_CONTAINER" curl -sf http://localhost:11451/mcp &>/dev/null; then
         echo "    Tool Server 就绪"
         break
     fi
