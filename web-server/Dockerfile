@@ -1,4 +1,5 @@
-ARG BASE_IMAGE=ghcr.io/loong64/python:3.13.13-trixie
+ARG BASE_IMAGE=python:3.13
+ARG PIP_EXTRA_INDEX_URL=
 FROM ${BASE_IMAGE}
 
 # 编译依赖
@@ -8,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install uv --extra-index-url https://mirrors.loong64.com/pypi/simple --no-cache-dir .
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+RUN pip install uv --no-cache-dir .
 
 
 COPY src/ src/

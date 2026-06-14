@@ -1,4 +1,5 @@
-FROM ghcr.io/loong64/nginx:1.29.8-debian-perl
+ARG BASE_IMAGE=ghcr.io/nginxinc/nginx-unprivileged:alpine
+FROM ${BASE_IMAGE}
 
 COPY vue-project/dist/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/conf.d/default.conf

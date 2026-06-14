@@ -7,9 +7,9 @@
 # ============================================================
 set -euo pipefail
 
-source "$(dirname "$0")/container-env.sh"
+source "$(dirname "$0")/build-config.sh"
 
-# ---------- 确保基础镜像存在 ----------
+# ---------- 确保基础镜像存在 (龙芯需预拉 ghcr.io/loong64 镜像) ----------
 ensure_base_images() {
     for img in "${BASE_IMAGES[@]}"; do
         if docker image inspect "$img" &>/dev/null; then
@@ -48,11 +48,23 @@ build_image() {
     local img="$1"
     local context="${IMAGE_CONTEXT[$img]}"
     local dockerfile="${context}/Dockerfile"
-    echo "==> 构建镜像: $img"
+
+    # 根据镜像名匹配对应的基础镜像
+    local base_image
+    if [[ "$img" =~ frontend ]]; then
+        base_image="$BASE_IMAGE_FRONTEND"
+    elif [[ "$img" =~ tool-server ]]; then
+        base_image="$BASE_IMAGE_TOOL_SERVER"
+    else
+        base_image="$BASE_IMAGE_WEB_SERVER"
+    fi
+
+    echo "==> 构建镜像: $img (base: $base_image)"
     docker build \
-        --platform linux/loong64 \
         -t "$img" \
         -f "$dockerfile" \
+        --build-arg BASE_IMAGE="$base_image" \
+        --build-arg PIP_EXTRA_INDEX_URL="${PIP_EXTRA_INDEX_URL:-}" \
         "$context"
     echo "    完成: $img"
 }
@@ -60,13 +72,15 @@ build_image() {
 # ---------- 主流程 ----------
 cd "$PROJECT_DIR"
 
-echo "==> 检查基础镜像..."
-ensure_base_images
-echo ""
+# 龙芯需预拉取基础镜像，x86 由 docker build 自动处理
+if [ "$ARCH" = "loong64" ]; then
+    echo "==> 检查基础镜像 (loong64)..."
+    ensure_base_images
+    echo ""
+fi
 
 # 确定要构建的镜像
 if [ $# -gt 0 ]; then
-    # 根据参数筛选镜像 (按镜像名关键词匹配，如 "tool-server" 匹配 TOOL_SERVER_IMAGE)
     TARGETS=()
     for arg in "$@"; do
         found=false

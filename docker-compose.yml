@@ -1,19 +1,17 @@
 services:
   # 前端 Web 界面 (Alpine.js 静态页面 + Nginx)
   frontend:
-    platform: linux/loong64
     build:
       context: ./frontend
     restart: unless-stopped
     network_mode: bridge
     ports:
-      - "80:80"
+      - "80:8080"
     depends_on:
       - web-server
 
   # 核心编排层
   web-server:
-    platform: linux/loong64
     build:
       context: ./web-server
     container_name: web-server
@@ -45,7 +43,7 @@ services:
 
   # 数据库
   postgres:
-    image: ghcr.io/loong64/postgres:18-trixie
+    image: ghcr.io/cloudnative-pg/postgresql:18
     container_name: postgres
     restart: unless-stopped
     environment:
@@ -76,7 +74,6 @@ services:
 
   # 工具执行层（感知 + 运维操作）
   tool-server:
-    platform: linux/loong64
     build:
       context: ./tool-server
     container_name: tool-server

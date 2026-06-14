@@ -8,13 +8,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+source "$SCRIPT_DIR/build-config.sh"
+
 # ---------- 配置 ----------
 TAG="${TAG:-latest}"
 NETWORK="${NETWORK:-alascup-net}"
 RESTART="${RESTART:-unless-stopped}"
 
-# 镜像
-BASE_POSTGRES="ghcr.io/loong64/postgres:18-trixie"
+# 镜像 (build-config.sh 提供 BASE_POSTGRES / *IMAGE 变量)
 FRONTEND_IMAGE="alascup-frontend:${TAG}"
 WEB_SERVER_IMAGE="alascup-web-server:${TAG}"
 TOOL_SERVER_IMAGE="alascup-tool-server:${TAG}"
@@ -84,7 +85,6 @@ docker run -d \
     --name "$POSTGRES_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    --platform linux/loong64 \
     -e POSTGRES_USER=alascup \
     -e POSTGRES_PASSWORD=alascup \
     -e POSTGRES_DB=alascup \
@@ -109,7 +109,6 @@ docker run -d \
     --name "$TOOL_SERVER_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    --platform linux/loong64 \
     -e TOOLSERVER_HOST_EXEC=nsenter \
     -v "/var/log:/host/var/log:ro" \
     -v "/proc:/host/proc:ro" \
@@ -177,7 +176,6 @@ docker run -d \
     --name "$WEB_SERVER_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    --platform linux/loong64 \
     --workdir /app \
     -e HOST=0.0.0.0 \
     -e PORT=11450 \
@@ -217,8 +215,7 @@ docker run -d \
     --name "$FRONTEND_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    --platform linux/loong64 \
-    -p 80:80 \
+    -p 80:8080 \
     "$FRONTEND_IMAGE"
 
 echo ""

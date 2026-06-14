@@ -6,7 +6,7 @@
 # ============================================================
 set -euo pipefail
 
-source "$(dirname "$0")/container-env.sh"
+source "$(dirname "$0")/build-config.sh"
 
 EXPORT_DIR="$PROJECT_DIR/docker-images"
 mkdir -p "$EXPORT_DIR"
