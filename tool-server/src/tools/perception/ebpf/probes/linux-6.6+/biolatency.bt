@@ -1,0 +1,26 @@
+// biolatency.bt — 磁盘 I/O 延迟 (10秒窗口后退出) [linux-6.6+: blk_mq_start/complete_request 替代 blk_account_io]
+// 输出: { "event": "start|done" }, { "latency_ns":N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":10}\n");
+}
+
+kprobe:blk_mq_start_request
+{
+    @io_start[arg0] = nsecs;
+}
+
+kprobe:blk_mq_complete_request
+/@io_start[arg0]/
+{
+    $lat = nsecs - @io_start[arg0];
+    printf("{\"latency_ns\":%ld}\n", $lat);
+    delete(@io_start[arg0]);
+}
+
+interval:s:10
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}
