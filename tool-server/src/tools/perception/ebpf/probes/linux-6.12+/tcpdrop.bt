@@ -1,0 +1,19 @@
+// tcpdrop.bt — TCP 丢包诊断 (10秒窗口后退出) [linux-6.12+: tcp_drop_reason]
+// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "reason":N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":10}\n");
+}
+
+kprobe:tcp_drop_reason
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"reason\":%d}\n",
+        nsecs, pid, comm, arg1);
+}
+
+interval:s:10
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

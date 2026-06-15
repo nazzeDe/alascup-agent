@@ -6,7 +6,7 @@ kprobe:tcp_connect
     $sk = (struct sock *)arg0;
     printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"saddr\":\"%s\",\"daddr\":\"%s\",\"dport\":%d}\n",
         nsecs, pid, comm,
-        ntop(AF_INET, $sk->__sk_common.skc_rcv_saddr),
-        ntop(AF_INET, $sk->__sk_common.skc_daddr),
-        ntohs($sk->__sk_common.skc_dport));
+        ntop(2, $sk->__sk_common.skc_rcv_saddr),
+        ntop(2, $sk->__sk_common.skc_daddr),
+        (($sk->__sk_common.skc_dport & 0xff) << 8) | (($sk->__sk_common.skc_dport >> 8) & 0xff));
 }

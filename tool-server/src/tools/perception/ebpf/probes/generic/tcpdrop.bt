@@ -1,4 +1,4 @@
-// tcpdrop.bt — TCP 丢包诊断 (10秒窗口后退出)
+// tcpdrop.bt — TCP 丢包诊断 (10秒窗口后退出) [generic: tcp_drop]
 // 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"..." }
 
 BEGIN

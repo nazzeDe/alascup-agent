@@ -1,0 +1,19 @@
+// syscount.bt — 系统调用频率统计 (10秒窗口后退出)
+// 输出: { "event": "start|done" }, { "ts": N, "pid": N, "comm": "...", "syscall": N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":10}\n");
+}
+
+tracepoint:raw_syscalls:sys_enter
+{
+    printf("{\"ts\":%llu,\"pid\":%d,\"comm\":\"%s\",\"syscall\":%d}\n",
+        nsecs, pid, comm, args->id);
+}
+
+interval:s:10
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

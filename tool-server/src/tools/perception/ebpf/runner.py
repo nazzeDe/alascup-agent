@@ -11,11 +11,11 @@ from pathlib import Path
 
 from loguru import logger
 
-_PROBES_DIR = Path(__file__).parent / "probes"
+from .resolver import resolve
 
 # 各探针的超时预设（秒）
 _DEFAULT_TIMEOUTS: dict[str, float] = {
-    "syscount.bt": 5.0,
+    "syscount.bt": 15.0,
     "syscall_slow.bt": 5.0,
     "tcpdrop.bt": 10.0,
     "biolatency.bt": 10.0,
@@ -39,7 +39,11 @@ async def run_on_demand(
     Returns:
         解析后的 JSON 事件列表。失败时返回 [{ "error": ..., "script": ... }]。
     """
-    script_path = _PROBES_DIR / script_name
+    script_path = resolve(script_name)
+    if script_path is None:
+        err = f"probe script not found (no variant for this kernel): {script_name}"
+        logger.error(err)
+        return [{"error": err, "script": script_name}]
     if not script_path.exists():
         err = f"probe script not found: {script_path}"
         logger.error(err)

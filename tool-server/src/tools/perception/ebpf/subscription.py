@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-_PROBES_DIR = Path(__file__).parent / "probes"
+from .resolver import resolve
 
 
 class BpftraceDaemon:
@@ -25,7 +25,7 @@ class BpftraceDaemon:
         restart_delay: float = 3.0,
     ) -> None:
         self._script_name = script_name
-        self._script_path = _PROBES_DIR / script_name
+        self._script_path = resolve(script_name)
         self._buffer_size = buffer_size
         self._restart_delay = restart_delay
 
@@ -38,10 +38,21 @@ class BpftraceDaemon:
 
     async def start(self) -> None:
         """启动子进程及其消费者协程。"""
+        if self._script_path is None:
+            logger.error(
+                "bpftrace_daemon no_variant script={} - no probe variant found for this kernel",
+                self._script_name,
+            )
+            self._permanent_failure = True
+            return
         if not self._script_path.exists():
             logger.error("bpftrace_daemon script_not_found path={}", self._script_path)
+            self._permanent_failure = True
             return
-        logger.info("bpftrace_daemon starting script={}", self._script_name)
+        logger.info(
+            "bpftrace_daemon starting script={} path={}",
+            self._script_name, self._script_path,
+        )
         await self._spawn(start_watchdog=True)
 
     async def _spawn(self, start_watchdog: bool = False) -> None:
@@ -80,7 +91,7 @@ class BpftraceDaemon:
         text = stderr_data.decode(errors="replace").strip()
         if text:
             logger.warning("bpftrace_daemon stderr script={} msg={}", self._script_name, text)
-            self._permanent_failure = _is_permission_error(text)
+            self._permanent_failure = _is_fatal_error(text)
 
     async def _watchdog(self) -> None:
         """检测子进程退出，自动重启。"""
@@ -144,21 +155,48 @@ class BpftraceDaemon:
         """是否因权限等永久性错误而停止。"""
         return self._permanent_failure
 
+    @property
+    def status(self) -> str:
+        """探针守护进程状态。
+
+        Returns:
+            "not_started" — start() 未被调用
+            "running" — bpftrace 进程运行中
+            "permanent_failure" — 永久性失败，不会重试
+            "stopped" — 已调用 stop()
+        """
+        if self._watchdog_task and not self._watchdog_task.done():
+            return "running"
+        if self._permanent_failure:
+            return "permanent_failure"
+        if self._proc is not None and self._proc.returncode is not None:
+            # 进程已退出但 watchdog 未启动 → 可能是 start_fail 或正在重启
+            return "permanent_failure" if self._permanent_failure else "running"
+        if self._proc is None:
+            return "not_started"
+        return "running"
+
 
 # ── helpers ──────────────────────────────────────────────────────────
 
 
-def _is_permission_error(text: str) -> bool:
-    """检查 stderr 是否包含权限类错误（永久性失败，不应重试）。"""
+def _is_fatal_error(text: str) -> bool:
+    """检查 stderr 是否包含不可恢复的错误（不应重试）。"""
     text_lower = text.lower()
-    keywords = [
+    fatal_keywords = [
+        # 权限错误
         "cap_dac_read_search",
         "cap_bpf",
         "permission denied",
         "operation not permitted",
         "not permitted",
+        # bpftrace 脚本语法/语义错误
+        "unknown function",
+        "does not contain a field named",
+        "unknown identifier",
+        "syntax error",
     ]
-    return any(k in text_lower for k in keywords)
+    return any(k in text_lower for k in fatal_keywords)
 
 
 class SubscriptionManager:
@@ -185,6 +223,19 @@ class SubscriptionManager:
         """清空指定 daemon 的缓冲区。"""
         daemon = self._daemons.get(script_name)
         return daemon.drain() if daemon else []
+
+    def probe_status(self, script_name: str) -> str:
+        """返回指定探针的状态字符串。
+
+        Returns:
+            "not_registered" — 探针未在 start_all 中注册
+            "not_started" — 已注册但未启动
+            "running" — bpftrace 进程运行中
+            "permanent_failure" — 永久性失败，不会重试
+            "stopped" — 已调用 stop()
+        """
+        daemon = self._daemons.get(script_name)
+        return daemon.status if daemon else "not_registered"
 
     async def shutdown(self) -> None:
         """停止所有 daemon。"""

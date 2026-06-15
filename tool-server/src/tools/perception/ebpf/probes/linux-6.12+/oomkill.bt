@@ -1,0 +1,19 @@
+// oomkill.bt — OOM killer 事件追踪 (30秒窗口后退出) [linux-6.12+: new fields]
+// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "victim_pid":N, "total_vm":N, "anon_rss":N, "uid":N, "oom_score_adj":N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":30}\n");
+}
+
+tracepoint:oom:mark_victim
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"victim_pid\":%d,\"total_vm\":%lu,\"anon_rss\":%lu,\"uid\":%d,\"oom_score_adj\":%d}\n",
+        nsecs, pid, comm, args->pid, args->total_vm, args->anon_rss, args->uid, args->oom_score_adj);
+}
+
+interval:s:30
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

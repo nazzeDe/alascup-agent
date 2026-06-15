@@ -1,25 +1,27 @@
 // syscall_slow.bt — 检测延迟超过 100μs 的慢系统调用 (5秒窗口后退出)
-// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "latency_ns":N }
+// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "syscall_id":N, "latency_ns":N }
 
 BEGIN
 {
     printf("{\"event\":\"start\",\"threshold_ns\":100000,\"duration_s\":5}\n");
 }
 
-tracepoint:syscalls:sys_enter_*
+tracepoint:raw_syscalls:sys_enter
 {
     @start[tid] = nsecs;
+    @enter_id[tid] = args->id;
 }
 
-tracepoint:syscalls:sys_exit_*
+tracepoint:raw_syscalls:sys_exit
 /@start[tid]/
 {
     $lat = nsecs - @start[tid];
     if ($lat > 100000) {
         printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"syscall_id\":%d,\"latency_ns\":%ld}\n",
-            nsecs, pid, comm, args->id, $lat);
+            nsecs, pid, comm, @enter_id[tid], $lat);
     }
     delete(@start[tid]);
+    delete(@enter_id[tid]);
 }
 
 interval:s:5

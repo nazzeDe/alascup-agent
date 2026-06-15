@@ -1,4 +1,4 @@
-// oomkill.bt — OOM killer 事件追踪 (30秒窗口后退出)
+// oomkill.bt — OOM killer 事件追踪 (30秒窗口后退出) [generic: totalpages]
 // 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "totalpages":N }
 
 BEGIN

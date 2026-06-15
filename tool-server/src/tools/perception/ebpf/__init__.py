@@ -34,32 +34,41 @@ def watch_process_exec() -> dict:
     """返回最近的新进程启动事件。"""
     mgr = get_subscription_manager()
     if mgr is None:
-        return {"error": "subscription manager not initialized", "events": []}
-    return {"events": mgr.drain("execsnoop.bt")}
+        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+    return {
+        "events": mgr.drain("execsnoop.bt"),
+        "probe_status": mgr.probe_status("execsnoop.bt"),
+    }
 
 
 def watch_process_exit() -> dict:
     """返回最近的进程退出事件。"""
     mgr = get_subscription_manager()
     if mgr is None:
-        return {"error": "subscription manager not initialized", "events": []}
-    return {"events": mgr.drain("proc_exit.bt")}
+        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+    return {
+        "events": mgr.drain("proc_exit.bt"),
+        "probe_status": mgr.probe_status("proc_exit.bt"),
+    }
 
 
 def watch_tcp_connections() -> dict:
     """返回最近的 TCP 连接事件。"""
     mgr = get_subscription_manager()
     if mgr is None:
-        return {"error": "subscription manager not initialized", "events": []}
-    return {"events": mgr.drain("tcpconn.bt")}
+        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+    return {
+        "events": mgr.drain("tcpconn.bt"),
+        "probe_status": mgr.probe_status("tcpconn.bt"),
+    }
 
 
 # ── 按需快照工具（异步，需 await run_on_demand）─────────────────────
 
 
-async def trace_syscall_stats(duration: int = 5) -> dict:
+async def trace_syscall_stats(duration: int = 10) -> dict:
     """采集 syscall 频率分布。
-    duration: 采样秒数（默认 5s）。
+    duration: 采样秒数（默认 10s）。
     """
     return {"events": await run_on_demand("syscount.bt", timeout=float(duration))}
 
