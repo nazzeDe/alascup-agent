@@ -1,0 +1,19 @@
+// tcpdrop.bt — TCP 丢包诊断 (10秒窗口后退出) [linux-6.6+: tcp_retransmit_skb tracepoint 替代 tcp_drop]
+// 输出: { "event": "start|done" }, { "timestamp_ns":N, "pid":N, "comm":"...", "state":N, "sport":N, "dport":N, "family":N }
+
+BEGIN
+{
+    printf("{\"event\":\"start\",\"duration_s\":10}\n");
+}
+
+tracepoint:tcp:tcp_retransmit_skb
+{
+    printf("{\"timestamp_ns\":%llu,\"pid\":%d,\"comm\":\"%s\",\"state\":%d,\"sport\":%d,\"dport\":%d,\"family\":%d}\n",
+        nsecs, pid, comm, args->state, args->sport, args->dport, args->family);
+}
+
+interval:s:10
+{
+    printf("{\"event\":\"done\"}\n");
+    exit();
+}

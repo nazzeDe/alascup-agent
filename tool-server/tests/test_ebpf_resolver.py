@@ -118,3 +118,121 @@ class TestProbeResolver:
         result = resolver.resolve("execsnoop.bt")
 
         assert result is None
+
+    def test_resolve_loongarch_6_6_version(self, tmp_path: Path) -> None:
+        """loongarch64 kernel 6.6.0-32.17.v2505.kyl1 版本解析为 (6, 6) → 匹配 linux-6.6+/"""
+        from src.tools.perception.ebpf.resolver import ProbeResolver
+
+        (tmp_path / "linux-6.6+").mkdir(parents=True)
+        (tmp_path / "generic").mkdir(parents=True)
+        (tmp_path / "linux-6.6+" / "tcpdrop.bt").write_text("// 6.6+")
+        (tmp_path / "generic" / "tcpdrop.bt").write_text("// generic")
+
+        resolver = ProbeResolver(
+            probes_root=tmp_path,
+            version_string="Linux version 6.6.0-32.17.v2505.kyl1.loongarch64 (KYLINSOFT@1b1c18b8ee97) (gcc (GCC) 12.3.1)",
+        )
+        result = resolver.resolve("tcpdrop.bt")
+
+        assert result == tmp_path / "linux-6.6+" / "tcpdrop.bt"
+
+    def test_resolve_6_6_best_match_over_generic(self, tmp_path: Path) -> None:
+        """kernel 6.6: linux-6.6+/ 和 linux-6.12+/ 都存在 → 选 6.6+（<=6.6 最高版本）"""
+        from src.tools.perception.ebpf.resolver import ProbeResolver
+
+        (tmp_path / "linux-6.6+").mkdir(parents=True)
+        (tmp_path / "linux-6.12+").mkdir(parents=True)
+        (tmp_path / "generic").mkdir(parents=True)
+        (tmp_path / "linux-6.6+" / "oomkill.bt").write_text("// 6.6+")
+        (tmp_path / "linux-6.12+" / "oomkill.bt").write_text("// 6.12+")
+        (tmp_path / "generic" / "oomkill.bt").write_text("// generic")
+
+        resolver = ProbeResolver(
+            probes_root=tmp_path,
+            version_string="Linux version 6.6.0-32.17.v2505.kyl1.loongarch64",
+        )
+        result = resolver.resolve("oomkill.bt")
+
+        assert result == tmp_path / "linux-6.6+" / "oomkill.bt"
+
+    def test_resolve_6_6_fallback_to_generic(self, tmp_path: Path) -> None:
+        """6.6 探针不在 6.6+/ 但 generic 存在 → 降级 generic"""
+        from src.tools.perception.ebpf.resolver import ProbeResolver
+
+        (tmp_path / "linux-6.6+").mkdir(parents=True)
+        (tmp_path / "generic").mkdir(parents=True)
+        (tmp_path / "linux-6.6+" / "tcpdrop.bt").write_text("// 6.6+")
+        (tmp_path / "generic" / "execsnoop.bt").write_text("// generic")
+
+        resolver = ProbeResolver(
+            probes_root=tmp_path,
+            version_string="Linux version 6.6.0-32.17.v2505.kyl1.loongarch64",
+        )
+        result = resolver.resolve("execsnoop.bt")
+
+        assert result == tmp_path / "generic" / "execsnoop.bt"
+
+
+class TestProbeResolverIntegration:
+    """集成测试：用真实 probes/ 目录和 6.6 loongarch64 版本字符串端到端解析。"""
+
+    _VERSION_LOONGARCH_6_6 = (
+        "Linux version 6.6.0-32.17.v2505.kyl1.loongarch64 "
+        "(KYLINSOFT@1b1c18b8ee97) (gcc (GCC) 12.3.1) "
+        "(GNU ld (GNU Binutils) 2.41) #1 SMP Fri May 15 16:17:58 UTC 2026"
+    )
+
+    @staticmethod
+    def _make_resolver():
+        from src.tools.perception.ebpf.resolver import ProbeResolver
+        from pathlib import Path
+        probes_root = Path(__file__).resolve().parent.parent / "src" / "tools" / "perception" / "ebpf" / "probes"
+        return ProbeResolver(probes_root=probes_root, version_string=TestProbeResolverIntegration._VERSION_LOONGARCH_6_6)
+
+    def test_resolve_oomkill_to_6_6(self) -> None:
+        """oomkill.bt → probes/linux-6.6+/oomkill.bt"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("oomkill.bt")
+        assert result is not None
+        assert result.parent.name == "linux-6.6+"
+        assert result.name == "oomkill.bt"
+
+    def test_resolve_proc_exit_to_6_6(self) -> None:
+        """proc_exit.bt → probes/linux-6.6+/proc_exit.bt"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("proc_exit.bt")
+        assert result is not None
+        assert result.parent.name == "linux-6.6+"
+        assert result.name == "proc_exit.bt"
+
+    def test_resolve_tcpdrop_to_6_6(self) -> None:
+        """tcpdrop.bt → probes/linux-6.6+/tcpdrop.bt（不是 generic 的 kprobe:tcp_drop）"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("tcpdrop.bt")
+        assert result is not None
+        assert result.parent.name == "linux-6.6+"
+        assert result.name == "tcpdrop.bt"
+
+    def test_resolve_biolatency_to_6_6(self) -> None:
+        """biolatency.bt → probes/linux-6.6+/biolatency.bt"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("biolatency.bt")
+        assert result is not None
+        assert result.parent.name == "linux-6.6+"
+        assert result.name == "biolatency.bt"
+
+    def test_resolve_execsnoop_fallback_generic(self) -> None:
+        """execsnoop.bt 不在 6.6+/ → 降级 probes/generic/execsnoop.bt"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("execsnoop.bt")
+        assert result is not None
+        assert result.parent.name == "generic"
+        assert result.name == "execsnoop.bt"
+
+    def test_resolve_syscount_fallback_generic(self) -> None:
+        """syscount.bt 不在 6.6+/ → 降级 probes/generic/syscount.bt"""
+        resolver = self._make_resolver()
+        result = resolver.resolve("syscount.bt")
+        assert result is not None
+        assert result.parent.name == "generic"
+        assert result.name == "syscount.bt"
