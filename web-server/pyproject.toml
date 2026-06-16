@@ -10,7 +10,6 @@ dependencies = [
     "loguru>=0.7,<1",
     "pydantic>=2,<3",
     "pytest>=9.0.3",
-    "tiktoken>=0.13.0",
     "uvicorn",
 ]
 

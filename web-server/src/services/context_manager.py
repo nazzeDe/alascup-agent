@@ -1,8 +1,4 @@
-import tiktoken
-
 from src.agent.messages import normalize_message
-
-_encoder = tiktoken.get_encoding("o200k_base")
 
 
 class ContextManager:
@@ -17,6 +13,7 @@ class ContextManager:
         self.max_result_chars = max_result_chars
 
     def count_tokens(self, messages: list) -> int:
+        """Approximate token count using chars//4 heuristic (DeepSeek-compatible)."""
         total = 0
         for m in messages:
             content = ""
@@ -24,10 +21,7 @@ class ContextManager:
                 content = str(m.get("content", ""))
             else:
                 content = str(getattr(m, "content", ""))
-            try:
-                total += len(_encoder.encode(content))
-            except Exception:
-                total += max(1, len(content) // 4)
+            total += max(1, len(content) // 4) if content else 0
         return max(1, total)
 
     def needs_compression(self, current_tokens: int) -> bool:

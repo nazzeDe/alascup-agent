@@ -6,26 +6,23 @@ pytestmark = pytest.mark.unit
 
 
 class TestCountTokens:
-    def test_english_tokens_gives_different_result_than_naive(self):
+    def test_approximate_tokens_chars_div_4(self):
         from src.services.context_manager import ContextManager
         cm = ContextManager()
         msgs = [{"role": "user", "content": "The quick brown fox jumps over the lazy dog."}]
         chars = len(msgs[0]["content"])
         tokens = cm.count_tokens(msgs)
-        naive = max(1, chars // 4)
-        # tiktoken and chars//4 should differ — that's why we use tiktoken
-        assert tokens != naive
-        assert tokens < chars  # English: fewer tokens than characters
+        # Uses chars//4 heuristic (DeepSeek-compatible approximation)
+        assert tokens == max(1, chars // 4)
 
-    def test_chinese_tokens_more_than_chars_div_4(self):
+    def test_chinese_text_approximation(self):
         from src.services.context_manager import ContextManager
         cm = ContextManager()
-        # Chinese: 1 char ≈ 1-2 tokens. chars//4 grossly underestimates
         msgs = [{"role": "user", "content": "你好，检查系统状态并诊断性能问题"}]
         chars = len(msgs[0]["content"])
         tokens = cm.count_tokens(msgs)
-        naive = max(1, chars // 4)
-        assert tokens > naive * 2  # at least 2x the naive estimate
+        # Approximation: chars//4, floors to at least 1
+        assert tokens == max(1, chars // 4)
 
     def test_handles_langgraph_message_objects(self):
         from src.services.context_manager import ContextManager

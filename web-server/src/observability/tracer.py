@@ -68,16 +68,11 @@ class PostgresTracer(Tracer):
             logger.opt(exception=True).error("PostgresTracer: insert failed trace_id={id}", id=trace_id)
 
 
-import tiktoken
-
-_encoder = tiktoken.get_encoding("o200k_base")
-
 
 def _estimate_tokens(messages: list[dict]) -> int:
+    """Approximate token count using chars//4 heuristic (DeepSeek-compatible)."""
     total = 0
     for m in messages:
-        try:
-            total += len(_encoder.encode(str(m.get("content", ""))))
-        except Exception:
-            total += max(1, len(str(m.get("content", ""))) // 4)
+        content = str(m.get("content", ""))
+        total += max(1, len(content) // 4) if content else 0
     return max(1, total)
