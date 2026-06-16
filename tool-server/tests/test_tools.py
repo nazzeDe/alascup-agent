@@ -297,6 +297,13 @@ class TestHostCmd:
         result = _host_cmd(["systemctl", "list-units"], ns_config)
         assert result == ["nsenter", "-t", "1", "-a", "--", "systemctl", "list-units"]
 
+    def test_chroot_mode_prefixes(self):
+        from src.tools.operation._host_exec import _host_cmd
+        from src.config import ToolServerConfig
+        ch_config = ToolServerConfig(host_exec="chroot")
+        result = _host_cmd(["bash", "-c", "ls"], ch_config)
+        assert result == ["chroot", "/host_root", "bash", "-c", "ls"]
+
 
 class TestBashWithNsenter:
     def test_run_bash_uses_nsenter(self):
@@ -321,6 +328,30 @@ class TestBashWithNsenter:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = ""
             run_bash(ns_config, command="whoami", timeout=5)
+            assert mock_run.call_args[1].get("cwd") is None
+
+    def test_run_bash_uses_chroot(self):
+        from unittest.mock import patch
+        from src.tools.operation.bash import run_bash
+        from src.config import ToolServerConfig
+        ch_config = ToolServerConfig(host_exec="chroot")
+        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "hello"
+            result = run_bash(ch_config, command="echo hello", timeout=5)
+            assert result["execution_status"] == "SUCCEEDED"
+            cmd = mock_run.call_args[0][0]
+            assert cmd == ["chroot", "/host_root", "bash", "-c", "echo hello"]
+
+    def test_run_bash_chroot_no_cwd(self):
+        from unittest.mock import patch
+        from src.tools.operation.bash import run_bash
+        from src.config import ToolServerConfig
+        ch_config = ToolServerConfig(host_exec="chroot")
+        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = ""
+            run_bash(ch_config, command="whoami", timeout=5)
             assert mock_run.call_args[1].get("cwd") is None
 
 

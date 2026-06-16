@@ -79,6 +79,7 @@ services:
       - /var/log:/host/var/log:ro,Z
       - /proc:/host/proc:ro,Z
       - /sys:/host/sys:ro,Z
+      - /:/host_root:ro,Z
       - /sys/kernel/btf:/sys/kernel/btf:ro,Z
       - /sys/kernel/tracing:/sys/kernel/tracing:ro,Z
       - ./logs/tool-server:/app/logs:Z

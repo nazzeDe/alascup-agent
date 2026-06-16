@@ -11,7 +11,7 @@ from src.tools.operation._host_exec import _host_cmd
 def run_bash(config: ToolServerConfig, command: str = "", timeout: int | None = None) -> dict:
     effective_timeout = timeout if timeout is not None else config.bash_timeout
     cmd = _host_cmd(["bash", "-c", command], config)
-    cwd = None if cmd[0] == "nsenter" else config.sandbox_root
+    cwd = None if cmd[0] in ("nsenter", "chroot") else config.sandbox_root
     if cwd is not None:
         import os as _os
         _os.makedirs(cwd, exist_ok=True)

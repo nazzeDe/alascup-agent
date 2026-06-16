@@ -113,6 +113,7 @@ docker run -d \
     -v "/var/log:/host/var/log:ro" \
     -v "/proc:/host/proc:ro" \
     -v "/sys:/host/sys:ro" \
+    -v "/:/host_root:ro" \
     -v "/sys/kernel/tracing:/sys/kernel/tracing:ro" \
     -v "$PROJECT_DIR/logs/tool-server:/app/logs" \
     --read-only \
