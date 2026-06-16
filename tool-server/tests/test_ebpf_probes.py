@@ -29,7 +29,7 @@ class TestProbeVariants6_6:
         assert "oom_score_adj" in content
 
     def test_proc_exit_exists_and_valid(self) -> None:
-        """proc_exit.bt 存在且使用 6.6 sched_process_exit 字段（无 exit_code，有 prio）"""
+        """proc_exit.bt 存在且使用 6.6 sched_process_exit 字段（无 exit code，有 prio，comm 直接 %s）"""
         f = _SET_6_6 / "proc_exit.bt"
         assert f.is_file(), f"missing: {f}"
         content = f.read_text()
@@ -37,6 +37,9 @@ class TestProbeVariants6_6:
         assert "prio" in content
         # 6.6 没有 exit_code 和 group_dead
         assert "exit_code" not in content
+        # bpftrace 6.6 char[16] 已是 string，printf 直接用 args->comm 配合 %s
+        assert 'args->comm' in content
+        assert 'str(args->comm)' not in content
 
     def test_tcpdrop_exists_and_valid(self) -> None:
         """tcpdrop.bt 存在且使用 tcp_retransmit_skb tracepoint（替代 tcp_drop）"""
