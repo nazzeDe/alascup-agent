@@ -34,6 +34,12 @@ export class ChatStore {
     this.messages.value = [...this.messages.value, ...msgs]
   }
 
+  updateMessage(messageId: string, updates: Partial<Message>): void {
+    this.messages.value = this.messages.value.map(message =>
+      message.message_id === messageId ? { ...message, ...updates } : message
+    )
+  }
+
   setToolCall(callId: string, tc: ToolCallInfo): void {
     const updated = new Map(this.toolCalls.value)
     updated.set(callId, tc)

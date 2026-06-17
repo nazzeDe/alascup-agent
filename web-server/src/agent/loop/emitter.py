@@ -25,15 +25,21 @@ class EventEmitter:
 
     # ── Streaming (from think_node) ──
 
+    def emit_stream_delta(self, chunk_type: str, delta: str) -> None:
+        if chunk_type == "reasoning":
+            self._channel.send_nowait(ReasoningDelta(delta=delta))
+        elif chunk_type == "assistant":
+            self._channel.send_nowait(AssistantDelta(delta=delta))
+
+    def emit_stream_done(self) -> None:
+        self._channel.send_nowait(ThinkingDone())
+        self._channel.send_nowait(AssistantDone())
+
     def emit_stream_chunks(self, chunks: list) -> None:
         """Emit ReasoningDelta/AssistantDelta/ThinkingDone/AssistantDone from stream chunks."""
         for chunk_type, delta in chunks:
-            if chunk_type == "reasoning":
-                self._channel.send_nowait(ReasoningDelta(delta=delta))
-            elif chunk_type == "assistant":
-                self._channel.send_nowait(AssistantDelta(delta=delta))
-        self._channel.send_nowait(ThinkingDone())
-        self._channel.send_nowait(AssistantDone())
+            self.emit_stream_delta(chunk_type, delta)
+        self.emit_stream_done()
 
     # ── Tool call lifecycle ──
 

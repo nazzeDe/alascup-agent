@@ -23,6 +23,7 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
     tool_call_blocks: list[dict] = []
     stream_chunks: list[tuple] = []
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
+    stream_sink = getattr(ctx, "stream_sink", None) if ctx else None
     feature = f"llm_call:{chat_id}"
     start_feature(feature)
     debug_log("DEBUG", "LLM call start", chat_id=str(chat_id), tools=len(tools))
@@ -30,6 +31,7 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
     error = await _stream_llm(
         llm, messages, tools, system, chat_id, feature,
         accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
+        stream_sink=stream_sink,
     )
     if error is not None:
         return ThinkOutput(llm_error=error, is_done=True)
@@ -44,8 +46,10 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
 async def _stream_llm(
     llm, messages, tools, system, chat_id, feature,
     accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
+    stream_sink=None,
 ) -> dict | None:
     """Drive the LLM stream. Returns error dict or None on success."""
+    emitted_live_stream = False
     try:
         async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
             try:
@@ -60,6 +64,8 @@ async def _stream_llm(
                 complete_feature(feature, status="error")
                 return error
             if result is True:
+                if stream_sink is not None and emitted_live_stream:
+                    stream_sink.emit_stream_done()
                 complete_feature(feature)
                 _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
                 return None
@@ -68,7 +74,10 @@ async def _stream_llm(
                 complete_feature(feature, status="error")
                 return result
             if event["event"] == "assistant":
-                _record_stream_chunks(event["data"], stream_chunks)
+                emitted_live_stream = (
+                    _record_stream_chunks(event["data"], stream_chunks, stream_sink=stream_sink)
+                    or emitted_live_stream
+                )
     except Exception as exc:
         error = {
             "code": 0,
@@ -114,15 +123,25 @@ def _log_stream_error(result, messages, chat_id):
     debug_log("DEBUG", "LLM message shapes", chat_id=str(chat_id), shapes=json.dumps(msg_shapes, default=str))
 
 
-def _record_stream_chunks(data_str: str, stream_chunks: list[tuple]) -> None:
+def _record_stream_chunks(data_str: str, stream_chunks: list[tuple], stream_sink=None) -> bool:
     """Record (type, delta) tuples for ThinkOutput.stream_chunks."""
     data = json.loads(data_str)
+    emitted = False
     rc = data.get("reasoning_content", "")
     if rc:
-        stream_chunks.append(("reasoning", rc))
+        if stream_sink is not None:
+            stream_sink.emit_stream_delta("reasoning", rc)
+        else:
+            stream_chunks.append(("reasoning", rc))
+        emitted = True
     content_chunk = data.get("delta", "")
     if content_chunk:
-        stream_chunks.append(("assistant", content_chunk))
+        if stream_sink is not None:
+            stream_sink.emit_stream_delta("assistant", content_chunk)
+        else:
+            stream_chunks.append(("assistant", content_chunk))
+        emitted = True
+    return emitted
 
 
 async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks, executor, available_tools, llm=None, lifecycle=None, ctx=None) -> ThinkOutput:

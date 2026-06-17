@@ -78,15 +78,16 @@ class AgentLoop:
         from src.agent.turn_context import _safe_uuid
 
         chat_id = state.get("_chat_id", "")
+        emitter = EventEmitter(channel)
 
         ctx = TurnContext(
             chat_id=_safe_uuid(str(chat_id)) if chat_id else None,
             turn_id=turn_id,
             iteration=0,
             model=state.get("_model", ""),
+            stream_sink=emitter,
         )
         auditor = self._auditor_factory(ctx)
-        emitter = EventEmitter(channel)
 
         emitted_assistant_count = sum(
             1 for m in state.get("messages", []) if m.get("role", "") == "assistant"

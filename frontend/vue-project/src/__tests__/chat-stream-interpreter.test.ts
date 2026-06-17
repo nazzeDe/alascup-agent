@@ -69,11 +69,19 @@ describe('ChatStreamInterpreter', () => {
     expect(chatStore.agentPhase.value).toBe('responding')
   })
 
-  it('creates assistant message on assistant_done', () => {
+  it('streams assistant deltas into the active assistant message', () => {
     chatStore.chatId.value = 'chat-1'
     const interpreter = makeInterpreter()
     interpreter.apply({ type: 'session_init', data: { chat_id: 'chat-42' } })
     interpreter.apply({ type: 'assistant', data: { delta: 'Hel' } })
+
+    expect(chatStore.messages.value.filter(m => m.type === 'assistant')).toHaveLength(1)
+    expect(chatStore.messages.value.find(m => m.type === 'assistant')).toMatchObject({
+      message_id: 'id-1',
+      chat_id: 'chat-42',
+      content: 'Hel',
+    })
+
     interpreter.apply({ type: 'assistant', data: { delta: 'lo' } })
     interpreter.apply({ type: 'assistant_done', data: {} })
 

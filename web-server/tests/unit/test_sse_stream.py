@@ -1,6 +1,7 @@
 """SSEStream tests. Verify session_init first event, agent event sequence, done last event."""
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -289,6 +290,32 @@ class TestSSEStreamAgentEvents:
         event_types = [e["event"] for e in events]
         assert event_types[0] == "session_init"
         assert "assistant" in event_types[1:], f"Expected 'assistant' after session_init, got {event_types[1:]}"
+
+    async def test_assistant_delta_is_emitted_before_llm_stream_done(
+        self, executor, context_manager, audit, bridge, rule_engine,
+        session_manager, prompt_manager,
+    ):
+        """Assistant deltas should reach SSE while the LLM stream is still open."""
+        continue_stream = asyncio.Event()
+
+        class PausedLLM(MockLLM):
+            async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+                yield {"event": "assistant", "data": json.dumps({"delta": "partial"})}
+                await continue_stream.wait()
+                yield {"event": "assistant", "data": json.dumps({"delta": " done"})}
+                yield {"event": "done", "data": "{}"}
+
+        stream = _build_stream("stream please", None, session_manager, prompt_manager,
+                               PausedLLM(), executor, context_manager, audit, bridge, rule_engine)
+        iterator = stream.__aiter__()
+
+        first = await asyncio.wait_for(iterator.__anext__(), timeout=0.5)
+        second = await asyncio.wait_for(iterator.__anext__(), timeout=0.5)
+        continue_stream.set()
+
+        assert first["event"] == "session_init"
+        assert second["event"] == "assistant"
+        assert json.loads(second["data"])["delta"] == "partial"
 
     async def test_agent_events_include_tool_calls(
         self, llm, executor, context_manager, audit, bridge, rule_engine,

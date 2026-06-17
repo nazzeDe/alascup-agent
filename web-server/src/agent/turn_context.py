@@ -3,6 +3,7 @@ audit_logger + TurnContext to collapse duplicated chat_id/turn_id/iteration/mode
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Protocol
 from uuid import UUID
 
 from src.agent.state import Transition
@@ -19,12 +20,21 @@ def _safe_uuid(value: str | None) -> UUID | None:
         return None
 
 
+class StreamSink(Protocol):
+    def emit_stream_delta(self, chunk_type: str, delta: str) -> None:
+        """Emit one streaming text chunk."""
+
+    def emit_stream_done(self) -> None:
+        """Emit stream boundary events."""
+
+
 @dataclass(frozen=True)
 class TurnContext:
     chat_id: UUID | None
     turn_id: UUID
     iteration: int
     model: str | None
+    stream_sink: StreamSink | None = None
 
     def evolve(self, *, iteration: int | None = None) -> "TurnContext":
         return TurnContext(
@@ -32,6 +42,7 @@ class TurnContext:
             turn_id=self.turn_id,
             iteration=iteration if iteration is not None else self.iteration,
             model=self.model,
+            stream_sink=self.stream_sink,
         )
 
 

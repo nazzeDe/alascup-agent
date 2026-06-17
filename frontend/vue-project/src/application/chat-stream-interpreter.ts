@@ -19,7 +19,7 @@ export class ChatStreamInterpreter {
   private sessionChatId: string
   private currentReasoningId = ''
   private reasoningBuffer = ''
-  private assistantBuffer = ''
+  private currentAssistantId = ''
   private newChatId: string | null = null
   private toolTimeout: ReturnType<typeof setTimeout> | null = null
   private readonly idFactory: () => string
@@ -48,10 +48,10 @@ export class ChatStreamInterpreter {
       case 'assistant':
         this.finishReasoning()
         this.options.chatStore.setPhase('responding')
-        this.assistantBuffer += event.data.delta
+        this.appendAssistantDelta(event.data.delta)
         break
       case 'assistant_done':
-        this.flushAssistant()
+        this.finishAssistant()
         break
       case 'tool_call':
         this.applyToolCall(event.data)
@@ -110,17 +110,29 @@ export class ChatStreamInterpreter {
     this.reasoningBuffer = ''
   }
 
-  private flushAssistant(): void {
-    if (!this.assistantBuffer) return
-    const msg: Message = {
-      message_id: this.idFactory(),
-      chat_id: this.sessionChatId,
-      timestamp: this.now(),
-      type: 'assistant',
-      content: this.assistantBuffer,
+  private appendAssistantDelta(delta: string): void {
+    if (!this.currentAssistantId) {
+      this.currentAssistantId = this.idFactory()
+      const msg: Message = {
+        message_id: this.currentAssistantId,
+        chat_id: this.sessionChatId,
+        timestamp: this.now(),
+        type: 'assistant',
+        content: '',
+      }
+      this.options.chatStore.addMessage(msg)
     }
-    this.options.chatStore.addMessage(msg)
-    this.assistantBuffer = ''
+
+    const store = this.options.chatStore
+    const existing = store.messages.value.find(m => m.message_id === this.currentAssistantId)
+    store.updateMessage(this.currentAssistantId, {
+      content: (existing?.content ?? '') + delta,
+    })
+  }
+
+  private finishAssistant(): void {
+    if (!this.currentAssistantId) return
+    this.currentAssistantId = ''
   }
 
   private applyToolCall(data: Extract<ChatStreamEvent, { type: 'tool_call' }>['data']): void {
