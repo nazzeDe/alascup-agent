@@ -81,6 +81,12 @@ export const SSE = {
       data: { chat_id: chatId, message_id: msgId, delta },
     };
   },
+  assistantDone(chatId: string, msgId: string): SSEEvent {
+    return {
+      event: "assistant_done",
+      data: { chat_id: chatId, message_id: msgId },
+    };
+  },
   toolCall(
     chatId: string,
     msgId: string,
@@ -92,10 +98,10 @@ export const SSE = {
       event: "tool_call",
       data: {
         chat_id: chatId,
-        message_id: msgId,
+        call_id: msgId,
         tool_name: toolName,
         params,
-        isReadOnly,
+        is_read_only: isReadOnly,
       },
     };
   },
@@ -110,7 +116,7 @@ export const SSE = {
       event: "tool_result",
       data: {
         chat_id: chatId,
-        message_id: msgId,
+        call_id: msgId,
         tool_name: toolName,
         execution_status: status,
         output,
@@ -128,6 +134,7 @@ export const SSE = {
       data: {
         chat_id: chatId,
         request_id: requestId,
+        call_id: requestId,
         tool_name: toolName,
         params,
         reason: "This tool modifies system state",

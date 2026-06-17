@@ -1,5 +1,18 @@
 # web-server 测试
 
+web-server 测试保护 Agent 编排层：API、SSE、审批、安全审查、MCP client、会话持久化和错误恢复。
+
+## 执行命令
+
+```bash
+cd web-server
+uv run pytest tests/ -m unit -v
+uv run pytest tests/ -m integration -v
+uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
+```
+
+`tests/conftest.py` 会按目录自动给 `tests/unit` 和 `tests/integration` 补 marker，避免新增测试漏标后被 Makefile 跳过。
+
 ## 测试对象
 
 | 模块 | 单元测试 | 集成测试 |

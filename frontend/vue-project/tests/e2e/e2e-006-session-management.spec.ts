@@ -21,6 +21,7 @@ test.describe("E2E-006 会话管理", () => {
     await mockSessionDetail(page);
     await mockChatTurn(page, [
       SSE.assistant(CHAT_ID_1, MSG_ID, "回复内容。"),
+      SSE.assistantDone(CHAT_ID_1, MSG_ID),
       SSE.done(CHAT_ID_1),
     ]);
 
@@ -90,7 +91,7 @@ test.describe("E2E-006 会话管理", () => {
     await mockSessionDetail(page, sessionsFixture[1]);
     await items.last().click();
 
-    await expect(items.last()).toHaveClass(/bg-primary-subtle/);
+    await expect(items.last()).toHaveClass(/active/);
   });
 
   test("new session button works", async ({ page }) => {

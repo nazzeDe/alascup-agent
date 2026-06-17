@@ -4,18 +4,21 @@ import type { Page, Locator } from '@playwright/test'
 export const SEL = {
   chatMessages: '.chat-messages',
   chatInput: '.chat-view textarea',
-  sendButton: '.btn-send',
+  sendButton: '.btn-send-btn',
   userBubble: '.chat-bubble-user',
   assistantBubble: '.chat-bubble-assistant',
   systemBubble: '.chat-bubble-system',
   toolInline: '.tool-call-inline',
-  toolName: '.tool-call-inline .fw-medium',
+  toolCard: '.tool-call-inline',
+  toolName: '.fw-medium',
   approvalInline: '.approval-inline',
+  approvalModal: '.approval-inline',
   approveButton: '.approval-inline .btn-success',
   rejectButton: '.approval-inline .btn-danger',
   rejectReasonInput: '.approval-inline input',
   connectionError: '.connection-error',
   sessionItem: '.session-item',
+  sessionItemActive: '.session-item.active',
   newSessionButton: '.btn-new-session',
   emptyChat: '.chat-messages .text-center.text-muted',
   toolOutputToggle: '.tool-output-toggle',
@@ -23,7 +26,7 @@ export const SEL = {
 
 export async function sendMessage(page: Page, text: string): Promise<void> {
   await page.fill(SEL.chatInput, text)
-  await page.click(SEL.sendButton)
+  await page.locator(SEL.sendButton).click()
 }
 
 export async function waitForAssistantMessage(page: Page, timeout = 15000): Promise<Locator> {

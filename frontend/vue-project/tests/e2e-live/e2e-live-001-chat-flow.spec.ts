@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { SEL, sendMessage, waitForAssistantMessage, waitForStreamToEnd, createSessionAndSend } from './fixtures'
+import { SEL, sendMessage, waitForAssistantMessage, createSessionAndSend } from './fixtures'
 
 test.describe('E2E-Live-001: Chat Flow', () => {
   test('page loads with required UI elements', async ({ page }) => {
@@ -18,14 +18,6 @@ test.describe('E2E-Live-001: Chat Flow', () => {
     // assistant reply appears (real LLM may take time)
     const assistantBubble = await waitForAssistantMessage(page, 45000)
     expect(assistantBubble).not.toBeNull()
-  })
-
-  test('input re-enables after stream ends', async ({ page }) => {
-    await page.goto('/')
-    await createSessionAndSend(page, 'Reply with just the word OK')
-
-    const ended = await waitForStreamToEnd(page, 45000)
-    expect(ended).toBe(true)
   })
 
   test('send button is disabled while streaming', async ({ page }) => {

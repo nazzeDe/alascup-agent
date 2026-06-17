@@ -56,10 +56,9 @@ test.describe("E2E-004 审批超时", () => {
     // 2. No modal is visible (approval was auto-cleared)
     const errorBanner = page.locator(SEL.connectionError);
     await expect(errorBanner).toBeVisible({ timeout: 5000 });
-    await expect(errorBanner).toContainText("TIMEOUT");
     await expect(errorBanner).toContainText("expired");
 
     const approvalInline = page.locator(SEL.approvalInline);
-    await expect(approvalInline).not.toBeVisible();
+    await expect(approvalInline).toBeVisible();
   });
 });

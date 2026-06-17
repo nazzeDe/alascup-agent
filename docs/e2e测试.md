@@ -1,81 +1,129 @@
 # E2E 测试
 
-端到端测试覆盖完整用户路径，使用 Playwright 驱动浏览器。当前分两类：
+E2E 测试验证用户视角的完整链路。项目分为 Mock E2E 和 Live E2E 两类：前者用于快速回归前端交互，后者用于比赛前确认真实服务栈可用。
 
-- `frontend/vue-project/tests/e2e/`：mock 后端的前端 E2E，默认由 `make test-e2e` 执行，不需要启动 web-server/tool-server。
-- `frontend/vue-project/tests/e2e-live/`：连接真实后端的 live E2E，需要先启动完整测试环境。
+## 测试类型
 
-## 前置
+| 类型 | 目录 | 后端依赖 | 适用场景 |
+|------|------|----------|----------|
+| Mock E2E | `frontend/vue-project/tests/e2e/` | 不需要真实后端 | 前端交互、SSE 解析、审批 UI、错误恢复 |
+| Live E2E | `frontend/vue-project/tests/e2e-live/` | 需要 Docker 测试栈 | 部署连通性、真实 API、真实 SSE、会话持久化 |
 
-### Mock E2E
+## Mock E2E
+
+执行：
 
 ```bash
 cd frontend/vue-project
 bun run test:e2e
 ```
 
-Playwright 通过 route mock `/api/chat`、`/api/sessions` 和 `/api/tool-requests/{request_id}/approval`。测试数据见 `docs/测试数据规格.md`。
+Mock E2E 使用 Playwright route 拦截：
 
-### Live E2E
+- `POST /api/chat`
+- `GET /api/sessions`
+- `GET /api/sessions/{chat_id}`
+- `DELETE /api/sessions/{chat_id}`
+- `POST /api/tool-requests/{request_id}/approval`
 
-1. 启动测试环境：`make up-test`
-2. 确认 `http://localhost/api/health` 返回健康状态
-3. 执行：
+它验证前端是否正确处理 `session_init`、`tool_call`、`tool_result`、`tool_approval_required`、`assistant`、`assistant_done`、`done` 和 `error` 等 SSE 事件。
+
+## Live E2E
+
+执行：
 
 ```bash
+make up-test
+curl http://localhost/api/health
 cd frontend/vue-project
 E2E_BASE_URL=http://localhost bun run test:e2e:live
 ```
 
-## 测试用例
+结束后清理：
+
+```bash
+make down-test
+```
+
+Live E2E 连接真实 nginx、web-server、tool-server 和 PostgreSQL。它不验证复杂 LLM 语义，而是验证测试栈是否能真实启动、API 是否可用、SSE 是否能开始推送、会话是否能持久化。
+
+## Mock E2E 用例
 
 ### E2E-001 只读诊断
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 打开页面 | 聊天界面加载完成，输入框可用 |
-| 2 | 输入 "查看当前系统 CPU 占用" 并发送 | 消息列表新增用户消息 |
-| 3 | 等待 SSE 流式响应 | 依次出现 `get_cpu_info` 内联工具调用、分析结论 |
-| 4 | 检查最终 assistant message | 含 CPU 占用百分比和建议 |
+| 1 | 打开页面 | 聊天输入框和空状态可见 |
+| 2 | 发送 “查看当前系统 CPU 占用” | 用户消息立即出现在消息列表 |
+| 3 | 接收工具事件 | 显示 `get_cpu_info` 工具调用，状态为 Done |
+| 4 | 接收助手消息 | assistant message 含 CPU 和 85% |
 
 ### E2E-002 高风险操作审批通过
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 输入 "清理磁盘空间" 并发送 | Agent 先返回只读诊断 + 清理计划 |
-| 2 | 输入 "确认执行" | 出现内联审批块，显示 `delete_temp_files` 工具参数 |
-| 3 | 点击 "Approve" | 审批块状态更新为 Approved，工具调用更新为 Done，assistant 返回执行总结 |
+| 1 | 发送 “清理磁盘空间” | 显示 `get_disk_usage` 只读诊断工具 |
+| 2 | 发送 “确认执行” | 显示 `delete_temp_files` 审批块 |
+| 3 | 点击 Approve | 审批块状态为 Approved，执行工具状态为 Done |
 
 ### E2E-003 高风险操作审批拒绝
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 输入 "重启 nginx 服务" 并发送 | 出现内联审批块 |
-| 2 | 填写拒绝原因 "暂不需要"，点击 "Reject" | 审批块状态更新为 Rejected，assistant 告知被拒原因，不执行重启 |
+| 1 | 发送 “重启 nginx 服务” | 显示审批块和工具参数 |
+| 2 | 填写拒绝原因并点击 Reject | 审批块状态为 Rejected，并显示拒绝原因 |
+| 3 | 不填写原因直接 Reject | 审批块仍更新为 Rejected |
 
 ### E2E-004 审批超时
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 触发高风险 tool_call | 内联审批块显示 |
-| 2 | 等待超时（测试通过 mock/依赖注入缩短等待） | 审批状态变为过期或 assistant 告知审批已过期 |
+| 1 | 模拟高风险 tool approval | 页面显示审批块 |
+| 2 | 模拟后端超时错误 | 页面显示错误横幅，提示 approval expired |
 
 ### E2E-005 SSE 错误恢复
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 正常对话进行中 | SSE 流正常 |
-| 2 | 模拟 SSE/后端错误 | 页面显示错误横幅；新会话首轮失败时显示 toast |
-| 3 | 输入新消息 | 输入框仍可用，可继续对话 |
+| 1 | 模拟 `/api/chat` 返回错误 | 页面显示 Connection lost |
+| 2 | 再次发送消息 | 输入框仍可用，后续 assistant 消息能显示 |
 
 ### E2E-006 会话管理
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 1 | 新会话发送消息并收到 `session_init` | 侧边栏新增会话条目 |
-| 2 | 点击侧边栏另一会话 | 消息列表切换为该会话内容 |
-| 3 | 右键会话并删除 | 前端调用 `DELETE /api/sessions/{chat_id}`，侧边栏移除该会话 |
+| 1 | 新会话发送消息 | 侧边栏新增会话 |
+| 2 | 点击另一会话 | 会话项 active，消息区切换 |
+| 3 | 点击 New Session | 回到空聊天状态 |
 
-## 测试数据初始化
+## Live E2E 用例
 
-Mock E2E 的 SSE 序列和 REST 响应在 `frontend/vue-project/tests/e2e/helpers.ts` 中通过 Playwright route 构造。Live E2E 的服务侧测试数据见 `docs/测试数据规格.md`，各服务初始化脚本见对应 `*/tests/` 目录。
+### E2E-Live-000 健康检查
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 请求 `/api/health` | 返回 `status=ok` |
+| 2 | 请求 `/api/tools` | 返回非空工具列表 |
+
+### E2E-Live-001 聊天流
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 打开页面 | 聊天输入框和 New Session 按钮可见 |
+| 2 | 新建会话并发送消息 | 用户消息可见，assistant 消息最终出现 |
+| 3 | 发送长请求 | 流式处理中输入框禁用，防止重复提交 |
+
+### E2E-Live-002 会话持久化
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 请求 `/api/sessions` | 返回数组 |
+| 2 | 前端发送消息创建会话 | 侧边栏出现该会话 |
+| 3 | 刷新页面 | 会话列表仍包含持久化记录 |
+
+## 设计原则
+
+- Mock E2E 断言具体 UI 状态，快速定位前端回归。
+- Live E2E 断言真实链路可用，避免依赖不稳定的自然语言回复内容。
+- 选择器应反映当前组件结构，优先使用稳定 class 或可见文本。
+- 超时测试只验证用户可见结果，不依赖内部定时器精确时间。

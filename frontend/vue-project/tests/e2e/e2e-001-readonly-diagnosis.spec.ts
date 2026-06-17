@@ -18,6 +18,7 @@ test.describe('E2E-001 只读诊断', () => {
       }),
       SSE.assistant(CHAT_ID, MSG_ID, '当前 CPU 占用 85%，4 核处理器。'),
       SSE.assistant(CHAT_ID, MSG_ID, '建议检查占用最高的进程。'),
+      SSE.assistantDone(CHAT_ID, MSG_ID),
       SSE.done(CHAT_ID),
     ])
     await page.goto('/')
@@ -40,7 +41,7 @@ test.describe('E2E-001 只读诊断', () => {
     await sendMessage(page, '查看当前系统 CPU 占用')
     const toolCard = await waitForToolCard(page)
     await expect(toolCard.locator(SEL.toolName)).toHaveText('get_cpu_info')
-    await expect(toolCard).toContainText('Completed')
+    await expect(toolCard).toContainText('Done')
   })
 
   test('assistant message contains CPU analysis', async ({ page }) => {

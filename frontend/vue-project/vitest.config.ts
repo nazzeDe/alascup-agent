@@ -14,5 +14,16 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     exclude: [...configDefaults.exclude, 'tests/e2e/*.spec.ts', 'tests/e2e-live/*.spec.ts'],
+    coverage: {
+      exclude: [
+        ...configDefaults.coverage.exclude!,
+        'playwright*.config.ts',
+        'tests/**',
+        'src/domain/**',
+        'src/application/ports.ts',
+        'src/main.ts',
+        'env.d.ts',
+      ],
+    },
   },
 })

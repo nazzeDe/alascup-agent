@@ -56,7 +56,12 @@ test-integration-web:
 	cd web-server && uv run pytest tests/ -m integration -v
 
 test-integration-tool:
-	cd tool-server && uv run pytest tests/ -m integration -v
+	cd tool-server && \
+	if uv run pytest tests/ -m integration --collect-only -q | grep -q '::'; then \
+		uv run pytest tests/ -m integration -v; \
+	else \
+		echo "No tool-server integration tests collected; skipping"; \
+	fi
 
 # E2E 测试：默认用 mock API + Vite dev server 运行，无需后端。
 #   针对 docker-compose 测试环境：E2E_BASE_URL=http://localhost E2E_SKIP_WEB_SERVER=1 make test-e2e
@@ -71,12 +76,11 @@ test-e2e-live:
 
 # === 覆盖率 ===
 test-coverage:
-	cd web-server && uv run pytest tests/ -m unit --cov=src --cov-report=term-missing
-	cd tool-server && uv run pytest tests/ -m unit --cov=src --cov-report=term-missing
+	cd web-server && uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
+	cd tool-server && uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 	cd frontend/vue-project && bun run test -- --coverage
 
 # === 清理 ===
 clean:
 	$(COMPOSE_TEST) down -v
 	rm -rf logs/
-

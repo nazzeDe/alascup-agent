@@ -4,16 +4,16 @@ import type { Page, Locator } from '@playwright/test'
 export const SEL = {
   chatMessages: '.chat-messages',
   chatInput: '.chat-view textarea',
-  sendButton: '.btn-send',
+  sendButton: '.btn-send-btn',
   userBubble: '.chat-bubble-user',
   assistantBubble: '.chat-bubble-assistant',
   systemBubble: '.chat-bubble-system',
-  toolCard: '.tool-call-card',
-  toolName: '.tool-name',
-  approvalModal: '.modal',
-  approveButton: '.btn-approve',
-  rejectButton: '.btn-reject',
-  rejectReasonInput: '.modal-body textarea',
+  toolCard: '.tool-call-inline',
+  toolName: '.tool-call-inline .fw-medium',
+  approvalModal: '.approval-inline',
+  approveButton: '.approval-inline .btn-success',
+  rejectButton: '.approval-inline .btn-danger',
+  rejectReasonInput: '.approval-inline input',
   sessionItem: '.session-item',
   newSessionButton: '.btn-new-session',
   emptyChat: '.chat-messages .text-center.text-muted',
@@ -22,7 +22,7 @@ export const SEL = {
 
 export async function sendMessage(page: Page, text: string): Promise<void> {
   await page.fill(SEL.chatInput, text)
-  await page.click(SEL.sendButton)
+  await page.locator(SEL.sendButton).click()
 }
 
 export async function waitForAssistantMessage(page: Page, timeout = 30000): Promise<Locator> {
@@ -68,5 +68,5 @@ export async function createSessionAndSend(page: Page, message: string): Promise
   await page.click(SEL.newSessionButton)
   await page.waitForTimeout(500)
   await page.fill(SEL.chatInput, message)
-  await page.click(SEL.sendButton)
+  await page.locator(SEL.sendButton).click()
 }

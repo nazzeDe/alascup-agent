@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { SEL, sendMessage, waitForAssistantMessage, waitForStreamToEnd } from './fixtures'
-import { createSession } from './helpers'
+import { SEL, sendMessage } from './fixtures'
+import { listSessions } from './helpers'
 
 test.describe('E2E-Live-002: Session CRUD', () => {
-  test('create session via API', async ({ page }) => {
-    const id = await createSession(page)
-    expect(id).toBeTruthy()
-    expect(typeof id).toBe('string')
+  test('list sessions via API', async ({ page }) => {
+    const sessions = await listSessions(page)
+    expect(Array.isArray(sessions)).toBe(true)
   })
 
   test('sessions persist after page reload', async ({ page }) => {
@@ -17,8 +16,9 @@ test.describe('E2E-Live-002: Session CRUD', () => {
     await page.click(SEL.newSessionButton)
     await page.waitForTimeout(500)
     await sendMessage(page, 'hello')
-    await waitForAssistantMessage(page, 45000)
-    await waitForStreamToEnd(page, 45000)
+    await expect(page.locator(SEL.sessionItem).filter({ hasText: 'hello' }).first()).toBeVisible({
+      timeout: 10000,
+    })
 
     // reload and verify sidebar has session items
     await page.reload()

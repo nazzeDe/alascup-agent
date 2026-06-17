@@ -32,7 +32,8 @@ test.describe('E2E-003 高风险操作审批拒绝', () => {
     await page.fill(SEL.rejectReasonInput, '暂不需要')
     await page.click(SEL.rejectButton)
 
-    await expect(modal).not.toBeVisible()
+    await expect(modal).toContainText('Rejected')
+    await expect(modal).toContainText('暂不需要')
   })
 
   test('reject without reason also dismisses modal', async ({ page }) => {
@@ -40,6 +41,6 @@ test.describe('E2E-003 高风险操作审批拒绝', () => {
     const modal = await waitForApprovalModal(page)
 
     await page.click(SEL.rejectButton)
-    await expect(modal).not.toBeVisible()
+    await expect(modal).toContainText('Rejected')
   })
 })

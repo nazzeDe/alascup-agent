@@ -1,16 +1,27 @@
 # tool-server 测试
 
+tool-server 测试重点保护工具执行层的安全边界和 MCP 协议链路。单元测试验证分类、校验、缓存、工具结果和本地执行；集成测试使用 `fastmcp.Client(server)` 验证真实 MCP 工具发现和 `call_tool` 调用。
+
+## 执行命令
+
+```bash
+cd tool-server
+uv run pytest tests/ -m unit -v
+uv run pytest tests/ -m integration -v
+uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
+```
+
 ## 测试对象
 
 | 模块 | 单元测试 | 集成测试 |
 |------|---------|---------|
 | 安全校验 | approval_status + request_id 格式校验 | — |
-| classify_tool（分级查询）| 根据参数判定 isReadOnly/isRollbackable | — |
+| 伴生分类工具 | bash AST 分类、fail-closed | `bash_classify` MCP 调用 |
 | ToolResult 构造 | 结构化输出 | — |
 | 错误格式化 | SECURITY_VIOLATION 响应 | — |
-| 感知工具 | 结果转换 | /proc、/sys、/var/log 模拟数据 |
-| 操作工具 | bash sandbox + timeout | systemd mock |
-| MCP Server | — | fastmcp test server 完整链路 |
+| 感知工具 | CPU、内存、磁盘、网络、进程结果转换 | — |
+| 操作工具 | bash sandbox、timeout、host_exec 参数 | `execute_tool` 调用 approved bash |
+| MCP Server | 工具注册契约、hidden/meta 校验 | 工具发现、结构化结果、安全拒绝 |
 
 
 ## 测试用例
@@ -18,26 +29,38 @@
 ### CF-101 只读工具分类
 
 | 前置 | tool-server 正常 |
-| 输入 | classify_tool(tool_name="bash", params={command: "ls /tmp"}) |
-| 预期 | isReadOnly=true, isRollbackable=true |
+| 输入 | `bash_classify(command="ls /tmp")` |
+| 预期 | `{"safe": true}` |
 
 ### CF-102 破坏性工具分类
 
 | 前置 | tool-server 正常 |
-| 输入 | classify_tool(tool_name="bash", params={command: "rm -rf /var/lib/mysql"}) |
-| 预期 | isReadOnly=false, isRollbackable=false |
+| 输入 | `bash_classify(command="rm -rf /var/lib/mysql")` |
+| 预期 | `{"safe": false}` |
 
-### CF-103 可回滚工具分类
+### CF-103 伴生分类工具通过 MCP 调用
 
-| 前置 | tool-server 正常 |
-| 输入 | classify_tool(tool_name="delete_temp_files", params={path: "/tmp"}) |
-| 预期 | isReadOnly=false, isRollbackable=true |
+| 前置 | FastMCP server 已创建 |
+| 输入 | `Client(server).call_tool("bash_classify", {"command": "ls /tmp"})` |
+| 预期 | structured content 为 `{"safe": true}` |
 
-### CF-104 感知工具分类
+### MCP-101 工具发现
 
-| 前置 | tool-server 正常 |
-| 输入 | classify_tool(tool_name="get_cpu_info", params={}) |
-| 预期 | isReadOnly=true, isRollbackable=true |
+| 前置 | FastMCP server 已创建 |
+| 输入 | `Client(server).list_tools()` |
+| 预期 | 包含 `get_cpu_info`、`bash`、`bash_classify`、`execute_tool` |
+
+### MCP-102 未审批执行被拒绝
+
+| 前置 | FastMCP server 已创建 |
+| 输入 | `execute_tool` 携带 `approval_status=PENDING` |
+| 预期 | `execution_status=FAILED`，error message 为 `SECURITY_VIOLATION` |
+
+### MCP-103 已审批执行成功
+
+| 前置 | FastMCP server 已创建，sandbox 指向临时目录 |
+| 输入 | `execute_tool` 执行 `bash command="echo mcp-ok"`，approval 为 `APPROVED` |
+| 预期 | `execution_status=SUCCEEDED`，stdout 为 `mcp-ok\n` |
 
 ### SC-101 approval_status 校验
 
@@ -54,26 +77,14 @@
 ### SC-103 高风险工具必须携带 request_id
 
 | 前置 | tool-server 正常 |
-| 输入 | isReadOnly=false 且无 request_id |
+| 输入 | `is_read_only=false` 且无 `request_id` |
 | 预期 | 拒绝；返回 SECURITY_VIOLATION |
 
 ### SC-104 只读工具无需 request_id
 
 | 前置 | tool-server 正常 |
-| 输入 | isReadOnly=true，approval_status=APPROVED，无 request_id |
+| 输入 | `is_read_only=true`，`approval_status=APPROVED`，无 `request_id` |
 | 预期 | 校验通过，执行工具 |
-
-### SC-105 沙箱写入只读挂载
-
-| 前置 | sandbox_root 可写，/host/proc 只读挂载 |
-| 输入 | bash command="echo x > /host/proc/test" |
-| 预期 | 拒绝或 EACCES；不修改 /host/proc |
-
-### SC-106 沙箱路径逃逸
-
-| 前置 | sandbox_root=/tmp/sandbox |
-| 输入 | bash command="cat /etc/passwd" |
-| 预期 | 拒绝；目标路径不在 sandbox_root 内 |
 
 ### PR-101 get_cpu_info
 
@@ -99,12 +110,6 @@
 | 输入 | 调用 get_process_list |
 | 预期 | 返回进程列表含 pid + name + cpu_percent |
 
-### PR-105 read_logs
-
-| 前置 | /var/log 模拟日志就绪 |
-| 输入 | 调用 read_logs(path="/var/log/syslog", lines=50) |
-| 预期 | 返回日志行列表 |
-
 ### OP-101 bash 执行成功
 
 | 前置 | sandbox_root 可写 |
@@ -122,12 +127,6 @@
 | 前置 | sandbox_root 可写 |
 | 输入 | bash command="nonexistent_cmd" |
 | 预期 | FAILED，output 含 returncode 和 stderr |
-
-### OP-104 systemd 服务管理
-
-| 前置 | systemd mock |
-| 输入 | restart_service(name="nginx") |
-| 预期 | 调用 systemd D-Bus；返回执行结果 |
 
 ## Mock 配置
 
@@ -171,13 +170,6 @@ May  7 10:23:30 server1 systemd[1]: mysql.service: Main process exited
 May  7 10:23:35 server1 systemd[1]: mysql.service: Scheduled restart job
 ```
 
-### MCP Mock 工具
+### MCP 集成替身
 
-```python
-get_cpu_info()       → {"cpu_percent": 85.0, "cores": 4}
-get_disk_usage()     → {"disk_usage": 92, "largest_dir": "/tmp/logs"}
-get_memory_info()    → {"mem_total_gb": 16, "mem_used_gb": 14}
-get_process_info()   → {"pid": 12345, "name": "mysqld", "cpu_percent": 78}
-delete_temp_files()  → {"deleted_bytes": "2.3GB"}
-restart_service()    → {"execution_status": "FAILED", "error": "permission denied"}
-```
+`test_mcp_integration.py` 使用内存 FastMCP server，不占用端口。测试中用 `_DummyEbpfRuntime` 替代 eBPF 后台 daemon，避免依赖内核权限，同时保留 MCP 工具注册、发现和调用路径。

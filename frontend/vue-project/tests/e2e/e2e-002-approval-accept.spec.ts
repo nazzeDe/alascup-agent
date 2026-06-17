@@ -21,6 +21,7 @@ test.describe('E2E-002 高风险操作审批通过', () => {
       }),
       SSE.assistant(CHAT_ID, PLAN_MSG_ID, '磁盘使用率 92%，建议清理 /tmp/logs。'),
       SSE.assistant(CHAT_ID, PLAN_MSG_ID, '确认后执行 delete_temp_files。'),
+      SSE.assistantDone(CHAT_ID, PLAN_MSG_ID),
       SSE.done(CHAT_ID),
     ])
 
@@ -31,7 +32,7 @@ test.describe('E2E-002 高风险操作审批通过', () => {
     await sendMessage(page, '清理磁盘空间')
     const toolCard = await waitForToolCard(page)
     await expect(toolCard.locator(SEL.toolName)).toHaveText('get_disk_usage')
-    await expect(toolCard).toContainText('Completed')
+    await expect(toolCard).toContainText('Done')
   })
 
   test('confirm execution triggers approval modal then approve', async ({ page }) => {
@@ -43,6 +44,7 @@ test.describe('E2E-002 高风险操作审批通过', () => {
       SSE.toolCall(CHAT_ID, EXEC_TOOL_ID, 'delete_temp_files', { path: '/tmp/logs' }, false),
       SSE.toolResult(CHAT_ID, EXEC_TOOL_ID, 'delete_temp_files', 'SUCCEEDED', { deleted: '2.3GB' }),
       SSE.assistant(CHAT_ID, PLAN_MSG_ID, '已清理 2.3GB 临时文件。'),
+      SSE.assistantDone(CHAT_ID, PLAN_MSG_ID),
       SSE.done(CHAT_ID),
     ])
 
@@ -52,10 +54,10 @@ test.describe('E2E-002 高风险操作审批通过', () => {
     await expect(modal).toContainText('delete_temp_files')
 
     await page.click(SEL.approveButton)
-    await expect(modal).not.toBeVisible()
+    await expect(modal).toContainText('Approved')
 
     const toolCard = await waitForToolCard(page)
-    await expect(toolCard).toContainText('Completed')
+    await expect(toolCard).toContainText('Done')
     await expect(toolCard).toContainText('delete_temp_files')
   })
 })

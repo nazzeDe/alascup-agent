@@ -28,6 +28,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+      - /app/logs:size=16m,mode=1777
     ports:
       - "11450:11450"
     depends_on:
@@ -74,5 +75,3 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
       - /run/postgresql:size=16m,mode=1777
-    ports:
-      - "5432:5432"

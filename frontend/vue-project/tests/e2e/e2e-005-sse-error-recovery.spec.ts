@@ -19,7 +19,7 @@ test.describe("E2E-005 SSE 错误恢复", () => {
 
     const errorBanner = page.locator(SEL.connectionError);
     await expect(errorBanner).toBeVisible({ timeout: 5000 });
-    await expect(errorBanner).toContainText("Error");
+    await expect(errorBanner).toContainText("Connection lost");
 
     expect(await isInputEnabled(page)).toBe(true);
   });
@@ -37,6 +37,7 @@ test.describe("E2E-005 SSE 错误恢复", () => {
         const body =
           [
             SSE.assistant(CHAT_ID, MSG_ID, "系统已恢复，正常运行。"),
+            SSE.assistantDone(CHAT_ID, MSG_ID),
             SSE.done(CHAT_ID),
           ]
             .map((e) => `event: ${e.event}\ndata: ${JSON.stringify(e.data)}\n`)
