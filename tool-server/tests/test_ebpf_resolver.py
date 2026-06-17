@@ -236,3 +236,53 @@ class TestProbeResolverIntegration:
         assert result is not None
         assert result.parent.name == "generic"
         assert result.name == "syscount.bt"
+
+
+class TestEbpfRuntime:
+    def test_runtime_resolve_uses_injected_kernel_version(self, tmp_path: Path) -> None:
+        from src.tools.perception.ebpf.runtime import EbpfRuntime
+
+        (tmp_path / "linux-6.6+").mkdir(parents=True)
+        (tmp_path / "generic").mkdir(parents=True)
+        (tmp_path / "linux-6.6+" / "tcpdrop.bt").write_text("// 6.6+")
+        (tmp_path / "generic" / "tcpdrop.bt").write_text("// generic")
+
+        runtime = EbpfRuntime(
+            probes_root=tmp_path,
+            version_string="Linux version 6.6.0-32.17.v2505.kyl1.loongarch64",
+        )
+
+        result = runtime.resolve("tcpdrop.bt")
+
+        assert result == tmp_path / "linux-6.6+" / "tcpdrop.bt"
+
+    def test_runtime_watch_reports_unregistered_probe(self, tmp_path: Path) -> None:
+        from src.tools.perception.ebpf.runtime import EbpfRuntime
+
+        runtime = EbpfRuntime(probes_root=tmp_path, version_string="Linux version 6.6.0")
+
+        assert runtime.watch("execsnoop.bt") == {
+            "events": [],
+            "probe_status": "not_registered",
+        }
+
+    @pytest.mark.asyncio
+    async def test_runtime_trace_uses_runtime_resolver(self, tmp_path: Path, monkeypatch) -> None:
+        from src.tools.perception.ebpf.runtime import EbpfRuntime
+
+        (tmp_path / "generic").mkdir(parents=True)
+        script_path = tmp_path / "generic" / "syscount.bt"
+        script_path.write_text("// generic")
+
+        async def fake_run_on_demand(script_name, timeout=None, args=None, resolve_fn=None):
+            assert script_name == "syscount.bt"
+            assert timeout == 3.0
+            assert args is None
+            assert resolve_fn("syscount.bt") == script_path
+            return [{"ok": True}]
+
+        monkeypatch.setattr("src.tools.perception.ebpf.runtime.run_on_demand", fake_run_on_demand)
+
+        runtime = EbpfRuntime(probes_root=tmp_path, version_string="not parseable")
+
+        assert await runtime.trace("syscount.bt", 3) == {"events": [{"ok": True}]}

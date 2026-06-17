@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -23,9 +24,10 @@ class BpftraceDaemon:
         script_name: str,
         buffer_size: int = 4096,
         restart_delay: float = 3.0,
+        resolve_fn: Callable[[str], Path | None] = resolve,
     ) -> None:
         self._script_name = script_name
-        self._script_path = resolve(script_name)
+        self._script_path = resolve_fn(script_name)
         self._buffer_size = buffer_size
         self._restart_delay = restart_delay
 
@@ -202,14 +204,15 @@ def _is_fatal_error(text: str) -> bool:
 class SubscriptionManager:
     """管理所有活跃的 bpftrace 守护进程。"""
 
-    def __init__(self) -> None:
+    def __init__(self, resolve_fn: Callable[[str], Path | None] = resolve) -> None:
+        self._resolve_fn = resolve_fn
         self._daemons: dict[str, BpftraceDaemon] = {}
 
     async def start_all(self, enabled: list[str] | None = None) -> None:
         """启动所有启用的持续探针。"""
         scripts = enabled or ["execsnoop.bt", "proc_exit.bt", "tcpconn.bt"]
         for name in scripts:
-            daemon = BpftraceDaemon(name)
+            daemon = BpftraceDaemon(name, resolve_fn=self._resolve_fn)
             await daemon.start()
             self._daemons[name] = daemon
         if self._daemons:

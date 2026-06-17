@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from loguru import logger
@@ -28,6 +29,7 @@ async def run_on_demand(
     script_name: str,
     timeout: float | None = None,
     args: dict[str, str] | None = None,
+    resolve_fn: Callable[[str], Path | None] = resolve,
 ) -> list[dict]:
     """运行一个 bpftrace 探针脚本并返回解析后的事件列表。
 
@@ -39,7 +41,7 @@ async def run_on_demand(
     Returns:
         解析后的 JSON 事件列表。失败时返回 [{ "error": ..., "script": ... }]。
     """
-    script_path = resolve(script_name)
+    script_path = resolve_fn(script_name)
     if script_path is None:
         err = f"probe script not found (no variant for this kernel): {script_name}"
         logger.error(err)

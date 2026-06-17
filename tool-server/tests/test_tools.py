@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -103,45 +101,6 @@ class TestBashClassify:
         from src.security.bash_classify import classify_bash
         result = classify_bash("echo $HOME")
         assert result["safe"] is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Companion Registration (uses FastMCP's own tool list)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestCompanionRegistration:
-    @pytest.mark.asyncio
-    async def test_companion_tools_registered(self, config):
-        from src.main import create_server
-        server = await create_server(config)
-        tools = await server.list_tools()
-        names = {t.name for t in tools}
-        assert "bash_classify" in names
-
-    @pytest.mark.asyncio
-    async def test_companion_tools_hidden(self, config):
-        from src.main import create_server
-        server = await create_server(config)
-        tool = await server.get_tool("bash_classify")
-        assert tool is not None
-        assert (tool.meta or {}).get("hidden") is True
-
-    @pytest.mark.asyncio
-    async def test_no_companion_for_readonly_tools(self, config):
-        from src.main import create_server
-        server = await create_server(config)
-        assert await server.get_tool("get_cpu_info_classify") is None
-
-    @pytest.mark.asyncio
-    async def test_companion_not_in_main_tool_list(self, config):
-        from src.main import create_server
-        server = await create_server(config)
-        tools = await server.list_tools()
-        companion_names = [t.name for t in tools if t.name.endswith("_classify")]
-        for name in companion_names:
-            tool = await server.get_tool(name)
-            assert tool is not None
-            assert (tool.meta or {}).get("hidden") is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -265,44 +224,32 @@ class TestOperationTools:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestHostCmd:
-    def test_direct_mode_returns_original(self, config):
-        from src.tools.operation._host_exec import _host_cmd
-        assert _host_cmd(["bash", "-c", "ls"], config) == ["bash", "-c", "ls"]
+class TestHostExecution:
+    def test_prepare_direct_host_command_sets_sandbox_cwd(self, config):
+        from src.tools.operation._host_exec import prepare_host_command
 
-    def test_nsenter_mode_prefixes(self):
-        from src.tools.operation._host_exec import _host_cmd
-        from src.config import ToolServerConfig
-        ns_config = ToolServerConfig(host_exec="nsenter")
-        result = _host_cmd(["bash", "-c", "ls"], ns_config)
-        assert result == ["nsenter", "-t", "1", "-a", "--", "bash", "-c", "ls"]
+        result = prepare_host_command(["bash", "-c", "ls"], config)
 
-    def test_unknown_host_exec_falls_through(self):
-        from src.tools.operation._host_exec import _host_cmd
-        from src.config import ToolServerConfig
-        cfg = ToolServerConfig(host_exec="")
-        assert _host_cmd(["echo", "hi"], cfg) == ["echo", "hi"]
+        assert result.argv == ["bash", "-c", "ls"]
+        assert result.cwd == config.sandbox_root
 
-    def test_direct_overrides_auto_detect(self, monkeypatch):
-        from src.tools.operation._host_exec import _host_cmd
+    def test_prepare_nsenter_host_command_owns_cwd_rule(self):
         from src.config import ToolServerConfig
-        monkeypatch.setattr("os.path.exists", lambda p: True)
-        cfg = ToolServerConfig(host_exec="direct")
-        assert _host_cmd(["echo", "hi"], cfg) == ["echo", "hi"]
+        from src.tools.operation._host_exec import prepare_host_command
 
-    def test_nsenter_systemctl_list(self):
-        from src.tools.operation._host_exec import _host_cmd
-        from src.config import ToolServerConfig
-        ns_config = ToolServerConfig(host_exec="nsenter")
-        result = _host_cmd(["systemctl", "list-units"], ns_config)
-        assert result == ["nsenter", "-t", "1", "-a", "--", "systemctl", "list-units"]
+        result = prepare_host_command(["bash", "-c", "ls"], ToolServerConfig(host_exec="nsenter"))
 
-    def test_chroot_mode_prefixes(self):
-        from src.tools.operation._host_exec import _host_cmd
+        assert result.argv == ["nsenter", "-t", "1", "-a", "--", "bash", "-c", "ls"]
+        assert result.cwd is None
+
+    def test_prepare_chroot_host_command_owns_cwd_rule(self):
         from src.config import ToolServerConfig
-        ch_config = ToolServerConfig(host_exec="chroot")
-        result = _host_cmd(["bash", "-c", "ls"], ch_config)
-        assert result == ["chroot", "/host_root", "bash", "-c", "ls"]
+        from src.tools.operation._host_exec import prepare_host_command
+
+        result = prepare_host_command(["bash", "-c", "ls"], ToolServerConfig(host_exec="chroot"))
+
+        assert result.argv == ["chroot", "/host_root", "bash", "-c", "ls"]
+        assert result.cwd is None
 
 
 class TestBashWithNsenter:
@@ -402,6 +349,32 @@ class TestCache:
         assert c.get("req-1") is None
 
 
+class TestToolResultNormalization:
+    def test_succeeded_adds_default_status(self):
+        from src.tool_result import succeeded
+
+        assert succeeded({"value": "ok"}) == {"value": "ok", "execution_status": "SUCCEEDED"}
+
+    def test_succeeded_preserves_existing_status(self):
+        from src.tool_result import succeeded
+
+        assert succeeded({"execution_status": "FAILED"}) == {"execution_status": "FAILED"}
+
+    def test_failed_sets_failed_status(self):
+        from src.tool_result import failed
+
+        assert failed({"stderr": "boom"}) == {"stderr": "boom", "execution_status": "FAILED"}
+
+    def test_failed_error_uses_jsonrpc_error_shape(self):
+        from src.error.types import execution_failed
+        from src.tool_result import failed_error
+
+        assert failed_error(execution_failed("boom")) == {
+            "execution_status": "FAILED",
+            "error": {"code": 500, "message": "EXECUTION_FAILED", "data": "boom"},
+        }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Handle Execute Tool (dispatch pipeline, now async via FastMCP get_tool)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -416,9 +389,9 @@ class TestHandleExecuteTool:
         server = await create_server(config)
         result = await handle_execute_tool(
             server=server,
-            tool_name="get_cpu_info", chat_id="c1", message_id="m1",
+            tool_name="get_cpu_info", chat_id="c1",
             params={}, request_id=self.rid, approval_status="PENDING",
-            config=config, cache=cache,
+            cache=cache,
         )
         assert "error" in result
 
@@ -429,9 +402,9 @@ class TestHandleExecuteTool:
         server = await create_server(config)
         result = await handle_execute_tool(
             server=server,
-            tool_name="nonexistent_tool", chat_id="c1", message_id="m1",
+            tool_name="nonexistent_tool", chat_id="c1",
             params={}, request_id=self.rid, approval_status="APPROVED",
-            config=config, cache=cache,
+            cache=cache,
         )
         assert "error" in result
 
@@ -442,9 +415,9 @@ class TestHandleExecuteTool:
         server = await create_server(config)
         result = await handle_execute_tool(
             server=server,
-            tool_name="get_cpu_info", chat_id="c1", message_id="m1",
+            tool_name="get_cpu_info", chat_id="c1",
             params={}, request_id="", approval_status="APPROVED",
-            config=config, cache=cache,
+            cache=cache,
         )
         assert "error" not in result
 
@@ -456,11 +429,52 @@ class TestHandleExecuteTool:
         cache.put(self.rid, {"cached": True})
         result = await handle_execute_tool(
             server=server,
-            tool_name="get_cpu_info", chat_id="c1", message_id="m1",
+            tool_name="get_cpu_info", chat_id="c1",
             params={}, request_id=self.rid, approval_status="APPROVED",
-            config=config, cache=cache,
+            cache=cache,
         )
         assert result == {"cached": True}
+
+    @pytest.mark.asyncio
+    async def test_execute_async_tool(self, config, cache):
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+
+        @server.tool(name="async_echo", meta={"is_read_only": True})
+        async def async_echo(value: str = "") -> dict:
+            return {"value": value}
+
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="async_echo", chat_id="c1",
+            params={"value": "ok"}, request_id="", approval_status="APPROVED",
+            cache=cache,
+        )
+
+        assert result == {"value": "ok", "execution_status": "SUCCEEDED"}
+
+    @pytest.mark.asyncio
+    async def test_execute_exception_normalizes_error(self, config, cache):
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+
+        @server.tool(name="boom", meta={"is_read_only": True})
+        def boom() -> dict:
+            raise RuntimeError("boom")
+
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="boom", chat_id="c1",
+            params={}, request_id="", approval_status="APPROVED",
+            cache=cache,
+        )
+
+        assert result["execution_status"] == "FAILED"
+        assert result["error"] == {"code": 500, "message": "EXECUTION_FAILED", "data": "boom"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -475,17 +489,83 @@ class TestServerCreation:
         assert server is not None
         assert server.name == "tool-server"
 
+
+class TestToolRegistrationContract:
     @pytest.mark.asyncio
-    async def test_all_tools_registered(self, config):
+    async def test_registered_tool_names_are_stable(self, config):
         from src.main import create_server
+
         server = await create_server(config)
         tools = await server.list_tools()
         names = {t.name for t in tools}
-        expected = {
-            "get_cpu_info", "get_memory_info", "get_disk_usage",
-            "get_network_info", "get_process_list",
-            "bash", "execute_tool", "health",
+
+        assert names == {
+            "get_cpu_info",
+            "get_memory_info",
+            "get_disk_usage",
+            "get_network_info",
+            "get_process_list",
+            "bash",
+            "execute_tool",
+            "watch_process_exec",
+            "watch_process_exit",
+            "watch_tcp_connections",
+            "trace_syscall_stats",
+            "trace_slow_syscalls",
+            "trace_tcp_drops",
+            "trace_io_latency",
+            "trace_oom_events",
+            "health",
             "bash_classify",
         }
-        missing = expected - names
-        assert not missing, f"Missing tools: {missing}"
+
+    @pytest.mark.asyncio
+    async def test_hidden_tools_are_stable(self, config):
+        from src.main import create_server
+
+        server = await create_server(config)
+        tools = await server.list_tools()
+        hidden_names = {t.name for t in tools if (t.meta or {}).get("hidden") is True}
+
+        assert hidden_names == {"execute_tool", "health", "bash_classify"}
+
+    @pytest.mark.asyncio
+    async def test_tool_metadata_is_stable(self, config):
+        from src.main import create_server
+
+        server = await create_server(config)
+        expected_meta = {
+            "get_cpu_info": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_memory_info": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_disk_usage": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_network_info": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_process_list": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "bash": {"is_read_only": False, "is_rollbackable": False, "mutable": True},
+            "execute_tool": {"hidden": True},
+            "watch_process_exec": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "watch_process_exit": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "watch_tcp_connections": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "trace_syscall_stats": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "trace_slow_syscalls": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "trace_tcp_drops": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "trace_io_latency": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "trace_oom_events": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "health": {"is_read_only": True, "is_rollbackable": False, "mutable": False, "hidden": True},
+            "bash_classify": {"hidden": True, "is_read_only": True, "mutable": False},
+        }
+
+        for tool_name, meta in expected_meta.items():
+            tool = await server.get_tool(tool_name)
+            assert tool is not None
+            assert tool.meta == meta
+
+    @pytest.mark.asyncio
+    async def test_bash_classify_companion_behavior(self, config):
+        from src.main import create_server
+
+        server = await create_server(config)
+        companion = await server.get_tool("bash_classify")
+
+        assert companion is not None
+        assert companion.fn(command="ls /tmp") == {"safe": True}
+        assert companion.fn(command="rm -rf /tmp") == {"safe": False}
