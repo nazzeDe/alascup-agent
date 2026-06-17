@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from src.services.db import CREATE_TABLES_SQL, Database
+from src.services.db import Database
 
 DEFAULT_TEST_DSN = "postgresql://nazze:1115@localhost:5432/alascup_agent"
 

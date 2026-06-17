@@ -1,26 +1,13 @@
 """Tests for event streaming via EventChannel — ensures deltas survive across multiple think cycles."""
 
-import asyncio
 import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
 
-from src.agent.events import (
-    AssistantDelta,
-    AssistantDone,
-    ApprovalRequired,
-    DomainEvent,
-    EventChannel,
-    ToolCallFinished,
-    ToolCallStarted,
-    TurnFailed,
-    TurnStarted,
-)
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
-from src.models.message import Message, MessageType
 
 pytestmark = pytest.mark.asyncio
 
@@ -28,8 +15,6 @@ pytestmark = pytest.mark.asyncio
 class MockLLM:
     def __init__(self):
         self._call = 0
-        self.escalated = False
-        self.fallback_switched = False
 
     async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         self._call += 1
@@ -45,10 +30,10 @@ class MockLLM:
             yield {"event": "done", "data": "{}"}
 
     def escalate_max_tokens(self):
-        self.escalated = True
+        pass
 
     def switch_to_fallback(self):
-        self.fallback_switched = True
+        pass
 
 
 class MockRuleEngine:
@@ -100,7 +85,6 @@ class MockContextManager:
 
 class MockSessionManager:
     def __init__(self):
-        from src.models.session import ChatSession
         self._sessions = {}
 
     async def create_session(self):

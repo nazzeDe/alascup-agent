@@ -1,4 +1,3 @@
-import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -77,7 +76,6 @@ class TestMessageFromRow:
     def test_reads_reasoning_content_from_row(self):
         """_message_from_row preserves reasoning_content for multi-turn context reconstruction."""
         from src.services.session_manager import _message_from_row
-        from src.models.message import MessageType
 
         msg_id = uuid.uuid4()
         chat_id = uuid.uuid4()
@@ -98,7 +96,6 @@ class TestMessageFromRow:
     def test_reasoning_content_none_when_missing_from_row(self):
         """_message_from_row returns None for reasoning_content when column is absent."""
         from src.services.session_manager import _message_from_row
-        from src.models.message import MessageType
 
         msg_id = uuid.uuid4()
         chat_id = uuid.uuid4()
@@ -488,8 +485,7 @@ class TestPersistAssistantMessage:
     async def test_persists_reasoning_content(self):
         """persist_assistant_message passes reasoning_content to Message constructor."""
         from src.services.tool_lifecycle import ToolCallLifecycle
-        from src.models.message import Message, MessageType
-        import json
+        from src.models.message import Message
 
         sm = MagicMock()
         sm.add_message = AsyncMock()
@@ -518,7 +514,6 @@ class TestPersistAssistantMessage:
     async def test_persists_none_reasoning_content(self):
         """persist_assistant_message passes None when reasoning_content absent."""
         from src.services.tool_lifecycle import ToolCallLifecycle
-        from src.models.message import Message
 
         sm = MagicMock()
         sm.add_message = AsyncMock()

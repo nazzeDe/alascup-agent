@@ -35,12 +35,6 @@ class EventEmitter:
         self._channel.send_nowait(ThinkingDone())
         self._channel.send_nowait(AssistantDone())
 
-    def emit_thinking_done(self) -> None:
-        self._channel.send_nowait(ThinkingDone())
-
-    def emit_assistant_done(self) -> None:
-        self._channel.send_nowait(AssistantDone())
-
     # ── Tool call lifecycle ──
 
     def emit_tool_started(self, tc: dict) -> None:

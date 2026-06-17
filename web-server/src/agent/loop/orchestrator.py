@@ -1,8 +1,6 @@
 """Agent loop orchestrator — composes AgentLoop invocation, event emission, and handlers."""
 
 from functools import partial
-from uuid import uuid4
-
 from loguru import logger
 
 from src.agent.events import EventChannel, TurnFailed
@@ -10,7 +8,7 @@ from src.agent.loop.approval import ApprovalHandler
 from src.agent.loop.circuit_breaker import CircuitBreaker
 from src.agent.loop.runner import AgentLoop
 from src.agent.nodes import act_node, observe_node, review_node, think_node
-from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
+from src.agent.turn_context import TurnContext, Auditor
 
 
 class LoopOrchestrator:
@@ -62,7 +60,6 @@ class LoopOrchestrator:
         self._approval = ApprovalHandler(
             bridge=bridge, audit_logger=audit_logger, lifecycle=lifecycle
         )
-        self._auditor: Auditor | None = None
         ws = getattr(self._context_manager, "window_size", 128000)
         self._breaker = CircuitBreaker(
             max_iterations=agent_max_iterations,
@@ -72,16 +69,7 @@ class LoopOrchestrator:
     async def run(self, initial_state: dict, *, channel: EventChannel) -> None:
         """Execute ReAct loop, sending DomainEvents to channel. channel.close() in finally."""
 
-        turn_id = uuid4()
         state = dict(initial_state)
-
-        ctx = TurnContext(
-            chat_id=_safe_uuid(self._chat_id),
-            turn_id=turn_id,
-            iteration=0,
-            model=self._model,
-        )
-        self._auditor = Auditor(audit_logger=self._audit, ctx=ctx)
 
         # Store metadata in state for AgentLoop to pick up
         state["_chat_id"] = self._chat_id

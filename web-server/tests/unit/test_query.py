@@ -6,17 +6,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from src.agent.events import (
-    ApprovalRequired,
-    AssistantDelta,
-    AssistantDone,
-    DomainEvent,
-    EventChannel,
-    ToolCallFinished,
-    ToolCallStarted,
-    TurnFailed,
-    TurnStarted,
-)
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
 from src.models.message import Message, MessageType
@@ -26,8 +15,6 @@ class MockLLM:
     def __init__(self, responses: list[dict] | None = None):
         self.responses = responses or [{"content": "no tools needed"}]
         self._idx = 0
-        self.escalated = False
-        self.fallback_switched = False
 
     async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         resp = self.responses[min(self._idx, len(self.responses) - 1)]
@@ -50,10 +37,10 @@ class MockLLM:
         yield {"event": "done", "data": "{}"}
 
     def escalate_max_tokens(self) -> None:
-        self.escalated = True
+        pass
 
     def switch_to_fallback(self) -> None:
-        self.fallback_switched = True
+        pass
 
 
 class MockClassifier:
@@ -126,7 +113,6 @@ class MockAuditLogger:
 class MockSessionManager:
     def __init__(self):
         self.sessions: dict[UUID, dict] = {}
-        from src.models.session import ChatSession
 
     async def create_session(self):
         sid = uuid4()
@@ -435,7 +421,6 @@ class TestChatTurnConcurrent:
         class MixedExecutor(MockExecutor):
             def __init__(self):
                 super().__init__()
-                self._classified_readonly = True
 
             def list_tools(self):
                 return _tools("get_cpu") + _tools("restart_service", is_read_only=False)
@@ -627,8 +612,11 @@ class TestAgentCrashSendsDone:
                     yield {}
                 raise RuntimeError("simulated LLM crash")
 
-            escalate_max_tokens = lambda self: None
-            switch_to_fallback = lambda self: None
+            def escalate_max_tokens(self):
+                pass
+
+            def switch_to_fallback(self):
+                pass
 
         session_mgr = MockSessionManager()
         prompt_mgr = MockPromptManager()
@@ -756,7 +744,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
 
         chat_id = uuid4()
         llm_tool_call_id = "call_msg_source_001"
@@ -809,14 +797,13 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
         from src.models.tool import (
             ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
         )
 
         chat_id = uuid4()
         ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
-        ts2 = datetime(2026, 6, 13, 12, 0, 1, tzinfo=timezone.utc)
         ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
         ts_tool = datetime(2026, 6, 13, 12, 0, 1, 500000, tzinfo=timezone.utc)
 
@@ -866,7 +853,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
 
         chat_id = uuid4()
         session = ChatSession(
@@ -898,7 +885,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
         from src.models.tool import (
             ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
         )
@@ -945,7 +932,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
         from src.models.tool import (
             ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
         )
@@ -1025,7 +1012,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
         from src.models.tool import (
             ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
         )
@@ -1099,7 +1086,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
 
         chat_id = uuid4()
         ts = datetime.now(timezone.utc)
@@ -1137,7 +1124,7 @@ class TestHistoryReconstruction:
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
-        from src.models.message import Message, MessageType
+        from src.models.message import Message
 
         chat_id = uuid4()
         ts = datetime.now(timezone.utc)

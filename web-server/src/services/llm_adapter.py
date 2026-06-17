@@ -81,7 +81,6 @@ class LLMAdapter:
         self._config = config
         self._transport = transport
         self._tracer = tracer
-        self._original_model = config.model
         self._max_tokens = config.max_tokens
         self._last_trace_id: UUID | None = None
 

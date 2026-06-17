@@ -79,11 +79,11 @@ class Settings(BaseSettings):
         from src.config.loader import load_llm_config, load_rules_config, load_servers_config
 
         llm = load_llm_config(config_dir / "llm.json")
-        servers = load_servers_config(config_dir / "servers.json")
+        load_servers_config(config_dir / "servers.json")
         try:
-            rules = load_rules_config(config_dir / "rules.json")
+            load_rules_config(config_dir / "rules.json")
         except FileNotFoundError:
-            rules = RulesConfig()
+            pass
 
         return cls(
             config_dir=config_dir,

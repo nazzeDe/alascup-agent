@@ -10,8 +10,6 @@ from loguru import logger
 from src.agent.events import (
     DomainEvent,
     EventChannel,
-    ToolCallFinished,
-    ToolCallStarted,
     TurnFailed,
     TurnStarted,
 )
@@ -121,8 +119,6 @@ class ChatTurn:
 
         # 10. Read from channel, yield events to SSE stream.
         # Assistant message persistence is handled by think_node → lifecycle.persist_assistant_message().
-        disconnected = False
-
         try:
             while True:
                 # Check for task completion while waiting
@@ -134,8 +130,6 @@ class ChatTurn:
                         debug_log("DEBUG", tp.CHAT_TURN_RECEIVED, type=type(event).__name__)
                 except asyncio.TimeoutError:
                     if (orch_task.done() and channel.is_closed()) or await self._is_disconnected():
-                        if await self._is_disconnected():
-                            disconnected = True
                         # Drain any remaining events
                         if not channel.is_closed():
                             channel.close()
@@ -164,7 +158,6 @@ class ChatTurn:
                 yield event
 
                 if await self._is_disconnected():
-                    disconnected = True
                     break
 
         except Exception as exc:

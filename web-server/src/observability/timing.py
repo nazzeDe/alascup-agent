@@ -207,13 +207,6 @@ class FeatureTimeTracker:
         mem = tracemalloc.get_traced_memory()
         self._checkpoints.append(Checkpoint(label, elapsed, mem[0] / 1024))
 
-    def feature_summary(self) -> dict[str, float]:
-        """Average duration per feature for this profiling run only."""
-        grouped: dict[str, list[float]] = {}
-        for f in self._features:
-            grouped.setdefault(f.name, []).append(f.duration_ms)
-        return {name: sum(v) / len(v) for name, v in grouped.items()}
-
     def report(self) -> str | None:
         if not self._profile_enabled and not self._features:
             return None

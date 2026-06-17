@@ -1,8 +1,7 @@
 """Unit tests for ApprovalHandler and its module-level helpers."""
 
-import json
 from uuid import UUID, uuid4
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +15,7 @@ from src.agent.loop.approval import (
 from src.agent.loop.emitter import EventEmitter
 from src.agent.state import Transition, TurnScratch
 from src.agent.turn_context import TurnContext
-from src.models.audit import AuditActor, AuditEvent, AuditLevel
+from src.models.audit import AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
 
 

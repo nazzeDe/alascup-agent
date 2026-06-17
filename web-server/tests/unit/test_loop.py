@@ -194,7 +194,6 @@ class TestOrchestratorTermination:
         }
 
         await orch.run(state, channel=channel)
-        events = await collect_channel_events(channel)
         assert call_count >= 2, f"orchestrator should loop at least once, got {call_count} iterations"
         assert channel.is_closed()
 
@@ -231,8 +230,11 @@ class TestOrchestratorRecoveryEmission:
             )
 
         class RecoveryLLM:
-            escalate_max_tokens = lambda self: None
-            switch_to_fallback = lambda self: None
+            def escalate_max_tokens(self):
+                pass
+
+            def switch_to_fallback(self):
+                pass
 
         class RecoveryCtx:
             window_size = 128000

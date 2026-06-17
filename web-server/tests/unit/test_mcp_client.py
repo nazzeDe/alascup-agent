@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,13 +14,6 @@ class FakeRegistry:
 
 
 class TestToolExecutorConstruction:
-    def test_is_connect_error(self):
-        from src.mcp_client.executor import ToolExecutor
-
-        executor = ToolExecutor(FakeRegistry())
-        assert executor._is_connect_error(ConnectionRefusedError("test"))
-        assert not executor._is_connect_error(ValueError("test"))
-
     def test_resolve_status_from_data_execution_status(self):
         """data.execution_status 优先于 isError"""
         from src.mcp_client.executor import ToolExecutor

@@ -9,7 +9,6 @@ from src.agent.nodes._helpers import _parse_args
 from src.agent.state import Transition, TurnScratch
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
-from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 

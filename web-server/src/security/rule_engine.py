@@ -14,9 +14,3 @@ class RuleEngine:
         if is_read_only:
             return "AUTO_APPROVE"
         return "REQUIRE_APPROVAL"
-
-    def is_blacklisted(self, tool_name: str) -> bool:
-        return tool_name in self._blacklist
-
-    def is_whitelisted(self, tool_name: str) -> bool:
-        return tool_name in self._whitelist

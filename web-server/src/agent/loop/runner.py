@@ -65,7 +65,6 @@ class AgentLoop:
         self._approval = approval
         self._breaker = breaker
         self._auditor_factory = auditor_factory
-        self._emitter = emitter
         self._context_manager = context_manager
         self._error_recovery = error_recovery
         self._llm = llm

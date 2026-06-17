@@ -46,11 +46,6 @@ def get_transition(scratch: TurnScratch) -> Transition | None:
     return scratch.transition
 
 
-def has_pending_approval(scratch: TurnScratch) -> bool:
-    """Check if review_node returned pending tool calls needing human approval."""
-    return bool(scratch.pending_approval)
-
-
 class AgentState(TypedDict, total=False):
     messages: list
     system: str | None

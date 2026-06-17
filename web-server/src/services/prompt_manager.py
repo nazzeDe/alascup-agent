@@ -59,9 +59,6 @@ class PromptManager:
     def set_memory(self, memory: str) -> None:
         self._memory = memory
 
-    def reset_cache(self) -> None:
-        self._cache.clear()
-
     def _get_section(self, name: str) -> str:
         if name in self._overrides:
             return self._overrides[name]

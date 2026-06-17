@@ -1,9 +1,7 @@
 import json
 from uuid import uuid4
 
-import pytest
 
-from src.agent.events import EventChannel
 from src.agent.nodes import (
     act_node,
     observe_node,
@@ -20,10 +18,8 @@ class MockLLM:
 
     def __init__(self, events: list[dict]):
         self._events = events
-        self._call_count = 0
 
     async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
-        self._call_count += 1
         for e in self._events:
             yield e
 

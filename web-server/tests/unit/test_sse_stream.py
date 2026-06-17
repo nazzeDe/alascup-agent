@@ -8,7 +8,7 @@ import pytest
 
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
-from src.models.message import Message, MessageType
+from src.models.message import Message
 from src.sse_stream import SSEStream
 
 
@@ -19,8 +19,6 @@ class MockLLM:
     def __init__(self, responses: list[dict] | None = None):
         self.responses = responses or [{"content": "no tools needed"}]
         self._idx = 0
-        self.escalated = False
-        self.fallback_switched = False
 
     async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
         resp = self.responses[min(self._idx, len(self.responses) - 1)]
@@ -47,10 +45,10 @@ class MockLLM:
         yield {"event": "done", "data": "{}"}
 
     def escalate_max_tokens(self) -> None:
-        self.escalated = True
+        pass
 
     def switch_to_fallback(self) -> None:
-        self.fallback_switched = True
+        pass
 
 
 class MockRuleEngine:
@@ -252,7 +250,7 @@ class TestSSEStreamSessionInit:
         assert first["event"] == "session_init", f"First event: {first['event']}"
         data = json.loads(first["data"])
         chat_id = data["chat_id"]
-        assert chat_id != "new", f"chat_id should be a real UUID, not 'new'"
+        assert chat_id != "new", "chat_id should be a real UUID, not 'new'"
         UUID(chat_id)
 
     async def test_session_init_when_chat_id_provided(

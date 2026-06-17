@@ -125,10 +125,6 @@ class ToolExecutor:
         return await asyncio.gather(*tasks)
 
     @staticmethod
-    def _is_connect_error(exc: Exception) -> bool:
-        return isinstance(exc, (ConnectionError, ConnectionRefusedError, TimeoutError))
-
-    @staticmethod
     def _resolve_status(result) -> ExecutionStatus:
         """Derive execution status from structured_content or isError.
 

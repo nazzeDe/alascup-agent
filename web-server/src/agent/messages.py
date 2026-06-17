@@ -92,7 +92,3 @@ def _tc_normalize(tc) -> dict:
         "function": {"name": tc.get("name", ""), "arguments": args},
     }
 
-
-def normalize_state_messages(state: dict) -> dict:
-    """Normalize all messages in state to plain dicts. Call after graph.ainvoke()."""
-    return {**state, "messages": [normalize_message(m) for m in state.get("messages", [])]}
