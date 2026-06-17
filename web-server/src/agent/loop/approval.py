@@ -28,6 +28,7 @@ def _apply_decisions(pending: list[dict], decisions: list[dict]) -> tuple[list[d
             tc["approval_status"] = "APPROVED"
             approved.append(tc)
         else:
+            tc["approval_status"] = "EXPIRED" if status == "EXPIRED" else "REJECTED"
             tc["rejection_reason"] = d.get("reason") if isinstance(d, dict) else None
             rejected.append(tc)
     return approved, rejected
@@ -172,13 +173,12 @@ class ApprovalHandler:
         if self._lifecycle is not None:
             cid = turn_ctx.chat_id
             for tc in all_approved:
-                await self._lifecycle.update(cid, tc.get("call_id"),
-                                             approval_status=ApprovalStatus.APPROVED,
-                                             execution_status=ExecutionStatus.RUNNING)
+                await self._lifecycle.mark_approved(cid, tc.get("call_id"))
             for tc in all_rejected:
-                await self._lifecycle.update(cid, tc.get("call_id"),
-                                             approval_status=ApprovalStatus.REJECTED,
-                                             execution_status=ExecutionStatus.FAILED)
+                if tc.get("approval_status") == "EXPIRED":
+                    await self._lifecycle.mark_expired(cid, tc.get("call_id"))
+                else:
+                    await self._lifecycle.mark_rejected(cid, tc.get("call_id"))
         scratch.approved_tool_calls = scratch.approved_tool_calls + all_approved
         scratch.rejected_tool_calls = scratch.rejected_tool_calls + all_rejected
         scratch.pending_approval = []
@@ -186,52 +186,3 @@ class ApprovalHandler:
             Transition.APPROVAL_GRANTED if all_approved
             else Transition.APPROVAL_REJECTED
         )
-
-# ── Legacy module-level function (kept for test compatibility) ──
-
-async def _yield_approval_events(
-    pending: list[dict], *, request_id: str,
-    bridge, auditor, chat_id: str,
-):
-    """Yield approval_required SSE events for each pending tool call.
-    
-    Registers with the bridge so the orchestrator can await decisions.
-    """
-    if bridge:
-        bridge.create(request_id, chat_id)
-
-    if auditor is not None:
-        await auditor.transition(Transition.APPROVAL_PENDING, actor=AuditActor.POLICY)
-
-    if not pending:
-        yield {
-            "event": "tool_approval_required",
-            "data": json.dumps({
-                "chat_id": chat_id,
-                "request_id": request_id,
-                "tool_name": "",
-                "params": {},
-                "reason": "No tool calls to approve",
-            }, default=str),
-        }
-        return
-
-    for tc in pending:
-        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-        params = fn.get("arguments", "{}")
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except (json.JSONDecodeError, TypeError):
-                params = {}
-
-        yield {
-            "event": "tool_approval_required",
-            "data": json.dumps({
-                "chat_id": chat_id,
-                "request_id": request_id,
-                "tool_name": fn.get("name", ""),
-                "params": params,
-                "reason": fn.get("name", "") + " needs your approval to execute",
-            }, default=str),
-        }

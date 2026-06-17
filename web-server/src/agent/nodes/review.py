@@ -7,7 +7,6 @@ from src.agent.results import ReviewOutput
 from src.agent.state import Transition
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
-from src.models.tool import ApprovalStatus, ExecutionStatus
 from src.observability.debug_log import log as debug_log
 
 
@@ -83,7 +82,7 @@ async def _apply_decision(
             params=args, decision="REJECT",
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.update(chat_id_uuid, tc.get("call_id"), approval_status=ApprovalStatus.REJECTED, execution_status=ExecutionStatus.FAILED)
+            await lifecycle.mark_rejected(chat_id_uuid, tc.get("call_id"))
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
@@ -94,7 +93,7 @@ async def _apply_decision(
             params=args,
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.update(chat_id_uuid, tc.get("call_id"), approval_status=ApprovalStatus.APPROVED, execution_status=ExecutionStatus.RUNNING)
+            await lifecycle.mark_approved(chat_id_uuid, tc.get("call_id"))
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)

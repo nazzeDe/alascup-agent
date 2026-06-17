@@ -623,8 +623,9 @@ class TestAgentCrashSendsDone:
 
         class RaisingLLM:
             async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+                if messages is None:
+                    yield {}
                 raise RuntimeError("simulated LLM crash")
-                yield  # unreachable
 
             escalate_max_tokens = lambda self: None
             switch_to_fallback = lambda self: None
@@ -749,11 +750,64 @@ class TestChatTurnFullChainAudit:
 class TestHistoryReconstruction:
     """Slice 2: ChatTurn builds history from messages + executed_tool_list."""
 
+    async def test_build_history_uses_persisted_tool_result_messages(self):
+        """Tool result messages are replayed from messages, not synthesized from tool_calls."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from src.services.history_projection import build_llm_history
+        from src.models.session import ChatSession
+        from src.models.message import Message, MessageType
+
+        chat_id = uuid4()
+        llm_tool_call_id = "call_msg_source_001"
+        ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
+        ts_assist = datetime(2026, 6, 13, 12, 0, 1, tzinfo=timezone.utc)
+        ts_tool = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
+
+        session = ChatSession(
+            id=chat_id,
+            messages=[
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    content="check CPU",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    content="",
+                    tool_calls=[{
+                        "id": llm_tool_call_id,
+                        "type": "function",
+                        "function": {"name": "get_cpu", "arguments": "{}"},
+                    }],
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
+                    tool_call_id=llm_tool_call_id,
+                    tool_name="get_cpu",
+                ),
+            ],
+            executed_tool_list=[],
+            timestamp=ts_tool.isoformat(),
+        )
+
+        history = build_llm_history(session)
+
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant", "tool"]
+        tool_msg = history[2]
+        assert tool_msg["tool_call_id"] == llm_tool_call_id
+        assert tool_msg["name"] == "get_cpu"
+        assert "CPU: 45%" in tool_msg["content"]
+
     async def test_build_history_includes_tool_results(self):
         """Tool results from executed_tool_list appear as role=tool in history."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
         from src.models.tool import (
@@ -796,7 +850,7 @@ class TestHistoryReconstruction:
             timestamp=ts3.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
 
         roles = [m["role"] for m in history]
         assert roles == ["user", "tool", "assistant"], f"expected [user, tool, assistant], got {roles}"
@@ -810,7 +864,7 @@ class TestHistoryReconstruction:
         """Session with no tool results — history unchanged."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
 
@@ -833,7 +887,7 @@ class TestHistoryReconstruction:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
 
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant"]
@@ -842,7 +896,7 @@ class TestHistoryReconstruction:
         """Tool calls without result field are not added to history."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
         from src.models.tool import (
@@ -881,7 +935,7 @@ class TestHistoryReconstruction:
             timestamp=ts.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant"]  # tool without result not included
 
@@ -889,7 +943,7 @@ class TestHistoryReconstruction:
         """Assistant message with tool_calls → output dict includes tool_calls field."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
         from src.models.tool import (
@@ -944,7 +998,7 @@ class TestHistoryReconstruction:
             timestamp=ts3.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
 
         # Expected order: user → assistant(with tool_calls) → tool → assistant(final)
         assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
@@ -969,7 +1023,7 @@ class TestHistoryReconstruction:
         the LLM-generated id is NOT a valid UUID (e.g. OpenAI 'call_abc123')."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
         from src.models.tool import (
@@ -1026,7 +1080,7 @@ class TestHistoryReconstruction:
             timestamp=ts3.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
 
         assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
         roles = [m["role"] for m in history]
@@ -1043,7 +1097,7 @@ class TestHistoryReconstruction:
         """Assistant messages with reasoning_content include it in history dicts."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
 
@@ -1071,7 +1125,7 @@ class TestHistoryReconstruction:
             timestamp=ts.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
         assert len(history) == 2
         assistant_entry = history[1]
         assert assistant_entry["role"] == "assistant"
@@ -1081,7 +1135,7 @@ class TestHistoryReconstruction:
         """Assistant messages without reasoning_content omit it from history."""
         from datetime import datetime, timezone
         from uuid import uuid4
-        from src.chat_turn import _build_history
+        from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message, MessageType
 
@@ -1102,6 +1156,6 @@ class TestHistoryReconstruction:
             timestamp=ts.isoformat(),
         )
 
-        history = _build_history(session)
+        history = build_llm_history(session)
         assert len(history) == 1
         assert "reasoning_content" not in history[0]

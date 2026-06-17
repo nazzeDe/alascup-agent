@@ -19,4 +19,6 @@ class Message(BaseModel):
     type: MessageType
     content: str
     tool_calls: list[dict] | None = Field(default=None)
+    tool_call_id: str | None = Field(default=None)
+    tool_name: str | None = Field(default=None)
     reasoning_content: str | None = Field(default=None)

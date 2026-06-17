@@ -115,6 +115,29 @@ class TestMessageFromRow:
         msg = _message_from_row(row)
         assert msg.reasoning_content is None
 
+    def test_reads_tool_result_metadata_from_row(self):
+        """Tool result messages preserve tool_call_id and tool_name for LLM history replay."""
+        from src.services.session_manager import _message_from_row
+
+        msg_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        ts = datetime.now(timezone.utc)
+
+        row = _FakeRecord({
+            "id": msg_id,
+            "chat_id": chat_id,
+            "timestamp": ts,
+            "type": "tool_result",
+            "content": "[get_cpu] execution_status=SUCCEEDED",
+            "tool_calls": None,
+            "tool_call_id": "call_abc",
+            "tool_name": "get_cpu",
+            "reasoning_content": None,
+        })
+        msg = _message_from_row(row)
+        assert msg.tool_call_id == "call_abc"
+        assert msg.tool_name == "get_cpu"
+
 class TestToolCallFromRow:
     def test_converts_row_to_tool_call(self):
         from src.services.session_manager import _tool_call_from_row
@@ -333,6 +356,33 @@ class TestPostgresSessionManagerAddMessage:
         await mgr.add_message(chat_id, msg)
         assert db.execute.call_count == 2
 
+    @pytest.mark.asyncio
+    async def test_add_tool_result_message_writes_tool_metadata(self):
+        from src.services.session_manager import PostgresSessionManager
+        from src.models.message import Message, MessageType
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        mgr = PostgresSessionManager(db)
+
+        chat_id = uuid.uuid4()
+        msg = Message(
+            message_id=uuid.uuid4(),
+            chat_id=chat_id,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            type=MessageType.TOOL_RESULT,
+            content="[get_cpu] execution_status=SUCCEEDED",
+            tool_call_id="call_abc",
+            tool_name="get_cpu",
+        )
+        await mgr.add_message(chat_id, msg)
+
+        insert_args = db.execute.call_args_list[0][0]
+        assert "tool_call_id" in insert_args[0]
+        assert "tool_name" in insert_args[0]
+        assert "call_abc" in insert_args
+        assert "get_cpu" in insert_args
+
 class TestPostgresSessionManagerAddToolCall:
     @pytest.mark.asyncio
     async def test_add_tool_call_inserts_and_updates(self):
@@ -486,3 +536,30 @@ class TestPersistAssistantMessage:
         sm.add_message.assert_called_once()
         msg_arg = sm.add_message.call_args[0][1]
         assert msg_arg.reasoning_content is None
+
+
+class TestPersistToolResultMessage:
+    @pytest.mark.asyncio
+    async def test_persists_tool_result_metadata(self):
+        from src.services.tool_lifecycle import ToolCallLifecycle
+        from src.models.message import Message, MessageType
+
+        sm = MagicMock()
+        sm.add_message = AsyncMock()
+
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+
+        await lifecycle.persist_tool_result(chat_id, [{
+            "role": "tool",
+            "content": "[get_cpu] execution_status=SUCCEEDED",
+            "tool_call_id": "call_abc",
+            "name": "get_cpu",
+        }])
+
+        sm.add_message.assert_called_once()
+        msg_arg = sm.add_message.call_args[0][1]
+        assert isinstance(msg_arg, Message)
+        assert msg_arg.type == MessageType.TOOL_RESULT
+        assert msg_arg.tool_call_id == "call_abc"
+        assert msg_arg.tool_name == "get_cpu"

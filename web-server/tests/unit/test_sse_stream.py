@@ -314,6 +314,39 @@ class TestSSEStreamAgentEvents:
         assert "tool_result" in event_types
         assert "assistant" in event_types
 
+    async def test_readonly_tool_events_use_llm_tool_call_id_not_db_call_id(
+        self, llm, executor, context_manager, audit, bridge, rule_engine,
+        session_manager, prompt_manager,
+    ):
+        """SSE tool event pairing uses the LLM tool call id, not persistence row id."""
+        executor.list_tools = lambda: [{"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True}]
+        llm_tool_call_id = "call_readonly_llm_id"
+        db_call_id = uuid4()
+
+        async def add_tool_call(chat_id, call):
+            return db_call_id
+
+        session_manager.add_tool_call = add_tool_call
+        llm.responses = [
+            {"content": "", "tool_calls": [
+                {"id": llm_tool_call_id, "function": {"name": "get_cpu", "arguments": "{}"}},
+            ]},
+            {"content": "CPU is 85%.", "tool_calls": None},
+        ]
+
+        stream = _build_stream("check CPU", None, session_manager, prompt_manager,
+                               llm, executor, context_manager, audit, bridge, rule_engine)
+        events = await _collect_events(stream)
+
+        tool_call_ids = [
+            json.loads(e["data"])["call_id"]
+            for e in events
+            if e["event"] in ("tool_call", "tool_result")
+        ]
+        assert tool_call_ids
+        assert set(tool_call_ids) == {llm_tool_call_id}
+        assert str(db_call_id) not in tool_call_ids
+
 
 class TestSSEStreamDone:
     """done is always the last event."""

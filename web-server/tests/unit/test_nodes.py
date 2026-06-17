@@ -229,26 +229,23 @@ class TestActNode:
         et = result.results[0]["result"].get("execution_time_ms")
         assert et is None
 
-    async def test_passes_result_to_lifecycle_update(self):
-        """act_node passes result output to lifecycle.update() for persistence."""
+    async def test_passes_result_to_lifecycle_mark_executed(self):
+        """act_node passes result output to lifecycle execution transition."""
         from unittest.mock import AsyncMock, MagicMock
 
         executor = MockExecutor({
             "get_cpu": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
         })
         lifecycle = MagicMock()
-        lifecycle.update = AsyncMock()
+        lifecycle.mark_executed = AsyncMock()
 
         state = _state_with_tools([
             {"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": uuid4()},
         ])
         await act_node(state, executor=executor, lifecycle=lifecycle)
 
-        lifecycle.update.assert_called_once()
-        call_kwargs = lifecycle.update.call_args.kwargs
-        assert call_kwargs["execution_status"] is not None
-        assert "result" in call_kwargs
-        assert call_kwargs["result"]["output"] == "CPU: 45%"
+        lifecycle.mark_executed.assert_called_once()
+        assert lifecycle.mark_executed.call_args.args[2]["output"] == "CPU: 45%"
 
 
 class TestStreamingThink:
@@ -358,7 +355,7 @@ class TestStreamingThink:
 
         assert result.tool_calls == []
         assert len(result.pre_executed) == 1
-        assert result.pre_executed[0]["tool_name"] == "search_experience"
+        assert result.pre_executed[0]["tool_name"] == "get_cpu_info"
 
 
 class TestObserveNode:

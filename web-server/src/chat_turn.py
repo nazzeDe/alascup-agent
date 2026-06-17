@@ -16,81 +16,9 @@ from src.agent.events import (
     TurnStarted,
 )
 from src.models.message import Message, MessageType
-from src.models.session import ChatSession
 from src.observability.debug_log import log as debug_log
 from src.observability import trace_points as tp
-
-
-def _build_history(session: ChatSession) -> list[dict]:
-    """Build conversation history from session messages AND executed_tool_list.
-
-    Tool calls with results are interleaved as role=tool messages ordered by
-    timestamp, so the LLM sees tool execution output in multi-turn conversations.
-    Assistant messages with tool_calls are included so tool messages have valid
-    preceding tool_calls (Anthropic API requirement).
-    """
-    from datetime import datetime, timezone
-
-    # Collect entries: (timestamp, kind, data)
-    entries: list[tuple[datetime, str, object]] = []
-
-    for m in session.messages:
-        # TOOL_RESULT messages are synthesized from executed_tool_list below
-        # with proper tool_call_id/name fields that the Message model lacks
-        if m.type == MessageType.TOOL_RESULT:
-            continue
-        ts = datetime.fromisoformat(m.timestamp)
-        entries.append((ts, "msg", m))
-
-    for tc in session.executed_tool_list:
-        if tc.result is None:
-            continue
-        ts = datetime.fromisoformat(tc.timestamp)
-        entries.append((ts, "tool", tc))
-
-    entries.sort(key=lambda e: e[0])
-
-    history: list[dict] = []
-    for _ts, kind, obj in entries:
-        if kind == "msg":
-            m = obj
-            role = m.type.value if isinstance(m.type, MessageType) else m.type
-            entry: dict = {"role": role, "content": m.content}
-            if m.tool_calls:
-                entry["tool_calls"] = m.tool_calls
-            if m.reasoning_content:
-                entry["reasoning_content"] = m.reasoning_content
-            history.append(entry)
-        else:
-            tc = obj
-            history.append({
-                "role": "tool",
-                "content": _format_tool_result_for_history(tc),
-                "tool_call_id": tc.llm_tool_call_id or str(tc.call_id or ""),
-                "name": tc.name,
-            })
-
-    return history
-
-
-def _format_tool_result_for_history(tc) -> str:
-    """Format a ToolCall with result into the same string format as observe_node."""
-    result = tc.result or {}
-    status = result.get("execution_status", tc.execution_status.value)
-    output = result.get("output", "")
-    error = result.get("error", {})
-    if isinstance(error, dict):
-        error_msg = error.get("message", "")
-    else:
-        error_msg = str(error) if error else ""
-
-    parts = [f"[{tc.name}] execution_status={status}"]
-    if output:
-        parts.append(f"output={output}")
-    if error_msg:
-        parts.append(f"error={error_msg}")
-
-    return "\n".join(parts)
+from src.services.history_projection import build_llm_history
 
 
 class ChatTurn:
@@ -148,7 +76,7 @@ class ChatTurn:
             return
 
         # 3. Build history from session messages + executed_tool_list
-        history: list[dict] = _build_history(session)
+        history: list[dict] = build_llm_history(session)
 
         # 4. Set title
         if not session.title and self._user_message:

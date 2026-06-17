@@ -245,6 +245,30 @@ class _MockLifecycle:
     async def update(self, chat_id, call_id, **kwargs):
         self.updates.append({"chat_id": chat_id, "call_id": call_id, **kwargs})
 
+    async def mark_approved(self, chat_id, call_id):
+        self.updates.append({
+            "chat_id": chat_id,
+            "call_id": call_id,
+            "approval_status": ApprovalStatus.APPROVED,
+            "execution_status": ExecutionStatus.RUNNING,
+        })
+
+    async def mark_rejected(self, chat_id, call_id):
+        self.updates.append({
+            "chat_id": chat_id,
+            "call_id": call_id,
+            "approval_status": ApprovalStatus.REJECTED,
+            "execution_status": ExecutionStatus.FAILED,
+        })
+
+    async def mark_expired(self, chat_id, call_id):
+        self.updates.append({
+            "chat_id": chat_id,
+            "call_id": call_id,
+            "approval_status": ApprovalStatus.EXPIRED,
+            "execution_status": ExecutionStatus.FAILED,
+        })
+
 
 _MOCK_PROFILER = MagicMock()
 
@@ -476,6 +500,33 @@ class TestApprovalHandlerResolve:
         update = lifecycle.updates[0]
         assert update["call_id"] == "call-2"
         assert update["approval_status"] == ApprovalStatus.REJECTED
+        assert update["execution_status"] == ExecutionStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_updated_on_expired(self):
+        """Lifecycle receives EXPIRED/FAILED status for expired tools."""
+        bridge = _MockBridge(decisions=["EXPIRED"])
+        lifecycle = _MockLifecycle()
+        handler = ApprovalHandler(
+            bridge=bridge,
+            audit_logger=_MockAuditLogger(),
+            lifecycle=lifecycle,
+        )
+        chat_id = "12345678-1234-5678-1234-567812345678"
+        scratch = _make_scratch(
+            pending_approval=[
+                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-3"},
+            ],
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        channel.close()
+
+        assert len(lifecycle.updates) == 1
+        update = lifecycle.updates[0]
+        assert update["call_id"] == "call-3"
+        assert update["approval_status"] == ApprovalStatus.EXPIRED
         assert update["execution_status"] == ExecutionStatus.FAILED
 
     @pytest.mark.asyncio

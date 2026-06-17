@@ -62,6 +62,8 @@ class ToolCallLifecycle:
                 timestamp=now.isoformat(),
                 type=MessageType.TOOL_RESULT,
                 content=tm.get("content", ""),
+                tool_call_id=tm.get("tool_call_id"),
+                tool_name=tm.get("name"),
             )
             await self._sm.add_message(chat_id, msg)
 
@@ -172,5 +174,49 @@ class ToolCallLifecycle:
             error=error,
             backup_ref=backup_ref,
             llm_trace_id=llm_trace_id,
+            result=result,
+        )
+
+    async def mark_approved(self, chat_id: UUID | None, call_id) -> None:
+        await self.update(
+            chat_id,
+            call_id,
+            approval_status=ApprovalStatus.APPROVED,
+            execution_status=ExecutionStatus.RUNNING,
+        )
+
+    async def mark_rejected(self, chat_id: UUID | None, call_id) -> None:
+        await self.update(
+            chat_id,
+            call_id,
+            approval_status=ApprovalStatus.REJECTED,
+            execution_status=ExecutionStatus.FAILED,
+        )
+
+    async def mark_expired(self, chat_id: UUID | None, call_id) -> None:
+        await self.update(
+            chat_id,
+            call_id,
+            approval_status=ApprovalStatus.EXPIRED,
+            execution_status=ExecutionStatus.FAILED,
+        )
+
+    async def mark_executed(
+        self,
+        chat_id: UUID | None,
+        call_id,
+        result: dict,
+    ) -> None:
+        exec_status_str = result.get("execution_status", "UNKNOWN")
+        try:
+            exec_status = ExecutionStatus(exec_status_str)
+        except ValueError:
+            exec_status = ExecutionStatus.FAILED
+        await self.update(
+            chat_id,
+            call_id,
+            execution_status=exec_status,
+            error=result.get("error"),
+            backup_ref=result.get("backup_ref"),
             result=result,
         )

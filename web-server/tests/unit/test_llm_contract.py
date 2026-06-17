@@ -39,7 +39,7 @@ def _capture_stream_payload(adapter, messages, tools=None, system=None):
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        async def fake_stream(method, url, json=None):
+        async def fake_stream(_method, _url, json=None):
             captured["payload"] = json
             resp = MagicMock()
             resp.status_code = 200

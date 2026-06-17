@@ -6,7 +6,6 @@ from src.agent.nodes._helpers import _execute_with_error_handling, _parse_args
 from src.agent.results import ExecuteOutput
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor
-from src.models.tool import ExecutionStatus
 from src.observability.debug_log import log as debug_log
 from src.observability import trace_points as tp
 from src.observability.timing import start_feature, complete_feature
@@ -60,12 +59,7 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
         if lifecycle is not None:
             call_id = tool_calls[i].get("call_id")
             cid = UUID(chat_id) if chat_id else None
-            exec_status_str = r.get("execution_status", "UNKNOWN")
-            try:
-                exec_status = ExecutionStatus(exec_status_str)
-            except ValueError:
-                exec_status = ExecutionStatus.FAILED
-            await lifecycle.update(cid, call_id, execution_status=exec_status, error=r.get("error"), backup_ref=r.get("backup_ref"), result=r)
+            await lifecycle.mark_executed(cid, call_id, r)
         if r.get("execution_status") == "FAILED":
             err = r.get("error", {})
             err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)

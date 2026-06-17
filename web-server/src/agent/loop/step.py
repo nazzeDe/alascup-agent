@@ -1,0 +1,126 @@
+"""Agent step execution: think -> review -> act -> observe."""
+
+import asyncio
+
+from src.agent.nodes.observe import route_after_review, route_after_think
+from src.agent.state import Transition
+from src.observability.debug_log import log as debug_log
+
+
+class AgentStep:
+    """Run one bounded think/review/act/observe pass against state."""
+
+    def __init__(self, *, think, review, act, observe, lifecycle=None):
+        self._think = think
+        self._review = review
+        self._act = act
+        self._observe = observe
+        self._lifecycle = lifecycle
+
+    async def run(self, state: dict, ctx, emitter, *, phase: str = "main") -> None:
+        state["_emitted_results"] = []
+        for _ in range(25):
+            think_out = await self._think(state, ctx)
+            if think_out.assistant_message:
+                state.setdefault("messages", []).append(think_out.assistant_message)
+            state["tool_calls"] = think_out.tool_calls
+            state["streaming_tool_results"] = think_out.pre_executed
+            state["stream_chunks"] = think_out.stream_chunks
+            state["llm_error"] = think_out.llm_error
+
+            await asyncio.sleep(0)
+
+            if think_out.stream_chunks:
+                emitter.emit_stream_chunks(think_out.stream_chunks)
+
+            if think_out.llm_error:
+                break
+
+            state["transition"] = Transition.DONE if think_out.is_done else None
+
+            route = route_after_think(state)
+            debug_log(
+                "DEBUG",
+                f"Route after think ({phase})",
+                chat_id=str(state.get("_chat_id", "")),
+                route=route,
+                tool_calls_count=len(state.get("tool_calls", [])),
+                streaming_results_count=len(state.get("streaming_tool_results", [])),
+                approved_count=len(state.get("approved_tool_calls", [])),
+                llm_error=bool(state.get("llm_error")),
+                is_done=think_out.is_done,
+            )
+            if route == "__end__":
+                state["transition"] = Transition.DONE
+                break
+
+            if route == "review":
+                review_out = await self._review(state, ctx)
+                state["approved_tool_calls"] = review_out.approved
+                state["rejected_tool_calls"] = review_out.rejected
+                state["pending_approval"] = review_out.pending
+                state["transition"] = review_out.transition
+                route = route_after_review(state)
+                debug_log(
+                    "DEBUG",
+                    f"Route after review ({phase})",
+                    chat_id=str(state.get("_chat_id", "")),
+                    route=route,
+                    approved_count=len(state.get("approved_tool_calls", [])),
+                    pending_count=len(state.get("pending_approval", [])),
+                    rejected_count=len(state.get("rejected_tool_calls", [])),
+                )
+                if route == "__end__":
+                    break
+
+            if route == "act":
+                approved = state.get("approved_tool_calls", [])
+                debug_log(
+                    "DEBUG",
+                    f"Enter act_node ({phase})",
+                    chat_id=str(state.get("_chat_id", "")),
+                    approved_count=len(approved),
+                    approved_ids=[tc.get("id", "?") for tc in approved],
+                )
+                emitter.emit_tools_started(approved)
+                exec_out = await self._act(state, ctx)
+                state["tool_results"] = exec_out.results
+                state["approved_tool_calls"] = []
+            elif route == "observe":
+                debug_log(
+                    "DEBUG",
+                    f"Skip act_node ({phase})",
+                    chat_id=str(state.get("_chat_id", "")),
+                    streaming_results_count=len(state.get("streaming_tool_results", [])),
+                )
+            elif route not in ("__end__",):
+                debug_log(
+                    "WARN",
+                    "Unexpected route after think",
+                    chat_id=str(state.get("_chat_id", "")),
+                    route=route,
+                )
+
+            obs_out = self._observe(state)
+            for tm in obs_out.tool_messages:
+                state.setdefault("messages", []).append(tm)
+            if self._lifecycle and obs_out.tool_messages:
+                await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
+            state["streaming_tool_results"] = []
+            state["tool_results"] = []
+            state["rejected_tool_calls"] = []
+            state["_emitted_results"].extend(obs_out.emitted_results)
+            state["transition"] = obs_out.transition
+
+
+def sync_scratch_from_state(scratch, state: dict) -> None:
+    scratch.tool_calls = state.get("tool_calls", [])
+    scratch.pending_approval = state.get("pending_approval", [])
+    scratch.approved_tool_calls = state.get("approved_tool_calls", [])
+    scratch.rejected_tool_calls = state.get("rejected_tool_calls", [])
+    scratch.tool_results = state.get("tool_results", [])
+    scratch.streaming_tool_results = state.get("streaming_tool_results", [])
+    scratch._emitted_results = state.get("_emitted_results", [])
+    scratch.stream_chunks = state.get("stream_chunks", [])
+    scratch.llm_error = state.get("llm_error")
+    scratch.transition = state.get("transition")
