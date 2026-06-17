@@ -5,13 +5,13 @@
 | 模块 | 单元测试 | 集成测试 |
 |------|---------|---------|
 | 数据模型（Pydantic） | 字段校验、序列化 | — |
-| 规则引擎 | rules.json 匹配 + classify_tool 分级判定 | — |
-| 审查层集成 | — | classify_tool → 规则匹配 → 审批 完整链路 |
+| 规则引擎 | rules.json 匹配 + `{tool}_classify` 伴生分类结果 | — |
+| 审查层集成 | — | `{tool}_classify` 伴生分类 → 规则匹配 → 审批 完整链路 |
 | ToolRequest 状态机 | PENDING→APPROVED/REJECTED/EXPIRED | — |
 | 审计日志 | 事件格式化 | 写入验证 |
 | Agent ReAct 循环 | 状态流转 | 完整 Agent 链路 |
 | OpenAPI 路由 | 请求/响应格式 | SSE 流式事件 |
-| MCP Client | 连接管理 mock | tool-server 通信（含 classify_tool）|
+| MCP Client | 连接管理 mock | tool-server 通信（含伴生分类工具）|
 | 可观测性 | 调试日志门控、剖析器开关、错误日志缓冲 | — |
 | LLM 错误恢复 | prompt_too_long / max_output_tokens / model_fallback 恢复路径 | — |
 
@@ -21,7 +21,7 @@
 
 | 前置 | get_cpu_info is_read_only=true，rules.json 未命中 |
 | 输入 | LLM 生成 get_cpu_info tool_call |
-| 预期 | 自动审批通过；审计事件 AUTO_APPROVED level=INFO |
+| 预期 | 静态只读工具在 think 阶段预执行；SSE 推送 tool_call/tool_result；tool_calls 记录 APPROVED + SUCCEEDED/FAILED |
 
 ### SC-002 黑名单拒绝
 
@@ -33,7 +33,7 @@
 
 | 前置 | delete_temp_files（is_read_only=false）在 whitelist |
 | 输入 | LLM 生成 delete_temp_files tool_call |
-| 预期 | 自动审批通过；审计 AUTO_APPROVED level=WARN |
+| 预期 | 自动审批通过；审计 TOOL_AUTO_APPROVED；执行时携带 approval_status=APPROVED |
 
 ### SC-004 高风险生成 ToolRequest
 
@@ -45,7 +45,7 @@
 
 | 前置 | ToolRequest PENDING |
 | 输入 | POST approval_status=APPROVED |
-| 预期 | 状态 APPROVED；审计 APPROVED level=WARN；调用 tool-server 携带 approval_status=APPROVED |
+| 预期 | ApprovalBridge 唤醒等待中的 AgentLoop；状态 APPROVED/RUNNING；调用 tool-server 携带 approval_status=APPROVED |
 
 ### SC-006 审批拒绝
 
@@ -56,20 +56,20 @@
 ### SC-007 审批超时
 
 | 前置 | ToolRequest PENDING |
-| 输入 | 等待超时（测试设 3s） |
+| 输入 | 等待超时（测试通过 mock/注入缩短等待） |
 | 预期 | 自动 EXPIRED；审计 EXPIRED；LLM 被告知超时 |
 
 ### SC-008 二次校验拦截未审批请求
 
 | 前置 | tool-server 正常 |
 | 输入 | web-server 发 approval_status=PENDING 的 tool_call |
-| 预期 | tool-server 拒绝，返回 SECURITY_VIOLATION；web-server 记录 CRITICAL |
+| 预期 | ToolExecutor 本地拒绝并返回 SECURITY_VIOLATION 语义错误；不向 tool-server 发起执行 |
 
 ### AG-001 ReAct 基本循环
 
 | 前置 | LLM mock，tool-server mock |
 | 输入 | 用户消息 "查看系统 CPU" |
-| 预期 | Thought → tool_call → tool_result → assistant message 完整流转 |
+| 预期 | session_init → reasoning/assistant → tool_call → tool_result → assistant_done → done 完整流转 |
 
 ### AG-003 并发 tool_call（全只读）
 
@@ -121,16 +121,16 @@
 | 输入 | user_message → tool_results → approval_pending → approval_granted → done |
 | 预期 | 每个 transition 写入 audit_events（event=LOOP_TRANSITION），按 chat_id 可追溯完整轨迹 |
 
-### AG-007 流式工具执行
+### AG-007 静态只读工具预执行
 
-| 前置 | LLM 流式输出中返回两个只读 tool_use block |
-| 预期 | 第一个 tool_use 解析完成后立即入队执行（与 LLM 后续输出并行），第二个同理；流结束后工具结果均已就绪 |
+| 前置 | LLM 单次响应中返回两个静态只读 tool_call |
+| 预期 | LLM 流结束后 think 节点并行预执行两个工具；SSE 推送对应 tool_call/tool_result |
 
-### CL-001 classify_tool 集成
+### CL-001 伴生分类工具集成
 
 | 前置 | tool-server mock 就绪 |
-| 输入 | web-server 审查层收到 tool_call，调用 classify_tool 查询分级 |
-| 预期 | tool-server 返回 is_read_only/is_rollbackable；web-server 使用分级结果做规则匹配 |
+| 输入 | web-server 审查层收到 mutable tool_call，调用 `{tool}_classify` |
+| 预期 | tool-server 返回 `{"safe": bool}`；web-server 使用该结果做规则匹配；分类失败 fail-closed |
 
 ### OB-001 调试日志门控
 
@@ -154,8 +154,8 @@
 
 ### API-002 会话生命周期
 
-| 输入 | POST 创建 → GET 列表 → GET 详情 → POST 追加 |
-| 预期 | 创建 201；列表含新会话；详情含 messages |
+| 输入 | POST /api/chat 创建 → GET 列表 → GET 详情 → POST /api/chat 追加 → DELETE |
+| 预期 | session_init 返回真实 chat_id；列表含新会话；详情含 messages；删除后列表不再返回 |
 
 ## Mock 配置
 
@@ -211,9 +211,9 @@ turn N: tool_call: restart_service → tool_result(FAILED, "permission denied")
 
 ### 时间加速
 
-审批超时测试通过依赖注入缩短：
+审批超时测试通过 mock 或依赖注入缩短等待，不依赖生产配置自动切换：
 
 ```python
-# 生产 300s，测试 3s
-TOOL_REQUEST_TIMEOUT_SECONDS = 3
+# 生产默认 300s；测试中注入更短 timeout 或 mock ApprovalBridge.gather_decisions()
+await bridge.gather_decisions(request_id, expected_count=1, timeout=0.01)
 ```

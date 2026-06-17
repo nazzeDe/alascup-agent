@@ -2,15 +2,35 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ChatSession",
   "type": "object",
-  "required": ["chat_id", "messages", "timestamp"],
+  "required": ["chat_id", "messages", "executed_tool_list", "timestamp"],
   "properties": {
-    "chat_id": {"type": "string"},
+    "chat_id": {"type": "string", "format": "uuid"},
+    "title": {"type": ["string", "null"]},
     "messages": {
       "type": "array",
-      "items": {"type": "object"}
+      "items": {
+        "type": "object",
+        "required": ["message_id", "chat_id", "timestamp", "type", "content"],
+        "properties": {
+          "message_id": {"type": "string", "format": "uuid"},
+          "chat_id": {"type": "string", "format": "uuid"},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "type": {"type": "string", "enum": ["user", "assistant", "tool_call", "tool_result", "system"]},
+          "content": {"type": "string"},
+          "tool_calls": {"type": ["array", "null"], "items": {"type": "object"}},
+          "tool_call_id": {"type": ["string", "null"]},
+          "tool_name": {"type": ["string", "null"]},
+          "reasoning_content": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
     },
-    "executed_tool_list": {"type": "array", "items": {"type": "string"}},
-    "timestamp": {"type": "string", "format": "date-time"}
+    "executed_tool_list": {
+      "type": "array",
+      "items": {"$ref": "tool_call_message.jsonschema"}
+    },
+    "timestamp": {"type": "string", "format": "date-time"},
+    "deleted": {"type": "boolean"}
   },
   "additionalProperties": false
 }

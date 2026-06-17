@@ -45,7 +45,7 @@ web-server 使用 PostgreSQL 作为唯一持久化存储：
 | `audit_events` | 审计日志（仅 INSERT/SELECT，不可变） |
 | `llm_traces` | LLM 调用追踪（token、延迟、响应） |
 
-完整 Schema 见 `doc/数据库设计.md`。
+完整 Schema 见 `docs/数据库设计.md`。
 
 ## 依赖注入
 
@@ -116,7 +116,7 @@ Agent 循环以 ReAct 模式（Think → Review → Act → Observe → 循环�
 | `permissions` | tool-server 容器拥有的 Linux capabilities |
 
 **memory**
-> （由外部调用 `PromptManager.set_memory()` 注入；未设置时使用默认占位文本。格式见 `doc/详细设计.md` 的 System Prompt 结构）
+> （由外部调用 `PromptManager.set_memory()` 注入；未设置时使用默认占位文本。格式见 `docs/详细设计.md` 的 System Prompt 结构）
 
 ### Transition 追踪
 
@@ -319,9 +319,8 @@ Prompt section 默认值由 `PromptManager` 内置，当前版本不支持 `prom
 | GET /api/metrics | 性能指标（工具数量、功能耗时平均值） |
 | POST /api/chat | 聊天入口（SSE 流式） |
 | GET /api/sessions | 列出全部会话 |
-| POST /api/sessions | 创建新会话（前端不再主动调用；session 由 POST /api/chat 首条消息自动创建） |
-| DELETE /api/sessions/{chat_id} | 删除会话 |
 | GET /api/sessions/{chat_id} | 获取会话详情 |
+| DELETE /api/sessions/{chat_id} | 删除会话 |
 | GET /api/tools | 列出可用 MCP 工具 |
 | POST /api/tools/refresh | 刷新工具列表（可选指定 server_name 参数单服务器刷新） |
 | POST /api/tool-requests/{request_id}/approval | 审批回调 |
