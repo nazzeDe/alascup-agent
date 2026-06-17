@@ -6,6 +6,16 @@ from src.models.message import Message, MessageType
 from src.models.session import ChatSession
 from src.models.tool import ApprovalStatus, ExecutionStatus, ToolCall
 
+_TOOL_CALL_UPDATE_COLUMNS = {
+    "approval_status": "approval_status",
+    "execution_status": "execution_status",
+    "error": "error",
+    "backup_ref": "backup_ref",
+    "llm_trace_id": "llm_trace_id",
+    "result": "result",
+    "executed_at": "executed_at",
+}
+
 
 class InMemorySessionManager:
     """内存会话管理，仅用于测试。"""
@@ -187,37 +197,37 @@ class PostgresSessionManager:
     ) -> None:
         """Update tool_call row after classification, approval, or execution."""
         now = datetime.now(timezone.utc)
-        sets: list[str] = []
+        values: list[tuple[str, object]] = []
         args: list = []
 
         if approval_status is not None:
-            sets.append(f"approval_status = ${len(args) + 1}")
-            args.append(approval_status.value)
+            values.append(("approval_status", approval_status.value))
         if execution_status is not None:
-            sets.append(f"execution_status = ${len(args) + 1}")
-            args.append(execution_status.value)
+            values.append(("execution_status", execution_status.value))
         if error is not None:
-            sets.append(f"error = ${len(args) + 1}")
-            args.append(json.dumps(error))
+            values.append(("error", json.dumps(error)))
         if backup_ref is not None:
-            sets.append(f"backup_ref = ${len(args) + 1}")
-            args.append(backup_ref)
+            values.append(("backup_ref", backup_ref))
         if llm_trace_id is not None:
-            sets.append(f"llm_trace_id = ${len(args) + 1}")
-            args.append(llm_trace_id)
+            values.append(("llm_trace_id", llm_trace_id))
         if result is not None:
-            sets.append(f"result = ${len(args) + 1}")
-            args.append(json.dumps(result))
+            values.append(("result", json.dumps(result)))
         if execution_status in (ExecutionStatus.SUCCEEDED, ExecutionStatus.FAILED):
-            sets.append(f"executed_at = ${len(args) + 1}")
-            args.append(now)
+            values.append(("executed_at", now))
 
-        if not sets:
+        if not values:
             return
 
+        sets: list[str] = []
+        for idx, (column_key, value) in enumerate(values, start=1):
+            column = _TOOL_CALL_UPDATE_COLUMNS[column_key]
+            sets.append(f"{column} = ${idx}")
+            args.append(value)
+
         args.append(tool_call_id)
+        query = f"UPDATE tool_calls SET {', '.join(sets)} WHERE id = ${len(args)}"  # nosec B608  # noqa: S608 - columns are fixed whitelist values.
         await self._db.execute(
-            f"UPDATE tool_calls SET {', '.join(sets)} WHERE id = ${len(args)}",
+            query,
             *args,
         )
         await self._db.execute(

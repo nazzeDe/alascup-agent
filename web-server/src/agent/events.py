@@ -154,8 +154,8 @@ class EventChannel:
         # Put sentinel to unblock any waiting receive
         try:
             self._queue.put_nowait(None)
-        except Exception:
-            pass
+        except asyncio.QueueFull:
+            logger.warning("EventChannel.close queue full id={}", self._instance_id)
 
     def is_closed(self) -> bool:
         return self._closed

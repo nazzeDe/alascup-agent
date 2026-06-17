@@ -21,12 +21,7 @@ class AgentStep:
         state["_emitted_results"] = []
         for _ in range(25):
             think_out = await self._think(state, ctx)
-            if think_out.assistant_message:
-                state.setdefault("messages", []).append(think_out.assistant_message)
-            state["tool_calls"] = think_out.tool_calls
-            state["streaming_tool_results"] = think_out.pre_executed
-            state["stream_chunks"] = think_out.stream_chunks
-            state["llm_error"] = think_out.llm_error
+            self._apply_think_output(state, think_out)
 
             await asyncio.sleep(0)
 
@@ -36,56 +31,18 @@ class AgentStep:
             if think_out.llm_error:
                 break
 
-            state["transition"] = Transition.DONE if think_out.is_done else None
-
-            route = route_after_think(state)
-            debug_log(
-                "DEBUG",
-                f"Route after think ({phase})",
-                chat_id=str(state.get("_chat_id", "")),
-                route=route,
-                tool_calls_count=len(state.get("tool_calls", [])),
-                streaming_results_count=len(state.get("streaming_tool_results", [])),
-                approved_count=len(state.get("approved_tool_calls", [])),
-                llm_error=bool(state.get("llm_error")),
-                is_done=think_out.is_done,
-            )
+            route = self._route_after_think(state, think_out, phase)
             if route == "__end__":
                 state["transition"] = Transition.DONE
                 break
 
             if route == "review":
-                review_out = await self._review(state, ctx)
-                state["approved_tool_calls"] = review_out.approved
-                state["rejected_tool_calls"] = review_out.rejected
-                state["pending_approval"] = review_out.pending
-                state["transition"] = review_out.transition
-                route = route_after_review(state)
-                debug_log(
-                    "DEBUG",
-                    f"Route after review ({phase})",
-                    chat_id=str(state.get("_chat_id", "")),
-                    route=route,
-                    approved_count=len(state.get("approved_tool_calls", [])),
-                    pending_count=len(state.get("pending_approval", [])),
-                    rejected_count=len(state.get("rejected_tool_calls", [])),
-                )
+                route = await self._run_review(state, ctx, phase)
                 if route == "__end__":
                     break
 
             if route == "act":
-                approved = state.get("approved_tool_calls", [])
-                debug_log(
-                    "DEBUG",
-                    f"Enter act_node ({phase})",
-                    chat_id=str(state.get("_chat_id", "")),
-                    approved_count=len(approved),
-                    approved_ids=[tc.get("id", "?") for tc in approved],
-                )
-                emitter.emit_tools_started(approved)
-                exec_out = await self._act(state, ctx)
-                state["tool_results"] = exec_out.results
-                state["approved_tool_calls"] = []
+                await self._run_act(state, ctx, emitter, phase)
             elif route == "observe":
                 debug_log(
                     "DEBUG",
@@ -101,16 +58,75 @@ class AgentStep:
                     route=route,
                 )
 
-            obs_out = self._observe(state)
-            for tm in obs_out.tool_messages:
-                state.setdefault("messages", []).append(tm)
-            if self._lifecycle and obs_out.tool_messages:
-                await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
-            state["streaming_tool_results"] = []
-            state["tool_results"] = []
-            state["rejected_tool_calls"] = []
-            state["_emitted_results"].extend(obs_out.emitted_results)
-            state["transition"] = obs_out.transition
+            await self._run_observe(state, ctx)
+
+    def _apply_think_output(self, state: dict, think_out) -> None:
+        if think_out.assistant_message:
+            state.setdefault("messages", []).append(think_out.assistant_message)
+        state["tool_calls"] = think_out.tool_calls
+        state["streaming_tool_results"] = think_out.pre_executed
+        state["stream_chunks"] = think_out.stream_chunks
+        state["llm_error"] = think_out.llm_error
+
+    def _route_after_think(self, state: dict, think_out, phase: str) -> str:
+        state["transition"] = Transition.DONE if think_out.is_done else None
+        route = route_after_think(state)
+        debug_log(
+            "DEBUG",
+            f"Route after think ({phase})",
+            chat_id=str(state.get("_chat_id", "")),
+            route=route,
+            tool_calls_count=len(state.get("tool_calls", [])),
+            streaming_results_count=len(state.get("streaming_tool_results", [])),
+            approved_count=len(state.get("approved_tool_calls", [])),
+            llm_error=bool(state.get("llm_error")),
+            is_done=think_out.is_done,
+        )
+        return route
+
+    async def _run_review(self, state: dict, ctx, phase: str) -> str:
+        review_out = await self._review(state, ctx)
+        state["approved_tool_calls"] = review_out.approved
+        state["rejected_tool_calls"] = review_out.rejected
+        state["pending_approval"] = review_out.pending
+        state["transition"] = review_out.transition
+        route = route_after_review(state)
+        debug_log(
+            "DEBUG",
+            f"Route after review ({phase})",
+            chat_id=str(state.get("_chat_id", "")),
+            route=route,
+            approved_count=len(state.get("approved_tool_calls", [])),
+            pending_count=len(state.get("pending_approval", [])),
+            rejected_count=len(state.get("rejected_tool_calls", [])),
+        )
+        return route
+
+    async def _run_act(self, state: dict, ctx, emitter, phase: str) -> None:
+        approved = state.get("approved_tool_calls", [])
+        debug_log(
+            "DEBUG",
+            f"Enter act_node ({phase})",
+            chat_id=str(state.get("_chat_id", "")),
+            approved_count=len(approved),
+            approved_ids=[tc.get("id", "?") for tc in approved],
+        )
+        emitter.emit_tools_started(approved)
+        exec_out = await self._act(state, ctx)
+        state["tool_results"] = exec_out.results
+        state["approved_tool_calls"] = []
+
+    async def _run_observe(self, state: dict, ctx) -> None:
+        obs_out = self._observe(state)
+        for tm in obs_out.tool_messages:
+            state.setdefault("messages", []).append(tm)
+        if self._lifecycle and obs_out.tool_messages:
+            await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
+        state["streaming_tool_results"] = []
+        state["tool_results"] = []
+        state["rejected_tool_calls"] = []
+        state["_emitted_results"].extend(obs_out.emitted_results)
+        state["transition"] = obs_out.transition
 
 
 def sync_scratch_from_state(scratch, state: dict) -> None:

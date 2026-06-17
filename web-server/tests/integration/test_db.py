@@ -60,8 +60,9 @@ class TestDatabaseAutoCreate:
             try:
                 # Terminate any remaining connections
                 await admin_conn.execute(
-                    f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                    f"WHERE datname = '{tmp_db_name}' AND pid != pg_backend_pid()"
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = $1 AND pid != pg_backend_pid()",
+                    tmp_db_name,
                 )
                 await admin_conn.execute(f"DROP DATABASE IF EXISTS {tmp_db_name}")
             finally:

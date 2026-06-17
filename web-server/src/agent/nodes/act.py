@@ -18,17 +18,7 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
         return ExecuteOutput()
 
     auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
-
-    calls = []
-    for tc in tool_calls:
-        fn = tc.get("function", {})
-        calls.append({
-            "tool_name": fn.get("name", ""),
-            "arguments": _parse_args(fn.get("arguments", "{}")),
-            "server_name": tc.get("server_name", ""),
-            "approval_status": tc.get("approval_status", "APPROVED"),
-            "request_id": tc.get("request_id", str(uuid4())),
-        })
+    calls = [_call_from_tool_call(tc) for tc in tool_calls]
 
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     feature = f"tool_exec:{chat_id}"
@@ -39,31 +29,58 @@ async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=Non
     results = await _execute_with_error_handling(executor, calls)
     complete_feature(feature)
     formatted = []
-    for i, r in enumerate(results):
-        tc_id = tool_calls[i].get("id", str(uuid4()))
-        formatted.append({
-            "tool_name": calls[i]["tool_name"],
-            "result": r,
-            "tool_call_id": tc_id,
-            "is_read_only": tool_calls[i].get("is_read_only", False),
-            "is_rollbackable": tool_calls[i].get("is_rollbackable", False),
-        })
-        await auditor.tool_event(
-            "TOOL_EXECUTED",
-            actor=AuditActor.TOOL,
-            tool_name=calls[i]["tool_name"],
-            request_id=_safe_uuid(calls[i].get("request_id", "")),
-            params=calls[i].get("arguments"),
-            execution_status=r.get("execution_status", "UNKNOWN"),
-        )
-        if lifecycle is not None:
-            call_id = tool_calls[i].get("call_id")
-            cid = UUID(chat_id) if chat_id else None
-            await lifecycle.mark_executed(cid, call_id, r)
-        if r.get("execution_status") == "FAILED":
-            err = r.get("error", {})
-            err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-            logger.warning("tool_failed tool={name} error={err}", name=calls[i]["tool_name"], err=err_msg)
+    for tc, call, result in zip(tool_calls, calls, results, strict=True):
+        formatted.append(_formatted_result(tc, call, result))
+        await _audit_execution(auditor, call, result)
+        await _record_execution_lifecycle(lifecycle, chat_id, tc, result)
+        _log_failed_execution(call, result)
     debug_log("DEBUG", tp.ACT_DONE, output_ids=[f["tool_call_id"] for f in formatted])
 
     return ExecuteOutput(results=formatted)
+
+
+def _call_from_tool_call(tc: dict) -> dict:
+    fn = tc.get("function", {})
+    return {
+        "tool_name": fn.get("name", ""),
+        "arguments": _parse_args(fn.get("arguments", "{}")),
+        "server_name": tc.get("server_name", ""),
+        "approval_status": tc.get("approval_status", "APPROVED"),
+        "request_id": tc.get("request_id", str(uuid4())),
+    }
+
+
+def _formatted_result(tc: dict, call: dict, result: dict) -> dict:
+    return {
+        "tool_name": call["tool_name"],
+        "result": result,
+        "tool_call_id": tc.get("id", str(uuid4())),
+        "is_read_only": tc.get("is_read_only", False),
+        "is_rollbackable": tc.get("is_rollbackable", False),
+    }
+
+
+async def _audit_execution(auditor: Auditor, call: dict, result: dict) -> None:
+    await auditor.tool_event(
+        "TOOL_EXECUTED",
+        actor=AuditActor.TOOL,
+        tool_name=call["tool_name"],
+        request_id=_safe_uuid(call.get("request_id", "")),
+        params=call.get("arguments"),
+        execution_status=result.get("execution_status", "UNKNOWN"),
+    )
+
+
+async def _record_execution_lifecycle(lifecycle, chat_id: str | None, tc: dict, result: dict) -> None:
+    if lifecycle is None:
+        return
+    cid = UUID(chat_id) if chat_id else None
+    await lifecycle.mark_executed(cid, tc.get("call_id"), result)
+
+
+def _log_failed_execution(call: dict, result: dict) -> None:
+    if result.get("execution_status") != "FAILED":
+        return
+    err = result.get("error", {})
+    err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+    logger.warning("tool_failed tool={name} error={err}", name=call["tool_name"], err=err_msg)

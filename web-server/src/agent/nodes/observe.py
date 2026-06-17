@@ -1,4 +1,5 @@
 from src.agent.results import ObserveOutput
+from src.agent.shared import error_message
 from src.agent.state import Transition
 
 
@@ -54,11 +55,7 @@ def _format_tool_result(r: dict) -> str:
     status = result.get("execution_status", "UNKNOWN")
     output = result.get("output", "")
     rejection_reason = result.get("rejection_reason", "")
-    error = result.get("error", {})
-    if isinstance(error, dict):
-        error_msg = error.get("message", "")
-    else:
-        error_msg = str(error) if error else ""
+    error_msg = error_message(result.get("error", {}))
 
     parts = [f"[{name}] execution_status={status}"]
     if output:

@@ -25,27 +25,33 @@ def classify_error(
     if status_code == 200:
         return "max_output_tokens" if stop_reason == "max_tokens" else None
 
-    if status_code == 0:
-        return "timeout"
-
     if status_code in (413, 400):
-        lower = response_text.lower()
-        if "max_tokens" in lower or "invalid" in lower:
-            return "unknown"
-        if any(kw in lower for kw in ("too large", "too long", "context", "token")):
-            return "prompt_too_long"
-        # All other 400/413 errors (message format, content filter, etc.)
-        # → treat as compressible to attempt recovery
-        return "prompt_too_long"
+        return _classify_bad_request(response_text)
 
     if mapped := _STATUS_ERROR_MAP.get(status_code):
         return mapped
 
+    return _classify_status_code(status_code)
+
+
+def _classify_bad_request(response_text: str) -> str:
+    lower = response_text.lower()
+    if "max_tokens" in lower or "invalid" in lower:
+        return "unknown"
+    if any(kw in lower for kw in ("too large", "too long", "context", "token")):
+        return "prompt_too_long"
+    # All other 400/413 errors (message format, content filter, etc.)
+    # → treat as compressible to attempt recovery
+    return "prompt_too_long"
+
+
+def _classify_status_code(status_code: int) -> str | None:
+    if status_code == 0:
+        return "timeout"
     if status_code >= 500:
         return "server_error"
     if status_code >= 400:
         return "unknown"
-
     return None
 
 

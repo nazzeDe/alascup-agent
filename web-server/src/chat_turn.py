@@ -13,6 +13,7 @@ from src.agent.events import (
     TurnFailed,
     TurnStarted,
 )
+from src.agent.shared import is_disconnected
 from src.models.message import Message, MessageType
 from src.observability.debug_log import log as debug_log
 from src.observability import trace_points as tp
@@ -48,113 +49,43 @@ class ChatTurn:
 
     async def _is_disconnected(self) -> bool:
         """Call the disconnect check, supporting both sync and async callables."""
-        if not self._disconnect_check:
-            return False
-        result = self._disconnect_check()
-        if asyncio.iscoroutine(result):
-            result = await result
-        return bool(result)
+        return await is_disconnected(self._disconnect_check)
 
     async def events(self) -> AsyncIterator[DomainEvent]:
         """Read domain events from the channel.
 
         First event is always TurnStarted.
         """
-        # 1. Session management
-        if self._chat_id is None:
-            session = await self._session_manager.create_session()
-        else:
-            session = await self._session_manager.get_session(UUID(self._chat_id))
-
+        session = await self._load_session()
         chat_id_uuid = session.id
 
-        # 2. Yield TurnStarted
         yield TurnStarted(chat_id=chat_id_uuid)
         if await self._is_disconnected():
             return
 
-        # 3. Build history from session messages + executed_tool_list
-        history: list[dict] = build_llm_history(session)
-
-        # 4. Set title
-        if not session.title and self._user_message:
-            title = self._user_message.split("\n")[0][:20]
-            await self._session_manager.set_title(chat_id_uuid, title)
-
-        # 5. Persist user message
-        user_msg = Message(
-            message_id=uuid4(),
-            chat_id=chat_id_uuid,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            type=MessageType.USER,
-            content=self._user_message,
-        )
-        await self._session_manager.add_message(chat_id_uuid, user_msg)
-
-        # 6. Build system prompt
-        system_prompt = self._prompt_manager.build_system_prompt()
-
-        # 7. Build available tools
-        available_tools = self._tool_executor.list_tools()
-
-        # 8. Create channel and orchestrator
+        state = await self._build_initial_state(session)
         channel = EventChannel()
         orchestrator = self._orchestrator_builder()
         orchestrator._chat_id = str(chat_id_uuid)
-
-        # Build initial state
-        messages = history + [{"role": "user", "content": self._user_message}]
-        state = {
-            "messages": messages,
-            "available_tools": available_tools,
-            "system": system_prompt,
-            "transition": None,
-            "llm_error": None,
-        }
-
-        # 9. Launch orchestrator as a task
         orch_task: asyncio.Task | None = asyncio.create_task(
             orchestrator.run(state, channel=channel)
         )
 
-        # 10. Read from channel, yield events to SSE stream.
-        # Assistant message persistence is handled by think_node → lifecycle.persist_assistant_message().
         try:
             while True:
-                # Check for task completion while waiting
-                event: DomainEvent | None = None
-                try:
-                    # Wait for next event with timeout to check disconnect
-                    event = await asyncio.wait_for(channel.receive(), timeout=0.1)
-                    if event is not None:
-                        debug_log("DEBUG", tp.CHAT_TURN_RECEIVED, type=type(event).__name__)
-                except asyncio.TimeoutError:
-                    if (orch_task.done() and channel.is_closed()) or await self._is_disconnected():
-                        # Drain any remaining events
-                        if not channel.is_closed():
-                            channel.close()
-                        # After close(), drain_nowait() deterministically
-                        # drains all queued events without timeout risk.
-                        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_START,
-                                  orch_done=orch_task.done(), channel_closed=channel.is_closed())
-                        drained_count = 0
-                        for ev in channel.drain_nowait():
-                            drained_count += 1
-                            yield ev
-                        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_DONE, drained_events=drained_count)
-                        break
+                event = await self._receive_event(channel, orch_task)
+                if event == "continue":
                     continue
-
-                if event is None:
-                    # Channel closed
+                if event == "drain":
+                    for drained in self._drain_channel(channel, orch_task):
+                        yield drained
                     break
 
-                # AssistantDelta events are yielded directly to SSE stream.
-                # Persistence is handled by think_node → lifecycle.persist_assistant_message()
+                if event is None:
+                    break
 
                 cid = getattr(event, 'call_id', 'N/A')
                 debug_log("DEBUG", tp.CHAT_TURN_YIELD, type=type(event).__name__, call_id=cid)
-
                 yield event
 
                 if await self._is_disconnected():
@@ -166,13 +97,67 @@ class ChatTurn:
             )
             yield TurnFailed(code="SSE_CRASH", message=str(exc))
         finally:
-            # Cancel orchestrator task
-            if orch_task and not orch_task.done():
-                orch_task.cancel()
-                try:
-                    await orch_task
-                except asyncio.CancelledError:
-                    pass
+            await self._cancel_task(orch_task)
             channel.close()
 
         # After disconnect, we don't yield done — SSEStream does that in finally
+
+    async def _load_session(self):
+        if self._chat_id is None:
+            return await self._session_manager.create_session()
+        return await self._session_manager.get_session(UUID(self._chat_id))
+
+    async def _build_initial_state(self, session) -> dict:
+        history: list[dict] = build_llm_history(session)
+        if not session.title and self._user_message:
+            title = self._user_message.split("\n")[0][:20]
+            await self._session_manager.set_title(session.id, title)
+
+        user_msg = Message(
+            message_id=uuid4(),
+            chat_id=session.id,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            type=MessageType.USER,
+            content=self._user_message,
+        )
+        await self._session_manager.add_message(session.id, user_msg)
+
+        return {
+            "messages": history + [{"role": "user", "content": self._user_message}],
+            "available_tools": self._tool_executor.list_tools(),
+            "system": self._prompt_manager.build_system_prompt(),
+            "transition": None,
+            "llm_error": None,
+        }
+
+    async def _receive_event(self, channel: EventChannel, orch_task: asyncio.Task):
+        try:
+            event = await asyncio.wait_for(channel.receive(), timeout=0.1)
+        except asyncio.TimeoutError:
+            return "drain" if await self._should_drain(channel, orch_task) else "continue"
+        if event is not None:
+            debug_log("DEBUG", tp.CHAT_TURN_RECEIVED, type=type(event).__name__)
+        return event
+
+    async def _should_drain(self, channel: EventChannel, orch_task: asyncio.Task) -> bool:
+        return (orch_task.done() and channel.is_closed()) or await self._is_disconnected()
+
+    def _drain_channel(self, channel: EventChannel, orch_task: asyncio.Task):
+        if not channel.is_closed():
+            channel.close()
+        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_START,
+                  orch_done=orch_task.done(), channel_closed=channel.is_closed())
+        drained_count = 0
+        for event in channel.drain_nowait():
+            drained_count += 1
+            yield event
+        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_DONE, drained_events=drained_count)
+
+    async def _cancel_task(self, orch_task: asyncio.Task | None) -> None:
+        if not orch_task or orch_task.done():
+            return
+        orch_task.cancel()
+        try:
+            await orch_task
+        except asyncio.CancelledError:
+            pass

@@ -16,7 +16,7 @@ class Transition(StrEnum):
     MAX_OUTPUT_TOKENS_RECOVERY = "max_output_tokens_recovery"
     MODEL_FALLBACK = "model_fallback"
     TURN_LIMIT_EXCEEDED = "turn_limit_exceeded"
-    TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"
+    TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"  # noqa: S105 - transition label, not secret.
     DONE = "done"
     ERROR_EXIT = "error_exit"
 

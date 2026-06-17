@@ -22,6 +22,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.observability.log_files import init_timestamped_log_file
+
 LOG_DIR = Path("logs/debug")
 RING_SIZE = 500
 
@@ -33,25 +35,7 @@ _filters: list[str] = [
 
 _ring: deque[str] = deque(maxlen=RING_SIZE)
 _lock = threading.Lock()
-_file_path: Path | None = None
-_initialized = False
-
-
-def _init_file() -> None:
-    global _file_path, _initialized
-    if _initialized:
-        return
-    _initialized = True
-    if not _enabled:
-        return
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    pid = os.getpid()
-    _file_path = LOG_DIR / f"{ts}-{pid}.log"
-    latest = LOG_DIR / "latest"
-    if latest.exists() or latest.is_symlink():
-        latest.unlink()
-    latest.symlink_to(_file_path.name)
+_file_path: Path | None = init_timestamped_log_file(_enabled, LOG_DIR)
 
 
 def _should_log(level: str) -> bool:
@@ -115,6 +99,3 @@ def traced(phase: str, **ctx):
     else:
         elapsed_ms = (time.monotonic() - t0) * 1000
         log("DEBUG", f"{phase}_exit", elapsed_ms=round(elapsed_ms, 2), **ctx)
-
-
-_init_file()

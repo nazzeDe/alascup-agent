@@ -137,43 +137,15 @@ class AgentLoop:
             loop_feature = f"loop:{state.get('_chat_id', '')}#{it}"
             start_feature(loop_feature)
 
-            # 0. Circuit breaker: max iterations
-            if self._breaker.check_iteration(it):
-                await self._handle_turn_limit_exceeded(auditor)
-                await channel.send(
-                    TurnFailed(
-                        code="TURN_LIMIT_EXCEEDED",
-                        message=f"Agent exceeded max iterations ({self._breaker.max_iterations}). Task may be too complex — try breaking it down.",
-                    )
-                )
-                _finalize_iteration(profiler, loop_feature)
-                return
-            self._breaker.inject_hint(state, it)
-
-            # 1. Context compression
-            await self._compress_context(state, auditor)
-
-            # 1.5 Circuit breaker: token ceiling
-            if await self._check_token_ceiling(state, auditor):
-                await channel.send(
-                    TurnFailed(
-                        code="TOKEN_BUDGET_EXCEEDED",
-                        message="Context too large even after compression. Start a new session or narrow the task scope.",
-                    )
-                )
+            if await self._preflight_iteration(state, auditor, channel, it):
                 _finalize_iteration(profiler, loop_feature)
                 return
 
-            # 2. Check if state already indicates termination (e.g., from test fixtures)
-            # This replaces graph.ainvoke() which would return state as-is.
-            if state.get("transition") == Transition.DONE:
-                scratch.transition = Transition.DONE
-                debug_log("DEBUG", tp.TRANSITION, reason="graph_done_terminal",
-                          pending_approval=0, tool_calls=0, approved=0)
-                action = await self._handle_transition(scratch, auditor)
-                if action not in ("continue",):
-                    _finalize_iteration(profiler, loop_feature)
-                    return
+            terminal_action = await self._handle_terminal_state(state, scratch, auditor)
+            if terminal_action == "return":
+                _finalize_iteration(profiler, loop_feature)
+                return
+            if terminal_action == "continue":
                 _finalize_iteration(profiler, loop_feature)
                 continue
 
@@ -200,157 +172,19 @@ class AgentLoop:
                 transition=get_transition(scratch),
             )
 
-            # 3-3.5. Approval loop — re-enter when there are pending tools
-            while True:
-                await self._approval.resolve(
-                    scratch, profiler=profiler, turn_ctx=ctx, emitter=emitter
-                )
-                # Copy scratch back to state dict
-                state["pending_approval"] = scratch.pending_approval
-                state["approved_tool_calls"] = scratch.approved_tool_calls
-                state["rejected_tool_calls"] = scratch.rejected_tool_calls
-                state["transition"] = scratch.transition
-                # Inject rejection messages so LLM sees rejected tools
-                _inject_rejection_messages(state, scratch.rejected_tool_calls)
-                transition = get_transition(scratch)
-                if transition not in (
-                    Transition.APPROVAL_GRANTED,
-                    Transition.APPROVAL_REJECTED,
-                ):
-                    break
+            await self._run_approval_loop(state, scratch, ctx, emitter, profiler, step)
 
-                # Emit ToolCallStarted for approved tools BEFORE execution
-                debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                          count=len(scratch.approved_tool_calls),
-                          ids=[tc.get("id") for tc in scratch.approved_tool_calls],
-                          phase="approval")
-                emitter.emit_tools_started(scratch.approved_tool_calls)
-
-                await step.run(state, ctx, emitter, phase="approval re-entry")
-
-                profiler.checkpoint("graph_resume")
-
-                sync_scratch_from_state(scratch, state)
-
-                debug_log(
-                    "DEBUG",
-                    tp.TRANSITION,
-                    reason="graph_resumed",
-                    pending_approval=bool(scratch.pending_approval),
-                    transition=get_transition(scratch),
-                )
-
-                # Emit ToolCallFinished for executed tools
-                result_sources = (
-                    scratch._emitted_results or scratch.streaming_tool_results
-                )
-                debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
-                          count=len(result_sources),
-                          ids=[r.get("tool_call_id") for r in result_sources],
-                          phase="approval")
-                emitter.emit_tools_finished(result_sources)
-                # Prevent re-emission
-                scratch._emitted_results = []
-                state["_emitted_results"] = []
-
-                if not scratch.pending_approval:
-                    debug_log("DEBUG", tp.LOOP_EXIT,
-                              reason="approval_empty",
-                              pending_approval=False)
-                    break
-
-            # 4. Error recovery
-            action, error_event = await self._recover_from_error(
-                state, channel, auditor
-            )
-            if error_event:
-                await channel.send(error_event)
-            if action == "continue":
-                debug_log("DEBUG", tp.ERROR_RECOVERY, outcome="continue")
+            error_action = await self._handle_error_recovery(state, channel, auditor)
+            if error_action in ("continue", "return"):
                 _finalize_iteration(profiler, loop_feature)
-                continue
-            if action == "return":
-                debug_log("DEBUG", tp.ERROR_RECOVERY, outcome="return")
-                _finalize_iteration(profiler, loop_feature)
+                if error_action == "continue":
+                    continue
                 return
 
-            # 5. Emit SSE events via EventEmitter
-            debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                      msg_count=len(state.get("messages", [])),
-                      phase="main_emit")
-            pending_ids = {
-                tc.get("id")
-                for tc in scratch.pending_approval
-                if tc.get("id")
-            }
-
-            # Emit ToolCallStarted for pending tool calls (excluding approval-pending)
-            tc_list = scratch.tool_calls
-            if tc_list:
-                tc_to_emit = [tc for tc in tc_list if tc.get("id") not in pending_ids]
-                debug_log(
-                    "DEBUG",
-                    "emit_tools_started",
-                    chat_id=str(state.get("_chat_id", "")),
-                    total=len(tc_list),
-                    skipped_pending=len(tc_list) - len(tc_to_emit),
-                    emitting=len(tc_to_emit),
-                    ids=[tc.get("id", "?") for tc in tc_to_emit],
-                )
-            else:
-                debug_log(
-                    "DEBUG",
-                    "emit_tools_started SKIPPED — no tool_calls in scratch",
-                    chat_id=str(state.get("_chat_id", "")),
-                )
-            emitter.emit_tools_started(scratch.tool_calls, skip_ids=pending_ids)
-
-            # Emit ToolCallFinished for act_node results
-            tr_list = scratch.tool_results
-            if tr_list:
-                debug_log(
-                    "DEBUG",
-                    "emit_tools_finished",
-                    chat_id=str(state.get("_chat_id", "")),
-                    count=len(tr_list),
-                    ids=[tr.get("tool_call_id", "?") for tr in tr_list],
-                )
-            else:
-                debug_log(
-                    "DEBUG",
-                    "emit_tools_finished SKIPPED — no tool_results in scratch",
-                    chat_id=str(state.get("_chat_id", "")),
-                )
-            emitter.emit_tools_finished(scratch.tool_results)
-
-            # Emit ToolCallStarted+Finished for streaming/pre-executed tools
-            stream_src = scratch._emitted_results or scratch.streaming_tool_results
-            if stream_src:
-                debug_log(
-                    "DEBUG",
-                    "emit_streaming_tool_results",
-                    chat_id=str(state.get("_chat_id", "")),
-                    count=len(stream_src),
-                    ids=[r.get("tool_call_id", "?") for r in stream_src],
-                    source="_emitted_results" if scratch._emitted_results else "streaming_tool_results",
-                )
-            else:
-                debug_log(
-                    "DEBUG",
-                    "emit_streaming_tool_results SKIPPED — no emitted_results or streaming_tool_results",
-                    chat_id=str(state.get("_chat_id", "")),
-                )
-            emitter.emit_streaming_tool_results(stream_src)
+            self._emit_iteration_events(state, scratch, emitter)
             profiler.checkpoint("emit_events")
 
-            # 6-7. Transition routing
-            action = await self._handle_transition(scratch, auditor)
-            profiler.checkpoint("handle_transition")
-            debug_log("DEBUG", tp.TRANSITION, route=action)
-            if action not in ("continue",):
-                debug_log("DEBUG", tp.LOOP_EXIT,
-                          reason="transition_stop",
-                          transition=get_transition(scratch))
+            if await self._should_stop_after_transition(scratch, auditor, profiler):
                 _finalize_iteration(profiler, loop_feature)
                 return
             debug_log(
@@ -359,6 +193,206 @@ class AgentLoop:
                 chat_id=str(state.get("_chat_id", "")),
             )
             _finalize_iteration(profiler, loop_feature)
+
+    async def _preflight_iteration(
+        self, state: dict, auditor: Auditor, channel: EventChannel, it: int
+    ) -> bool:
+        if self._breaker.check_iteration(it):
+            await self._handle_turn_limit_exceeded(auditor)
+            await channel.send(
+                TurnFailed(
+                    code="TURN_LIMIT_EXCEEDED",
+                    message=f"Agent exceeded max iterations ({self._breaker.max_iterations}). Task may be too complex — try breaking it down.",
+                )
+            )
+            return True
+        self._breaker.inject_hint(state, it)
+        await self._compress_context(state, auditor)
+        if await self._check_token_ceiling(state, auditor):
+            await channel.send(
+                TurnFailed(
+                    code="TOKEN_BUDGET_EXCEEDED",
+                    message="Context too large even after compression. Start a new session or narrow the task scope.",
+                )
+            )
+            return True
+        return False
+
+    async def _handle_terminal_state(
+        self, state: dict, scratch: TurnScratch, auditor: Auditor
+    ) -> str | None:
+        if state.get("transition") != Transition.DONE:
+            return None
+        scratch.transition = Transition.DONE
+        debug_log("DEBUG", tp.TRANSITION, reason="graph_done_terminal",
+                  pending_approval=0, tool_calls=0, approved=0)
+        return await self._handle_transition(scratch, auditor)
+
+    async def _run_approval_loop(
+        self,
+        state: dict,
+        scratch: TurnScratch,
+        ctx: TurnContext,
+        emitter: EventEmitter,
+        profiler: FeatureTimeTracker,
+        step: AgentStep,
+    ) -> None:
+        while True:
+            await self._approval.resolve(
+                scratch, profiler=profiler, turn_ctx=ctx, emitter=emitter
+            )
+            self._copy_scratch_to_state(state, scratch)
+            _inject_rejection_messages(state, scratch.rejected_tool_calls)
+            if get_transition(scratch) not in (
+                Transition.APPROVAL_GRANTED,
+                Transition.APPROVAL_REJECTED,
+            ):
+                break
+
+            self._emit_approval_started(scratch, emitter)
+            await step.run(state, ctx, emitter, phase="approval re-entry")
+            profiler.checkpoint("graph_resume")
+            sync_scratch_from_state(scratch, state)
+            self._log_graph_resumed(scratch)
+            self._emit_approval_finished(state, scratch, emitter)
+
+            if not scratch.pending_approval:
+                debug_log("DEBUG", tp.LOOP_EXIT,
+                          reason="approval_empty",
+                          pending_approval=False)
+                break
+
+    def _copy_scratch_to_state(self, state: dict, scratch: TurnScratch) -> None:
+        state["pending_approval"] = scratch.pending_approval
+        state["approved_tool_calls"] = scratch.approved_tool_calls
+        state["rejected_tool_calls"] = scratch.rejected_tool_calls
+        state["transition"] = scratch.transition
+
+    def _emit_approval_started(self, scratch: TurnScratch, emitter: EventEmitter) -> None:
+        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
+                  count=len(scratch.approved_tool_calls),
+                  ids=[tc.get("id") for tc in scratch.approved_tool_calls],
+                  phase="approval")
+        emitter.emit_tools_started(scratch.approved_tool_calls)
+
+    def _log_graph_resumed(self, scratch: TurnScratch) -> None:
+        debug_log(
+            "DEBUG",
+            tp.TRANSITION,
+            reason="graph_resumed",
+            pending_approval=bool(scratch.pending_approval),
+            transition=get_transition(scratch),
+        )
+
+    def _emit_approval_finished(
+        self, state: dict, scratch: TurnScratch, emitter: EventEmitter
+    ) -> None:
+        result_sources = scratch._emitted_results or scratch.streaming_tool_results
+        debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
+                  count=len(result_sources),
+                  ids=[r.get("tool_call_id") for r in result_sources],
+                  phase="approval")
+        emitter.emit_tools_finished(result_sources)
+        scratch._emitted_results = []
+        state["_emitted_results"] = []
+
+    async def _handle_error_recovery(
+        self, state: dict, channel: EventChannel, auditor: Auditor
+    ) -> str | None:
+        action, error_event = await self._recover_from_error(state, channel, auditor)
+        if error_event:
+            await channel.send(error_event)
+        if action in ("continue", "return"):
+            debug_log("DEBUG", tp.ERROR_RECOVERY, outcome=action)
+        return action
+
+    def _emit_iteration_events(
+        self, state: dict, scratch: TurnScratch, emitter: EventEmitter
+    ) -> None:
+        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
+                  msg_count=len(state.get("messages", [])),
+                  phase="main_emit")
+        pending_ids = {tc.get("id") for tc in scratch.pending_approval if tc.get("id")}
+        self._emit_started_events(state, scratch, emitter, pending_ids)
+        self._emit_finished_events(state, scratch, emitter)
+        self._emit_streaming_events(state, scratch, emitter)
+
+    def _emit_started_events(
+        self, state: dict, scratch: TurnScratch, emitter: EventEmitter, pending_ids: set
+    ) -> None:
+        tc_list = scratch.tool_calls
+        if tc_list:
+            tc_to_emit = [tc for tc in tc_list if tc.get("id") not in pending_ids]
+            debug_log(
+                "DEBUG",
+                "emit_tools_started",
+                chat_id=str(state.get("_chat_id", "")),
+                total=len(tc_list),
+                skipped_pending=len(tc_list) - len(tc_to_emit),
+                emitting=len(tc_to_emit),
+                ids=[tc.get("id", "?") for tc in tc_to_emit],
+            )
+        else:
+            debug_log(
+                "DEBUG",
+                "emit_tools_started SKIPPED — no tool_calls in scratch",
+                chat_id=str(state.get("_chat_id", "")),
+            )
+        emitter.emit_tools_started(scratch.tool_calls, skip_ids=pending_ids)
+
+    def _emit_finished_events(
+        self, state: dict, scratch: TurnScratch, emitter: EventEmitter
+    ) -> None:
+        tr_list = scratch.tool_results
+        if tr_list:
+            debug_log(
+                "DEBUG",
+                "emit_tools_finished",
+                chat_id=str(state.get("_chat_id", "")),
+                count=len(tr_list),
+                ids=[tr.get("tool_call_id", "?") for tr in tr_list],
+            )
+        else:
+            debug_log(
+                "DEBUG",
+                "emit_tools_finished SKIPPED — no tool_results in scratch",
+                chat_id=str(state.get("_chat_id", "")),
+            )
+        emitter.emit_tools_finished(scratch.tool_results)
+
+    def _emit_streaming_events(
+        self, state: dict, scratch: TurnScratch, emitter: EventEmitter
+    ) -> None:
+        stream_src = scratch._emitted_results or scratch.streaming_tool_results
+        if stream_src:
+            debug_log(
+                "DEBUG",
+                "emit_streaming_tool_results",
+                chat_id=str(state.get("_chat_id", "")),
+                count=len(stream_src),
+                ids=[r.get("tool_call_id", "?") for r in stream_src],
+                source="_emitted_results" if scratch._emitted_results else "streaming_tool_results",
+            )
+        else:
+            debug_log(
+                "DEBUG",
+                "emit_streaming_tool_results SKIPPED — no emitted_results or streaming_tool_results",
+                chat_id=str(state.get("_chat_id", "")),
+            )
+        emitter.emit_streaming_tool_results(stream_src)
+
+    async def _should_stop_after_transition(
+        self, scratch: TurnScratch, auditor: Auditor, profiler: FeatureTimeTracker
+    ) -> bool:
+        action = await self._handle_transition(scratch, auditor)
+        profiler.checkpoint("handle_transition")
+        debug_log("DEBUG", tp.TRANSITION, route=action)
+        if action in ("continue",):
+            return False
+        debug_log("DEBUG", tp.LOOP_EXIT,
+                  reason="transition_stop",
+                  transition=get_transition(scratch))
+        return True
 
     async def _compress_context(self, state: dict, auditor: Auditor) -> None:
         messages = state.get("messages", [])

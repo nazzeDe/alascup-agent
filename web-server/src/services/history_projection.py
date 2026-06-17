@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from src.agent.shared import error_message
 from src.models.message import MessageType
 from src.models.session import ChatSession
 
@@ -65,11 +66,7 @@ def _format_tool_result_for_history(tc) -> str:
     result = tc.result or {}
     status = result.get("execution_status", tc.execution_status.value)
     output = result.get("output", "")
-    error = result.get("error", {})
-    if isinstance(error, dict):
-        error_msg = error.get("message", "")
-    else:
-        error_msg = str(error) if error else ""
+    error_msg = error_message(result.get("error", {}))
 
     parts = [f"[{tc.name}] execution_status={status}"]
     if output:

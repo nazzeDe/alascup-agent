@@ -14,11 +14,12 @@ import os
 import time
 import tracemalloc
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
 from loguru import logger
+
+from src.observability.log_files import init_timestamped_log_file
 
 # ---------------------------------------------------------------------------
 # Profiling infrastructure (import-time config)
@@ -27,24 +28,7 @@ from loguru import logger
 PROFILE_DIR = Path("logs/profile")
 _enabled: bool = os.environ.get("ALASCUP_PROFILE", "").strip() == "1"
 
-_file_path: Path | None = None
-_initialized = False
-
-
-def _init_file() -> None:
-    global _file_path, _initialized
-    if _initialized:
-        return
-    _initialized = True
-    if not _enabled:
-        return
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    _file_path = PROFILE_DIR / f"{ts}-{os.getpid()}.log"
-    latest = PROFILE_DIR / "latest"
-    if latest.exists() or latest.is_symlink():
-        latest.unlink()
-    latest.symlink_to(_file_path.name)
+_file_path: Path | None = init_timestamped_log_file(_enabled, PROFILE_DIR)
 
 
 def profiler_enabled() -> bool:
@@ -269,9 +253,3 @@ def complete_feature(feature_name: str, status: str = "success") -> float:
 def summarize_feature_durations() -> dict[str, float]:
     return get_tracker().summarize_feature_durations()
 
-
-# ---------------------------------------------------------------------------
-# Import-time init
-# ---------------------------------------------------------------------------
-
-_init_file()

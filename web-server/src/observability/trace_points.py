@@ -46,7 +46,7 @@ EMIT_TOOL_FINISHED = "emit_tool_finished"
 
 # ── Infrastructure ────────────────────────────────────────────────
 CONTEXT_COMPRESS = "context_compress"
-TOKEN_CEILING = "token_ceiling"
+TOKEN_CEILING = "token_ceiling"  # noqa: S105 - trace point name, not secret.
 TURN_LIMIT = "turn_limit"
 ERROR_RECOVERY = "error_recovery"
 LLM_ERROR_DETAIL = "llm_error_detail"

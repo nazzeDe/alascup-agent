@@ -1,11 +1,10 @@
 """Approval handler — resolves pending tool approvals on the same SSE stream."""
 
-import json
-
 from uuid import uuid4
 
 from src.agent.loop.emitter import EventEmitter
 from src.agent.nodes._helpers import _parse_args
+from src.agent.shared import parse_json_object
 from src.agent.state import Transition, TurnScratch
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
@@ -104,80 +103,15 @@ class ApprovalHandler:
         all_approved: list[dict] = []
         all_rejected: list[dict] = []
         for tc in pending:
-            request_id = tc.get("request_id", str(uuid4()))
-
-            # Inline handle_pending_approval: register bridge + audit
-            if self._bridge:
-                self._bridge.create(request_id, chat_id)
-            await auditor.transition(Transition.APPROVAL_PENDING, actor=AuditActor.POLICY)
-
-            if emitter is not None:
-                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                params = fn.get("arguments", "{}")
-                if isinstance(params, str):
-                    try:
-                        params = json.loads(params)
-                    except (json.JSONDecodeError, TypeError):
-                        params = {}
-                emitter.emit_approval_required(
-                    chat_id=chat_id,
-                    request_id=request_id,
-                    tool_name=fn.get("name", ""),
-                    params=params,
-                    reason=fn.get("name", "") + " needs your approval to execute",
-                    call_id=tc.get("id", ""),
-                )
-            if profiler:
-                profiler.checkpoint("approval_events_emitted")
-
-            decisions = await self._bridge.gather_decisions(request_id, 1)
-            debug_log("INFO", "Approval decisions collected",
-                      request_id=request_id, count=len(decisions))
-
-            approved, rejected = _apply_decisions([tc], decisions)
+            approved, rejected = await self._resolve_one(tc, chat_id, auditor, emitter, profiler)
             all_approved.extend(approved)
             all_rejected.extend(rejected)
 
         await auditor.transition(Transition.APPROVAL_GRANTED, actor=AuditActor.POLICY)
 
-        # Audit approved tools
-        if self._audit:
-            for tc in all_approved:
-                fn = tc.get("function", {})
-                args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
-                await auditor.tool_event(
-                    "TOOL_APPROVED",
-                    actor=AuditActor.POLICY,
-                    tool_name=fn.get("name"),
-                    request_id=_safe_uuid(tc.get("request_id", "")),
-                    params=args,
-                    decision="APPROVED",
-                )
-        # Audit rejected tools
-        if self._audit:
-            for tc in all_rejected:
-                fn = tc.get("function", {})
-                args = _parse_args(fn.get("arguments", "{}")) if isinstance(fn.get("arguments"), str) else (fn.get("arguments") or {})
-                rejection_reason = tc.get("rejection_reason")
-                await auditor.tool_event(
-                    "TOOL_REJECTED",
-                    actor=AuditActor.POLICY,
-                    tool_name=fn.get("name"),
-                    request_id=_safe_uuid(tc.get("request_id", "")),
-                    params=args,
-                    level=AuditLevel.WARN,
-                    decision="REJECTED",
-                    error={"rejection_reason": rejection_reason} if rejection_reason else None,
-                )
-        if self._lifecycle is not None:
-            cid = turn_ctx.chat_id
-            for tc in all_approved:
-                await self._lifecycle.mark_approved(cid, tc.get("call_id"))
-            for tc in all_rejected:
-                if tc.get("approval_status") == "EXPIRED":
-                    await self._lifecycle.mark_expired(cid, tc.get("call_id"))
-                else:
-                    await self._lifecycle.mark_rejected(cid, tc.get("call_id"))
+        await self._audit_approved(auditor, all_approved)
+        await self._audit_rejected(auditor, all_rejected)
+        await self._update_lifecycle(turn_ctx.chat_id, all_approved, all_rejected)
         scratch.approved_tool_calls = scratch.approved_tool_calls + all_approved
         scratch.rejected_tool_calls = scratch.rejected_tool_calls + all_rejected
         scratch.pending_approval = []
@@ -185,3 +119,90 @@ class ApprovalHandler:
             Transition.APPROVAL_GRANTED if all_approved
             else Transition.APPROVAL_REJECTED
         )
+
+    async def _resolve_one(
+        self,
+        tc: dict,
+        chat_id: str,
+        auditor: Auditor,
+        emitter: EventEmitter | None,
+        profiler,
+    ) -> tuple[list[dict], list[dict]]:
+        request_id = tc.get("request_id", str(uuid4()))
+
+        if self._bridge:
+            self._bridge.create(request_id, chat_id)
+        await auditor.transition(Transition.APPROVAL_PENDING, actor=AuditActor.POLICY)
+
+        if emitter is not None:
+            self._emit_approval_required(emitter, tc, chat_id, request_id)
+        if profiler:
+            profiler.checkpoint("approval_events_emitted")
+
+        decisions = await self._bridge.gather_decisions(request_id, 1)
+        debug_log("INFO", "Approval decisions collected",
+                  request_id=request_id, count=len(decisions))
+        return _apply_decisions([tc], decisions)
+
+    def _emit_approval_required(
+        self, emitter: EventEmitter, tc: dict, chat_id: str, request_id: str
+    ) -> None:
+        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+        params = parse_json_object(fn.get("arguments", "{}"))
+        emitter.emit_approval_required(
+            chat_id=chat_id,
+            request_id=request_id,
+            tool_name=fn.get("name", ""),
+            params=params,
+            reason=fn.get("name", "") + " needs your approval to execute",
+            call_id=tc.get("id", ""),
+        )
+
+    async def _audit_approved(self, auditor: Auditor, approved: list[dict]) -> None:
+        if not self._audit:
+            return
+        for tc in approved:
+            fn = tc.get("function", {})
+            await auditor.tool_event(
+                "TOOL_APPROVED",
+                actor=AuditActor.POLICY,
+                tool_name=fn.get("name"),
+                request_id=_safe_uuid(tc.get("request_id", "")),
+                params=_approval_args(fn),
+                decision="APPROVED",
+            )
+
+    async def _audit_rejected(self, auditor: Auditor, rejected: list[dict]) -> None:
+        if not self._audit:
+            return
+        for tc in rejected:
+            fn = tc.get("function", {})
+            rejection_reason = tc.get("rejection_reason")
+            await auditor.tool_event(
+                "TOOL_REJECTED",
+                actor=AuditActor.POLICY,
+                tool_name=fn.get("name"),
+                request_id=_safe_uuid(tc.get("request_id", "")),
+                params=_approval_args(fn),
+                level=AuditLevel.WARN,
+                decision="REJECTED",
+                error={"rejection_reason": rejection_reason} if rejection_reason else None,
+            )
+
+    async def _update_lifecycle(
+        self, chat_id, approved: list[dict], rejected: list[dict]
+    ) -> None:
+        if self._lifecycle is None:
+            return
+        for tc in approved:
+            await self._lifecycle.mark_approved(chat_id, tc.get("call_id"))
+        for tc in rejected:
+            if tc.get("approval_status") == "EXPIRED":
+                await self._lifecycle.mark_expired(chat_id, tc.get("call_id"))
+            else:
+                await self._lifecycle.mark_rejected(chat_id, tc.get("call_id"))
+
+
+def _approval_args(fn: dict) -> dict:
+    args = fn.get("arguments", "{}")
+    return _parse_args(args) if isinstance(args, str) else (args or {})
