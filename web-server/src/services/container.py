@@ -69,62 +69,62 @@ def _services(request: Request) -> Services:
 # ── typed FastAPI dependencies ──────────────────────────────────────────
 
 
-def llm_adapter(request: Request) -> LLMAdapter:
+async def llm_adapter(request: Request) -> LLMAdapter:
     return _services(request).llm_adapter
 
 
-def session_manager(request: Request) -> SessionManager:
+async def session_manager(request: Request) -> SessionManager:
     return _services(request).session_manager
 
 
-def prompt_manager(request: Request) -> PromptManager:
+async def prompt_manager(request: Request) -> PromptManager:
     return _services(request).prompt_manager
 
 
-def context_manager(request: Request) -> ContextManager:
+async def context_manager(request: Request) -> ContextManager:
     return _services(request).context_manager
 
 
-def rule_engine(request: Request) -> RuleEngine:
+async def rule_engine(request: Request) -> RuleEngine:
     return _services(request).rule_engine
 
 
-def tool_executor(request: Request) -> ToolExecutor:
+async def tool_executor(request: Request) -> ToolExecutor:
     return _services(request).tool_executor
 
 
-def audit_logger(request: Request) -> AuditLogger:
+async def audit_logger(request: Request) -> AuditLogger:
     return _services(request).audit_logger
 
 
-def approval_bridge(request: Request) -> ApprovalBridge:
+async def approval_bridge(request: Request) -> ApprovalBridge:
     return _services(request).approval_bridge
 
 
-def error_recovery(request: Request) -> ErrorRecovery | None:
+async def error_recovery(request: Request) -> ErrorRecovery | None:
     return _services(request).error_recovery
 
 
-def agent_loop(request: Request):
+async def agent_loop(request: Request):
     return _services(request).agent_loop
 
 
 # Deprecated — kept for backward compat
-def graph(request: Request):
+async def graph(request: Request):
     return _services(request).graph
 
 
-def db(request: Request):
+async def db(request: Request):
     return _services(request).db
 
 
-def lifecycle(request: Request):
+async def lifecycle(request: Request):
     return _services(request).lifecycle
 
 
-def agent_max_iterations(request: Request) -> int:
+async def agent_max_iterations(request: Request) -> int:
     return _services(request).agent_max_iterations
 
 
-def agent_token_ceiling_ratio(request: Request) -> float:
+async def agent_token_ceiling_ratio(request: Request) -> float:
     return _services(request).agent_token_ceiling_ratio
