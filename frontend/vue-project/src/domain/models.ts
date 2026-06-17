@@ -74,6 +74,7 @@ export interface ApprovalEvent {
   reason: string;
   status: "pending" | "approved" | "rejected";
   message: string;
+  timestamp?: string;
 }
 
 export interface ErrorInfo {

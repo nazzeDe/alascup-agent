@@ -44,6 +44,7 @@ function makeApproval(overrides: Partial<ApprovalEvent> = {}): ApprovalEvent {
     reason: 'needs approval',
     status: 'pending',
     message: '',
+    timestamp: '2025-01-01T00:00:04.000Z',
     ...overrides,
   }
 }
@@ -126,7 +127,7 @@ describe('useTimeline', () => {
   })
 
   it('handles mixed content with correct types and order', () => {
-    // Message at t=3, tool call at t=1, reasoning at t=2, approval at "now"
+    // Message at t=3, tool call at t=1, reasoning at t=2, approval at t=4
     const msgs = ref<Message[]>([
       makeMsg({ message_id: 'm-late', timestamp: '2025-01-01T00:00:03Z', content: 'response' }),
     ])
@@ -140,7 +141,6 @@ describe('useTimeline', () => {
 
     const timeline = useTimeline(msgs, tcs, reasonings, approval)
 
-    // Approval uses Date.now() so it will sort last, after the t=3 message
     expect(timeline.value).toHaveLength(4)
     expect(timeline.value[0]!.type).toBe('tool_call')
     expect(timeline.value[1]!.type).toBe('reasoning')

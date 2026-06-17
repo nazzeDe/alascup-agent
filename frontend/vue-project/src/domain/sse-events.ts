@@ -60,15 +60,14 @@ export type SSEEventType =
   | "error"
   | "done";
 
-export interface SSECallbacks {
-  on_assistant?: (data: { delta: string }) => void;
-  on_assistant_done?: (data: {}) => void;
-  on_reasoning?: (data: { delta: string }) => void;
-  on_thinking_done?: (data: {}) => void;
-  on_tool_call?: (data: ToolCallEvent) => void;
-  on_tool_result?: (data: ToolResultEvent) => void;
-  on_tool_approval_required?: (data: ToolApprovalRequiredEvent) => void;
-  on_session_init?: (data: SessionInitEvent) => void;
-  on_error?: (data: ErrorEvent) => void;
-  on_done?: (data: {}) => void;
-}
+export type ChatStreamEvent =
+  | { type: "assistant"; data: AssistantEvent }
+  | { type: "assistant_done"; data: AssistantDoneEvent }
+  | { type: "reasoning"; data: ReasoningEvent }
+  | { type: "thinking_done"; data: ThinkingDoneEvent }
+  | { type: "tool_call"; data: ToolCallEvent }
+  | { type: "tool_result"; data: ToolResultEvent }
+  | { type: "tool_approval_required"; data: ToolApprovalRequiredEvent }
+  | { type: "session_init"; data: SessionInitEvent }
+  | { type: "error"; data: ErrorEvent }
+  | { type: "done"; data: {} };

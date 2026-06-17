@@ -3,20 +3,23 @@ package-lock.json
 
 # dependencies (bun install)
 node_modules
+vue-project/node_modules
 *.tar.gz
 
 # output
 out
+vue-project/dist-ssr
+vue-project/test-results
 *.tgz
 
 # code coverage
 coverage
+vue-project/coverage
 *.lcov
 
 # logs
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
 
 # dotenv environment variable files
 .env
@@ -29,6 +32,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .eslintcache
 .cache
 *.tsbuildinfo
+*.timestamp-*-*.mjs
 
 # IntelliJ based IDEs
 .idea

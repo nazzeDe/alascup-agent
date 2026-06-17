@@ -1,12 +1,11 @@
 import type { ChatSession } from '@/domain/models'
-import type { SSECallbacks } from '@/domain/sse-events'
+import type { ChatStreamEvent } from '@/domain/sse-events'
 
 export interface SseClient {
   connect(
     body: Record<string, unknown>,
-    callbacks: SSECallbacks,
+    onEvent: (event: ChatStreamEvent) => void,
     signal: AbortSignal,
-    onSessionId?: (chatId: string) => void
   ): Promise<void>
 }
 

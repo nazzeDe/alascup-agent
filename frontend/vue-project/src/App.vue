@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { provide, onMounted, shallowRef, type Ref } from 'vue'
+import { provide, onMounted } from 'vue'
 import { FetchEventSourceClient } from '@/infrastructure/sse-client'
 import { FetchSessionApi } from '@/infrastructure/session-api'
 import { FetchApprovalApi } from '@/infrastructure/approval-api'
 import { ToastStore } from '@/application/toast-store'
-import { ChatStore } from '@/application/chat-store'
 import { SessionListStore } from '@/application/session-list-store'
 import { SessionService } from '@/application/session-service'
+import { ActiveSessionWorkspace } from '@/application/active-session-workspace'
 import SessionList from '@/components/SessionList.vue'
 import ChatView from '@/components/ChatView.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
@@ -20,40 +20,29 @@ const approvalApi = new FetchApprovalApi()
 const toastStore = new ToastStore()
 const sessionListStore = new SessionListStore()
 const sessionService = new SessionService(sessionApi, approvalApi, sessionListStore)
-
-// Active session — swapped on session switch.
-// shallowRef prevents Vue from deeply unwrapping ChatStore's inner refs,
-// so storeRef.value.messages stays a Ref<Message[]> instead of Message[].
-const activeChatStore: Ref<ChatStore> = shallowRef(new ChatStore())
+const activeSessionWorkspace = new ActiveSessionWorkspace(sessionService, sessionListStore)
 
 provide('toastStore', toastStore)
 provide('sessionListStore', sessionListStore)
 provide('sessionService', sessionService)
-provide('chatStore', activeChatStore)
+provide('activeSessionWorkspace', activeSessionWorkspace)
+provide('chatStore', activeSessionWorkspace.activeChatStore)
 provide('sseClient', sseClient)
 
 onMounted(() => {
-  sessionService.loadSessions()
+  activeSessionWorkspace.loadSessions()
 })
 
 async function handleSelectSession(chatId: string) {
-  sessionListStore.setActive(chatId)
-  const newStore = new ChatStore()
-  newStore.chatId.value = chatId
-  await sessionService.loadHistory(chatId, newStore)
-  activeChatStore.value = newStore
+  await activeSessionWorkspace.select(chatId)
 }
 
 function handleCreateSession() {
-  sessionListStore.setActive(null)
-  activeChatStore.value = new ChatStore()
+  activeSessionWorkspace.createDraftSession()
 }
 
 async function handleDeleteSession(chatId: string) {
-  await sessionService.deleteSession(chatId)
-  if (sessionListStore.activeChatId.value === null) {
-    activeChatStore.value = new ChatStore()
-  }
+  await activeSessionWorkspace.delete(chatId)
 }
 </script>
 

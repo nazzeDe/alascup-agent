@@ -36,9 +36,9 @@ build_frontend() {
         echo "[ERROR] vue-project/package.json 不存在，无法构建前端"
         exit 1
     fi
-    echo "    运行 npm build..."
+    echo "    运行 bun build..."
     cd vue-project
-    npm install --prefer-offline && npm run build
+    bun install --frozen-lockfile && bun run build
     cd "$PROJECT_DIR"
     echo "    前端构建完成"
 }

@@ -18,11 +18,8 @@ let hljsInitialized = false
 async function ensureHighlightJs(): Promise<void> {
   if (hljsInitialized) return
   const hljs = (await import('highlight.js')).default
-  // @ts-expect-error — highlight.js types don't expose registerLanguage, but it exists
   const { default: bash } = await import('highlight.js/lib/languages/bash')
-  // @ts-expect-error
   const { default: json } = await import('highlight.js/lib/languages/json')
-  // @ts-expect-error
   const { default: python } = await import('highlight.js/lib/languages/python')
   hljs.registerLanguage('bash', bash)
   hljs.registerLanguage('json', json)

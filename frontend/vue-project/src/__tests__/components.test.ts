@@ -1,15 +1,28 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { nextTick, ref } from 'vue'
+import { nextTick } from 'vue'
 import { ToastStore } from '@/application/toast-store'
-import { ChatStore } from '@/application/chat-store'
 import { SessionListStore } from '@/application/session-list-store'
 import { SessionService } from '@/application/session-service'
+import { ActiveSessionWorkspace } from '@/application/active-session-workspace'
 import { FetchSessionApi } from '@/infrastructure/session-api'
 import { FetchApprovalApi } from '@/infrastructure/approval-api'
 
 const mockFetch = vi.fn()
 global.fetch = mockFetch as unknown as typeof fetch
+
+function makeSessionProviders(sessionListStore: SessionListStore) {
+  const sessionService = new SessionService(
+    new FetchSessionApi(), new FetchApprovalApi(), sessionListStore
+  )
+  const activeSessionWorkspace = new ActiveSessionWorkspace(sessionService, sessionListStore)
+  return {
+    sessionListStore,
+    chatStore: activeSessionWorkspace.activeChatStore,
+    sessionService,
+    activeSessionWorkspace,
+  }
+}
 
 describe('SessionList', () => {
   it('renders session items when injected with SessionListStore', async () => {
@@ -24,11 +37,7 @@ describe('SessionList', () => {
     const wrapper = mount(SessionList, {
       global: {
         provide: {
-          sessionListStore,
-          chatStore: ref(new ChatStore()),
-          sessionService: new SessionService(
-            new FetchSessionApi(), new FetchApprovalApi(), sessionListStore
-          ),
+          ...makeSessionProviders(sessionListStore),
         },
       },
     })
@@ -61,11 +70,7 @@ describe('SessionList loading states', () => {
     const wrapper = mount(SessionList, {
       global: {
         provide: {
-          sessionListStore,
-          chatStore: ref(new ChatStore()),
-          sessionService: new SessionService(
-            new FetchSessionApi(), new FetchApprovalApi(), sessionListStore
-          ),
+          ...makeSessionProviders(sessionListStore),
         },
       },
     })

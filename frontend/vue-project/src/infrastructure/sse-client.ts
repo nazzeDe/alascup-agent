@@ -1,13 +1,37 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import type { SseClient } from '@/application/ports'
-import type { SSECallbacks, ErrorEvent } from '@/domain/sse-events'
+import type { ChatStreamEvent, ErrorEvent, SSEEventType } from '@/domain/sse-events'
+
+const STREAM_EVENT_TYPES = new Set<SSEEventType>([
+  'assistant',
+  'assistant_done',
+  'reasoning',
+  'thinking_done',
+  'tool_call',
+  'tool_result',
+  'tool_approval_required',
+  'session_init',
+  'error',
+  'done',
+])
+
+function parseStreamEvent(event: string, data: string): ChatStreamEvent | null {
+  if (!STREAM_EVENT_TYPES.has(event as SSEEventType)) return null
+  try {
+    return {
+      type: event as ChatStreamEvent['type'],
+      data: JSON.parse(data),
+    } as ChatStreamEvent
+  } catch {
+    return null
+  }
+}
 
 export class FetchEventSourceClient implements SseClient {
   connect(
     body: Record<string, unknown>,
-    callbacks: SSECallbacks,
+    onEvent: (event: ChatStreamEvent) => void,
     signal: AbortSignal,
-    onSessionId?: (chatId: string) => void,
   ): Promise<void> {
     return fetchEventSource('/api/chat', {
       method: 'POST',
@@ -18,26 +42,17 @@ export class FetchEventSourceClient implements SseClient {
       body: JSON.stringify(body),
       signal,
       openWhenHidden: true,
-      onopen(response) {
-        const sid = response.headers.get('X-Session-ID')
-        if (sid) onSessionId?.(sid)
-      },
       onmessage(msg) {
         if (!msg.event || !msg.data) return
-        try {
-          const parsed = JSON.parse(msg.data)
-          const cb = callbacks[`on_${msg.event}` as keyof SSECallbacks]
-          cb?.(parsed as never)
-        } catch {
-          /* malformed event, skip */
-        }
+        const event = parseStreamEvent(msg.event, msg.data)
+        if (event) onEvent(event)
       },
       onerror(err) {
         const errorEvent: ErrorEvent = {
           code: 'NETWORK_ERROR',
           message: String(err),
         }
-        callbacks.on_error?.(errorEvent)
+        onEvent({ type: 'error', data: errorEvent })
         throw err
       },
     })

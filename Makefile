@@ -48,7 +48,7 @@ test-unit-tool:
 	cd tool-server && uv run pytest tests/ -m unit -v
 
 test-unit-fe:
-	cd frontend && bun test
+	cd frontend/vue-project && bun run test -- --run
 
 test-integration: test-integration-web test-integration-tool
 
@@ -73,11 +73,10 @@ test-e2e-live:
 test-coverage:
 	cd web-server && uv run pytest tests/ -m unit --cov=src --cov-report=term-missing
 	cd tool-server && uv run pytest tests/ -m unit --cov=src --cov-report=term-missing
-	cd frontend && bun test --coverage
+	cd frontend/vue-project && bun run test -- --coverage
 
 # === 清理 ===
 clean:
 	$(COMPOSE_TEST) down -v
 	rm -rf logs/
-
 

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { SSECallbacks } from '@/domain/sse-events'
 
 // Mock the fetchEventSource module before importing the SseClient
 vi.mock('@microsoft/fetch-event-source', () => ({
@@ -12,24 +11,13 @@ import { FetchEventSourceClient } from '@/infrastructure/sse-client'
 const mockFetchEventSource = fetchEventSource as ReturnType<typeof vi.fn>
 
 describe('infrastructure/sse-client — FetchEventSourceClient', () => {
-  let callbacks: SSECallbacks
+  let onEvent: ReturnType<typeof vi.fn>
   let client: FetchEventSourceClient
 
   beforeEach(() => {
     mockFetchEventSource.mockReset()
     client = new FetchEventSourceClient()
-    callbacks = {
-      on_assistant: vi.fn(),
-      on_assistant_done: vi.fn(),
-      on_reasoning: vi.fn(),
-      on_thinking_done: vi.fn(),
-      on_tool_call: vi.fn(),
-      on_tool_result: vi.fn(),
-      on_tool_approval_required: vi.fn(),
-      on_session_init: vi.fn(),
-      on_error: vi.fn(),
-      on_done: vi.fn(),
-    }
+    onEvent = vi.fn()
   })
 
   it('connect calls fetchEventSource with correct URL and options', async () => {
@@ -38,7 +26,7 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     const ctrl = new AbortController()
     await client.connect(
       { chat_id: 'c1', message: 'hello' },
-      callbacks,
+      onEvent,
       ctrl.signal,
     )
 
@@ -60,35 +48,15 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     expect(options.openWhenHidden).toBe(true)
   })
 
-  it('calls onSessionId when onopen delivers X-Session-ID header', async () => {
-    const fakeResponse = {
-      headers: {
-        get: vi.fn((name: string) => {
-          if (name === 'X-Session-ID') return 'session-abc'
-          return null
-        }),
-      },
-    }
-
-    mockFetchEventSource.mockImplementation(
-      (_url: string, options: any) => {
-        // Immediately invoke onopen
-        options.onopen(fakeResponse)
-        return Promise.resolve()
-      },
-    )
+  it('does not install a response-header session handler', async () => {
+    mockFetchEventSource.mockResolvedValue(undefined)
 
     const ctrl = new AbortController()
-    let capturedSessionId = ''
+    await client.connect({ message: 'hi' }, onEvent, ctrl.signal)
 
-    await client.connect(
-      { message: 'hi' },
-      callbacks,
-      ctrl.signal,
-      (id) => { capturedSessionId = id },
-    )
-
-    expect(capturedSessionId).toBe('session-abc')
+    const options = mockFetchEventSource.mock.calls[0]![1]
+    expect(options.onopen).toBeUndefined()
+    expect(onEvent).not.toHaveBeenCalled()
   })
 
   it('dispatches onmessage events to correct callbacks', async () => {
@@ -104,12 +72,12 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(callbacks.on_session_init).toHaveBeenCalledWith({ chat_id: 'c1' })
-    expect(callbacks.on_assistant).toHaveBeenCalledWith({ delta: 'Hello' })
-    expect(callbacks.on_assistant_done).toHaveBeenCalledWith({})
-    expect(callbacks.on_done).toHaveBeenCalledWith({})
+    expect(onEvent).toHaveBeenCalledWith({ type: 'session_init', data: { chat_id: 'c1' } })
+    expect(onEvent).toHaveBeenCalledWith({ type: 'assistant', data: { delta: 'Hello' } })
+    expect(onEvent).toHaveBeenCalledWith({ type: 'assistant_done', data: {} })
+    expect(onEvent).toHaveBeenCalledWith({ type: 'done', data: {} })
   })
 
   it('dispatches tool_call event', async () => {
@@ -130,14 +98,17 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(callbacks.on_tool_call).toHaveBeenCalledWith({
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'tool_call',
+      data: {
       call_id: 'tc-1',
       tool_name: 'read_file',
       params: { path: '/tmp/test' },
       is_read_only: true,
       server: 'filesystem',
+      },
     })
   })
 
@@ -158,13 +129,16 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(callbacks.on_tool_result).toHaveBeenCalledWith({
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'tool_result',
+      data: {
       call_id: 'tc-1',
       execution_status: 'SUCCEEDED',
       output: { bytes_written: 42 },
       execution_time_ms: 150,
+      },
     })
   })
 
@@ -187,15 +161,18 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(callbacks.on_tool_approval_required).toHaveBeenCalledWith({
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'tool_approval_required',
+      data: {
       chat_id: 'c1',
       request_id: 'req-1',
       tool_name: 'rm',
       params: { path: '/etc/hosts' },
       reason: 'needs approval',
       call_id: 'tc-1',
+      },
     })
   })
 
@@ -211,11 +188,14 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(callbacks.on_error).toHaveBeenCalledWith({
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'error',
+      data: {
       code: 'AGENT_CRASH',
       message: 'boom',
+      },
     })
   })
 
@@ -229,11 +209,11 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
     // Malformed event skipped, valid event processed
-    expect(callbacks.on_assistant).toHaveBeenCalledTimes(1)
-    expect(callbacks.on_assistant).toHaveBeenCalledWith({ delta: 'ok' })
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({ type: 'assistant', data: { delta: 'ok' } })
   })
 
   it('skips messages with missing event or data', async () => {
@@ -247,13 +227,14 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
     )
 
     const ctrl = new AbortController()
-    await client.connect({}, callbacks, ctrl.signal)
+    await client.connect({}, onEvent, ctrl.signal)
 
     // Only the valid event should trigger
-    expect(callbacks.on_done).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({ type: 'done', data: {} })
   })
 
-  it('onerror dispatches NETWORK_ERROR to on_error callback and rejects', async () => {
+  it('onerror dispatches NETWORK_ERROR event and rejects', async () => {
     mockFetchEventSource.mockImplementation(
       (_url: string, options: any) => {
         // fetchEventSource's onerror throws to abort the stream; the library
@@ -269,35 +250,32 @@ describe('infrastructure/sse-client — FetchEventSourceClient', () => {
 
     const ctrl = new AbortController()
     await expect(
-      client.connect({}, callbacks, ctrl.signal),
+      client.connect({}, onEvent, ctrl.signal),
     ).rejects.toThrow('Connection lost')
 
-    // The on_error callback should have been invoked before the throw
-    expect(callbacks.on_error).toHaveBeenCalledWith({
-      code: 'NETWORK_ERROR',
-      message: 'Error: Connection lost',
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'error',
+      data: {
+        code: 'NETWORK_ERROR',
+        message: 'Error: Connection lost',
+      },
     })
   })
 
-  it('onopen without X-Session-ID does not call onSessionId', async () => {
-    const fakeResponse = {
-      headers: {
-        get: vi.fn(() => null),
-      },
-    }
-
+  it('skips unknown stream event types', async () => {
     mockFetchEventSource.mockImplementation(
       (_url: string, options: any) => {
-        options.onopen(fakeResponse)
+        options.onmessage({ event: 'future_event', data: JSON.stringify({ ok: true }) })
+        options.onmessage({ event: 'done', data: JSON.stringify({}) })
         return Promise.resolve()
       },
     )
 
     const ctrl = new AbortController()
-    const onSessionId = vi.fn()
 
-    await client.connect({}, callbacks, ctrl.signal, onSessionId)
+    await client.connect({}, onEvent, ctrl.signal)
 
-    expect(onSessionId).not.toHaveBeenCalled()
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent).toHaveBeenCalledWith({ type: 'done', data: {} })
   })
 })
