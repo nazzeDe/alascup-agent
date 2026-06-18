@@ -24,7 +24,7 @@ class TestCountTokens:
         # Approximation: chars//4, floors to at least 1
         assert tokens == max(1, chars // 4)
 
-    def test_handles_langgraph_message_objects(self):
+    def test_handles_message_objects(self):
         from src.services.context_manager import ContextManager
         cm = ContextManager()
 

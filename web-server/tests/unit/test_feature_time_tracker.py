@@ -145,11 +145,11 @@ class TestProfilingEnabled:
         from src.observability.timing import FeatureTimeTracker
 
         tracker = FeatureTimeTracker(profile_enabled=True)
-        tracker.checkpoint("graph_ainvoke")
+        tracker.checkpoint("agent_step_run")
 
         report = tracker.report()
         assert report is not None
-        assert "graph_ainvoke" in report
+        assert "agent_step_run" in report
 
     def test_report_returns_none_when_disabled_and_no_features(self):
         from src.observability.timing import FeatureTimeTracker

@@ -70,8 +70,7 @@ class ApprovalHandler:
     """Parse tool approvals. One public method resolve().
 
     Pure side-effecting helper: emits ApprovalRequired events, waits on bridge,
-    applies decisions, returns. Does NOT call graph.ainvoke — the orchestrator's
-    outer loop is the sole graph driver.
+    applies decisions, and returns. AgentLoop owns the next execution step.
     """
 
     def __init__(self, *, bridge, audit_logger, lifecycle=None):
@@ -88,9 +87,8 @@ class ApprovalHandler:
         Side effects: modifies scratch.approved_tool_calls, scratch.rejected_tool_calls,
                       scratch.pending_approval, scratch.transition.
 
-        Does NOT call graph.ainvoke. The orchestrator re-enters the loop and calls
-        graph.ainvoke on the next iteration — think_node sees approved_tool_calls
-        and route_after_think sends it to act_node.
+        AgentLoop re-enters the step after approval; think_node sees
+        approved_tool_calls and route_after_think sends them to act_node.
         """
         if not scratch.pending_approval:
             return

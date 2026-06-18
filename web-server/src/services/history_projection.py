@@ -2,7 +2,6 @@
 
 from datetime import datetime
 
-from src.agent.shared import error_message
 from src.models.message import MessageType
 from src.models.session import ChatSession
 
@@ -15,24 +14,11 @@ def build_llm_history(session: ChatSession) -> list[dict]:
         ts = datetime.fromisoformat(m.timestamp)
         entries.append((ts, "msg", m))
 
-    # Compatibility fallback for sessions written before TOOL_RESULT messages
-    # carried tool_call_id/tool_name metadata.
-    has_tool_result_messages = any(m.type == MessageType.TOOL_RESULT for m in session.messages)
-    if not has_tool_result_messages:
-        for tc in session.executed_tool_list:
-            if tc.result is None:
-                continue
-            ts = datetime.fromisoformat(tc.timestamp)
-            entries.append((ts, "tool", tc))
-
     entries.sort(key=lambda e: e[0])
 
     history: list[dict] = []
     for _ts, kind, obj in entries:
-        if kind == "msg":
-            history.append(_message_to_history(obj))
-        else:
-            history.append(_tool_call_to_history(obj))
+        history.append(_message_to_history(obj))
 
     return history
 
@@ -51,27 +37,3 @@ def _message_to_history(m) -> dict:
     if m.reasoning_content:
         entry["reasoning_content"] = m.reasoning_content
     return entry
-
-
-def _tool_call_to_history(tc) -> dict:
-    return {
-        "role": "tool",
-        "content": _format_tool_result_for_history(tc),
-        "tool_call_id": tc.llm_tool_call_id or str(tc.call_id or ""),
-        "name": tc.name,
-    }
-
-
-def _format_tool_result_for_history(tc) -> str:
-    result = tc.result or {}
-    status = result.get("execution_status", tc.execution_status.value)
-    output = result.get("output", "")
-    error_msg = error_message(result.get("error", {}))
-
-    parts = [f"[{tc.name}] execution_status={status}"]
-    if output:
-        parts.append(f"output={output}")
-    if error_msg:
-        parts.append(f"error={error_msg}")
-
-    return "\n".join(parts)

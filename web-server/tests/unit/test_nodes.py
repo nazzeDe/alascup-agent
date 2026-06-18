@@ -463,13 +463,13 @@ class TestMessagesConversion:
         assert result[0]["name"] == "get_cpu"
 
     def test_maps_human_to_user(self):
-        """LangGraph human role → user for API."""
+        """Human-style role → user for API."""
         state = {"messages": [{"role": "human", "content": "hello"}]}
         result = _messages(state)
         assert result[0]["role"] == "user"
 
     def test_maps_ai_to_assistant(self):
-        """LangGraph ai role → assistant for API."""
+        """AI-style role → assistant for API."""
         state = {"messages": [{"role": "ai", "content": "hello there"}]}
         result = _messages(state)
         assert result[0]["role"] == "assistant"

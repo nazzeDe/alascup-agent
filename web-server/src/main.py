@@ -67,8 +67,6 @@ def _build_services(settings: Settings) -> Services:
         tool_executor=tool_executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        graph=None,
-        agent_loop=None,
         error_recovery=ErrorRecovery(),
         lifecycle=lifecycle,
         agent_max_iterations=settings.agent_max_iterations,

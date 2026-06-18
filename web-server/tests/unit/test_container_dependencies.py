@@ -14,8 +14,6 @@ def test_fastapi_dependency_providers_are_async():
         container.audit_logger,
         container.approval_bridge,
         container.error_recovery,
-        container.agent_loop,
-        container.graph,
         container.db,
         container.lifecycle,
         container.agent_max_iterations,

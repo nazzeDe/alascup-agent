@@ -1,4 +1,4 @@
-"""AgentLoop — pure while-loop ReAct executor. Replaces LangGraph StateGraph."""
+"""AgentLoop — pure while-loop ReAct executor."""
 
 from uuid import uuid4
 
@@ -37,9 +37,8 @@ def _log_profile(profiler: FeatureTimeTracker) -> None:
 class AgentLoop:
     """Execute ReAct loop: think -> review -> execute -> observe -> repeat.
 
-    Pure Python while-loop replacement for LangGraph StateGraph. Nodes receive
-    TurnContext directly instead of RunnableConfig. The orchestrator owns the
-    lifecycle (channel, audit, etc.) and delegates inner-loop logic here.
+    Nodes receive TurnContext directly. The orchestrator owns the lifecycle
+    (channel, audit, etc.) and delegates inner-loop logic here.
     """
 
     def __init__(
@@ -159,14 +158,14 @@ class AgentLoop:
             )
             await step.run(state, ctx, emitter, phase="main")
 
-            profiler.checkpoint("graph_ainvoke")
+            profiler.checkpoint("agent_step_run")
 
             sync_scratch_from_state(scratch, state)
 
             debug_log(
                 "DEBUG",
                 tp.TRANSITION,
-                reason="graph_done",
+                reason="agent_step_done",
                 pending_approval=bool(scratch.pending_approval),
                 tool_calls=len(scratch.tool_calls),
                 approved=len(scratch.approved_tool_calls),
@@ -225,7 +224,7 @@ class AgentLoop:
         if state.get("transition") != Transition.DONE:
             return None
         scratch.transition = Transition.DONE
-        debug_log("DEBUG", tp.TRANSITION, reason="graph_done_terminal",
+        debug_log("DEBUG", tp.TRANSITION, reason="agent_step_terminal",
                   pending_approval=0, tool_calls=0, approved=0)
         return await self._handle_transition(scratch, auditor)
 
@@ -252,9 +251,9 @@ class AgentLoop:
 
             self._emit_approval_started(scratch, emitter)
             await step.run(state, ctx, emitter, phase="approval re-entry")
-            profiler.checkpoint("graph_resume")
+            profiler.checkpoint("approval_reentry_run")
             sync_scratch_from_state(scratch, state)
-            self._log_graph_resumed(scratch)
+            self._log_approval_reentry(scratch)
             self._emit_approval_finished(state, scratch, emitter)
 
             if not scratch.pending_approval:
@@ -276,11 +275,11 @@ class AgentLoop:
                   phase="approval")
         emitter.emit_tools_started(scratch.approved_tool_calls)
 
-    def _log_graph_resumed(self, scratch: TurnScratch) -> None:
+    def _log_approval_reentry(self, scratch: TurnScratch) -> None:
         debug_log(
             "DEBUG",
             tp.TRANSITION,
-            reason="graph_resumed",
+            reason="approval_reentry_done",
             pending_approval=bool(scratch.pending_approval),
             transition=get_transition(scratch),
         )

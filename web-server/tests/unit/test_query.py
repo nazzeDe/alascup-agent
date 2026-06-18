@@ -185,7 +185,7 @@ async def _run_turn_and_collect(
 ) -> list[tuple]:
     """Helper: build ChatTurn + SSEStream, collect wire events, return [(event, data), ...].
 
-    If bridge and rule_engine are needed for approval tests, the graph is rebuilt.
+    If bridge and rule_engine are needed for approval tests, the orchestrator is rebuilt.
     """
     if session_mgr is None:
         session_mgr = MockSessionManager()
@@ -739,7 +739,7 @@ class TestHistoryReconstruction:
     """Slice 2: ChatTurn builds history from messages + executed_tool_list."""
 
     async def test_build_history_uses_persisted_tool_result_messages(self):
-        """Tool result messages are replayed from messages, not synthesized from tool_calls."""
+        """Tool result messages are replayed from persisted messages."""
         from datetime import datetime, timezone
         from uuid import uuid4
         from src.services.history_projection import build_llm_history
@@ -791,62 +791,6 @@ class TestHistoryReconstruction:
         assert tool_msg["name"] == "get_cpu"
         assert "CPU: 45%" in tool_msg["content"]
 
-    async def test_build_history_includes_tool_results(self):
-        """Tool results from executed_tool_list appear as role=tool in history."""
-        from datetime import datetime, timezone
-        from uuid import uuid4
-        from src.services.history_projection import build_llm_history
-        from src.models.session import ChatSession
-        from src.models.message import Message
-        from src.models.tool import (
-            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
-        )
-
-        chat_id = uuid4()
-        ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
-        ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
-        ts_tool = datetime(2026, 6, 13, 12, 0, 1, 500000, tzinfo=timezone.utc)
-
-        session = ChatSession(
-            id=chat_id,
-            messages=[
-                Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts1.isoformat(), type=MessageType.USER,
-                    content="check CPU",
-                ),
-                Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
-                    content="CPU is fine.",
-                ),
-            ],
-            executed_tool_list=[
-                ToolCall(
-                    name="get_cpu", server=ServerName.TOOL_SERVER,
-                    description="", is_read_only=True, is_rollbackable=False,
-                    params_schema={}, chat_id=chat_id,
-                    message_id=None, llm_tool_call_id="call_test_001",
-                    params={},
-                    approval_status=ApprovalStatus.APPROVED,
-                    execution_status=ExecutionStatus.SUCCEEDED,
-                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
-                    timestamp=ts_tool.isoformat(),
-                ),
-            ],
-            timestamp=ts3.isoformat(),
-        )
-
-        history = build_llm_history(session)
-
-        roles = [m["role"] for m in history]
-        assert roles == ["user", "tool", "assistant"], f"expected [user, tool, assistant], got {roles}"
-        tool_msg = history[1]
-        assert tool_msg["role"] == "tool"
-        assert tool_msg["name"] == "get_cpu"
-        assert "CPU: 45%" in tool_msg["content"]
-        assert tool_msg["tool_call_id"] is not None
-
     async def test_build_history_no_tool_results_empty_executed_list(self):
         """Session with no tool results — history unchanged."""
         from datetime import datetime, timezone
@@ -879,53 +823,6 @@ class TestHistoryReconstruction:
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant"]
 
-    async def test_build_history_tool_without_result_skipped(self):
-        """Tool calls without result field are not added to history."""
-        from datetime import datetime, timezone
-        from uuid import uuid4
-        from src.services.history_projection import build_llm_history
-        from src.models.session import ChatSession
-        from src.models.message import Message
-        from src.models.tool import (
-            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
-        )
-
-        chat_id = uuid4()
-        ts = datetime.now(timezone.utc)
-        session = ChatSession(
-            id=chat_id,
-            messages=[
-                Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts.isoformat(), type=MessageType.USER,
-                    content="list files",
-                ),
-                Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
-                    content="Here are the files.",
-                ),
-            ],
-            executed_tool_list=[
-                ToolCall(
-                    name="list_files", server=ServerName.TOOL_SERVER,
-                    description="", is_read_only=True, is_rollbackable=False,
-                    params_schema={}, chat_id=chat_id,
-                    message_id=None, llm_tool_call_id="call_test_002",
-                    params={},
-                    approval_status=ApprovalStatus.APPROVED,
-                    execution_status=ExecutionStatus.SUCCEEDED,
-                    result=None,  # No result stored
-                    timestamp=ts.isoformat(),
-                ),
-            ],
-            timestamp=ts.isoformat(),
-        )
-
-        history = build_llm_history(session)
-        roles = [m["role"] for m in history]
-        assert roles == ["user", "assistant"]  # tool without result not included
-
     async def test_build_history_assistant_with_tool_calls(self):
         """Assistant message with tool_calls → output dict includes tool_calls field."""
         from datetime import datetime, timezone
@@ -933,9 +830,6 @@ class TestHistoryReconstruction:
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message
-        from src.models.tool import (
-            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
-        )
 
         chat_id = uuid4()
         ts1 = datetime(2026, 6, 13, 12, 0, 0, tzinfo=timezone.utc)
@@ -965,23 +859,18 @@ class TestHistoryReconstruction:
                 ),
                 Message(
                     message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
+                    tool_call_id=tool_use_id,
+                    tool_name="get_cpu",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
                     timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
                     content="CPU is fine.",
                 ),
             ],
-            executed_tool_list=[
-                ToolCall(
-                    name="get_cpu", server=ServerName.TOOL_SERVER,
-                    description="", is_read_only=True, is_rollbackable=False,
-                    params_schema={}, chat_id=chat_id,
-                    message_id=None, llm_tool_call_id=tool_use_id,
-                    params={},
-                    approval_status=ApprovalStatus.APPROVED,
-                    execution_status=ExecutionStatus.SUCCEEDED,
-                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
-                    timestamp=ts_tool.isoformat(),
-                ),
-            ],
+            executed_tool_list=[],
             timestamp=ts3.isoformat(),
         )
 
@@ -1013,9 +902,6 @@ class TestHistoryReconstruction:
         from src.services.history_projection import build_llm_history
         from src.models.session import ChatSession
         from src.models.message import Message
-        from src.models.tool import (
-            ApprovalStatus, ExecutionStatus, ServerName, ToolCall,
-        )
 
         chat_id = uuid4()
         llm_tool_call_id = "call_abc123XYZ"
@@ -1046,24 +932,18 @@ class TestHistoryReconstruction:
                 ),
                 Message(
                     message_id=uuid4(), chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
+                    tool_call_id=llm_tool_call_id,
+                    tool_name="get_cpu",
+                ),
+                Message(
+                    message_id=uuid4(), chat_id=chat_id,
                     timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
                     content="CPU is fine.",
                 ),
             ],
-            executed_tool_list=[
-                ToolCall(
-                    name="get_cpu", server=ServerName.TOOL_SERVER,
-                    description="", is_read_only=True, is_rollbackable=False,
-                    params_schema={}, chat_id=chat_id,
-                    message_id=None,
-                    llm_tool_call_id=llm_tool_call_id,
-                    params={},
-                    approval_status=ApprovalStatus.APPROVED,
-                    execution_status=ExecutionStatus.SUCCEEDED,
-                    result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
-                    timestamp=ts_tool.isoformat(),
-                ),
-            ],
+            executed_tool_list=[],
             timestamp=ts3.isoformat(),
         )
 

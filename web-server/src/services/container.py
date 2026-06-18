@@ -12,7 +12,6 @@ from uuid import UUID
 
 from fastapi import Request
 
-from src.agent.loop.runner import AgentLoop
 from src.mcp_client.executor import ToolExecutor
 from src.models.message import Message
 from src.models.session import ChatSession
@@ -53,8 +52,6 @@ class Services:
     tool_executor: ToolExecutor
     audit_logger: AuditLogger
     approval_bridge: ApprovalBridge
-    graph: Any = None  # Deprecated, replaced by AgentLoop; kept for backward compat
-    agent_loop: AgentLoop | None = None
     error_recovery: ErrorRecovery | None = None
     agent_max_iterations: int = 30
     agent_token_ceiling_ratio: float = 0.95
@@ -103,15 +100,6 @@ async def approval_bridge(request: Request) -> ApprovalBridge:
 
 async def error_recovery(request: Request) -> ErrorRecovery | None:
     return _services(request).error_recovery
-
-
-async def agent_loop(request: Request):
-    return _services(request).agent_loop
-
-
-# Deprecated — kept for backward compat
-async def graph(request: Request):
-    return _services(request).graph
 
 
 async def db(request: Request):

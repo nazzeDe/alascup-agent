@@ -52,7 +52,6 @@ def app_with_bridge():
         tool_executor=_MockExecutor(),
         audit_logger=InMemoryAuditLogger(),
         approval_bridge=bridge,
-        graph=None,
     )
     return services, bridge
 

@@ -1,7 +1,7 @@
-"""Single message normalization — the only place that knows about LangChain objects.
+"""Single message normalization — the only place that knows about message objects.
 
-After graph.ainvoke() returns, messages may be a mix of plain dicts and
-LangChain message objects (AIMessage, HumanMessage, ToolMessage, ...).
+After history reconstruction or node execution, messages may be a mix of plain
+dicts and message objects (AIMessage, HumanMessage, ToolMessage, ...).
 normalize_message() converts any message to a plain dict with a stable
 schema. All downstream consumers can then assume messages are dicts.
 """
@@ -82,7 +82,7 @@ def _tc_normalize(tc) -> dict:
     # Already OpenAI format: {id, function: {name, arguments}, type: "function"}
     if tc.get("function") is not None:
         return {"id": tc.get("id", ""), "function": tc["function"], "type": "function"}
-    # LangChain dict format: {name, args, id, type: "tool_call"}
+    # Object-derived dict format: {name, args, id, type: "tool_call"}
     args = tc.get("args", {})
     if not isinstance(args, str):
         args = json.dumps(args)
@@ -91,4 +91,3 @@ def _tc_normalize(tc) -> dict:
         "type": "function",
         "function": {"name": tc.get("name", ""), "arguments": args},
     }
-

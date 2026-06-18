@@ -15,13 +15,12 @@ class LoopOrchestrator:
     """Wraps AgentLoop with lifecycle management (bridge, audit, emitter).
 
     The orchestrator owns the SSE connection lifecycle. AgentLoop owns the
-    inner think-review-act-observe cycle — pure Python while-loop, no LangGraph.
+    inner think-review-act-observe cycle.
     """
 
     def __init__(
         self,
         *,
-        graph=None,  # deprecated, kept for backward compat in tests; ignored
         context_manager,
         bridge,
         audit_logger,

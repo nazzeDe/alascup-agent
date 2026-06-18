@@ -221,22 +221,6 @@ class _MockBridge:
         return self._decisions
 
 
-class _MockGraph:
-    """Graph that returns a state with no pending approvals."""
-    def __init__(self, responses: list[dict] | None = None):
-        self._responses = responses or [{}]
-        self._calls: list[dict] = []
-
-    async def ainvoke(self, state, config=None):
-        self._calls.append(dict(state))
-        idx = min(len(self._calls) - 1, len(self._responses) - 1)
-        resp = dict(self._responses[idx])
-        # Preserve previous fields unless explicitly overridden
-        out = dict(state)
-        out.update(resp)
-        return out
-
-
 class _MockLifecycle:
     def __init__(self):
         self.updates: list[dict] = []
@@ -278,9 +262,8 @@ _MOCK_PROFILER = MagicMock()
 class TestApprovalHandlerResolve:
     """Tests for ApprovalHandler.resolve() — the sole public method.
 
-    resolve() is now a pure side-effecting helper: it emits ApprovalRequired events,
-    waits on the bridge, applies decisions, and returns. It does NOT call graph.ainvoke.
-    Multi-round approval is handled by the orchestrator's outer loop.
+    resolve() emits ApprovalRequired events, waits on the bridge, applies
+    decisions, and returns. Multi-round approval is handled by AgentLoop.
     """
 
     @pytest.mark.asyncio
@@ -322,7 +305,7 @@ class TestApprovalHandlerResolve:
 
     @pytest.mark.asyncio
     async def test_approved_tool_added_to_result(self):
-        """Approved tools populate scratch.approved_tool_calls. No graph call."""
+        """Approved tools populate scratch.approved_tool_calls."""
         bridge = _MockBridge(decisions=["APPROVED"])
         handler = ApprovalHandler(
             bridge=bridge,
@@ -371,8 +354,8 @@ class TestApprovalHandlerResolve:
     async def test_single_pass_approval_does_not_loop(self):
         """resolve() processes one round of pending_approval, then returns.
 
-        Multi-round approval is handled by the orchestrator's outer loop
-        re-invoking the graph, not by resolve() looping internally.
+        Multi-round approval is handled by AgentLoop re-entering the step,
+        not by resolve() looping internally.
         """
         bridge = _MockBridge(decisions=["APPROVED"])
         audit = _MockAuditLogger()
@@ -591,7 +574,7 @@ class TestApprovalHandlerResolve:
 
     @pytest.mark.asyncio
     async def test_no_channel_no_crash(self):
-        """Missing emitter does not crash resolve (backward compat for tests without emitter)."""
+        """Missing emitter does not crash resolve."""
         bridge = _MockBridge(decisions=["APPROVED"])
         handler = ApprovalHandler(
             bridge=bridge,

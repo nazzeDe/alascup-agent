@@ -93,7 +93,6 @@ def _build_test_services():
         tool_executor=executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),
-        graph=None,
         error_recovery=None,
         lifecycle=ToolCallLifecycle(session_mgr),
     )

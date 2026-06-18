@@ -1,7 +1,7 @@
 """Circuit breaker — hard limits to prevent token explosion and infinite loops.
 
-Extracted from LoopOrchestrator. Industry pattern: LangGraph recursion_limit=25,
-Claude Code max_turns. No interactive pause — just stop and report.
+Extracted from LoopOrchestrator. Uses the same hard-limit pattern as agent
+systems with max-turn controls. No interactive pause — just stop and report.
 """
 
 
