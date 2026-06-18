@@ -4,12 +4,12 @@ Replaces 4 scattered _persist_* functions across think/review/act/orchestrator
 with 2 lifecycle methods: register() for INSERT, update() for UPDATE.
 """
 
-import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from src.models.message import Message, MessageType
 from src.models.tool import ApprovalStatus, ExecutionStatus, ServerName, ToolCall
+from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
 
 
 class ToolCallLifecycle:
@@ -46,7 +46,7 @@ class ToolCallLifecycle:
     async def persist_tool_result(
         self,
         chat_id: UUID | None,
-        tool_messages: list[dict],
+        tool_messages: list[AgentMessage],
     ) -> None:
         """Persist role=tool messages to messages table so history
         reconstruction can read them directly without synthesizing from
@@ -61,17 +61,17 @@ class ToolCallLifecycle:
                 chat_id=chat_id,
                 timestamp=now.isoformat(),
                 type=MessageType.TOOL_RESULT,
-                content=tm.get("content", ""),
-                tool_call_id=tm.get("tool_call_id"),
-                tool_name=tm.get("name"),
+                content=tm.content,
+                tool_call_id=tm.tool_call_id,
+                tool_name=tm.name,
             )
             await self._sm.add_message(chat_id, msg)
 
     async def register(
         self,
         chat_id: UUID | None,
-        pending: list[dict],
-        pre_executed: list[dict],
+        pending: list[AgentToolCall],
+        pre_executed: list[AgentToolResult],
         llm_trace_id: UUID | None,
     ) -> None:
         """INSERT newly discovered tool calls. Sets call_id on each dict IN-PLACE.
@@ -85,22 +85,17 @@ class ToolCallLifecycle:
         now = datetime.now(timezone.utc)
 
         for tc in pending:
-            fn = tc.get("function", {})
-            name = fn.get("name", "")
-            args_str = fn.get("arguments", "{}")
-            try:
-                params = json.loads(args_str) if isinstance(args_str, str) else args_str
-            except json.JSONDecodeError:
-                params = {}
-            tc_id_str = tc.get("id", "")
-            server_name = tc.get("server_name", "tool-server")
+            name = tc.function.name
+            params = tc.function.arguments
+            tc_id_str = tc.id
+            server_name = tc.server_name or "tool-server"
 
             call = ToolCall(
                 name=name,
                 server=ServerName(server_name) if server_name == "tool-server" else ServerName.TOOL_SERVER,
                 description="",
-                is_read_only=bool(tc.get("is_read_only", False)),
-                is_rollbackable=bool(tc.get("is_rollbackable", False)),
+                is_read_only=bool(tc.is_read_only),
+                is_rollbackable=tc.is_rollbackable,
                 params_schema={},
                 chat_id=chat_id,
                 message_id=None,
@@ -113,15 +108,15 @@ class ToolCallLifecycle:
                 timestamp=now.isoformat(),
             )
             call_id = await self._sm.add_tool_call(chat_id, call)
-            tc["call_id"] = call_id
+            tc.call_id = call_id
 
         for pe in pre_executed:
-            tc_id_str = pe.get("tool_call_id", "")
-            result = pe.get("result", {})
+            tc_id_str = pe.tool_call_id
+            result = pe.result
             exec_status_str = result.get("execution_status", "SUCCEEDED")
 
             call = ToolCall(
-                name=pe.get("tool_name", ""),
+                name=pe.tool_name,
                 server=ServerName.TOOL_SERVER,
                 description="",
                 is_read_only=True,
@@ -140,7 +135,7 @@ class ToolCallLifecycle:
                 timestamp=now.isoformat(),
             )
             pe_call_id = await self._sm.add_tool_call(chat_id, call)
-            pe["call_id"] = pe_call_id
+            pe.call_id = pe_call_id
             # Pre-executed tools are already done; mark executed_at and store result.
             await self._sm.update_tool_call(
                 pe_call_id, chat_id,

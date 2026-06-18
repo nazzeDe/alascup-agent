@@ -9,8 +9,22 @@ from src.agent.nodes import (
     _messages,
     _merge_tool_block,
 )
+from src.agent.domain import AgentToolCall, AgentToolResult, ToolFunction
 from src.agent.state import AgentState, Transition
 from src.agent.turn_context import TurnContext
+
+
+def _call(name: str, arguments: dict | None = None, **kwargs) -> AgentToolCall:
+    return AgentToolCall(function=ToolFunction(name=name, arguments=arguments or {}), **kwargs)
+
+
+def _result(tool_name: str, result: dict, tool_call_id: str = "", **kwargs) -> AgentToolResult:
+    return AgentToolResult(
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        result=result,
+        **kwargs,
+    )
 
 
 class MockLLM:
@@ -39,8 +53,8 @@ class TestThinkNode:
 
         assert result.is_done is True
         assert result.assistant_message is not None
-        assert result.assistant_message["role"] == "assistant"
-        assert "CPU" in result.assistant_message["content"]
+        assert result.assistant_message.role == "assistant"
+        assert "CPU" in result.assistant_message.content
 
     async def test_text_accumulates_multiple_deltas(self):
         """多个 text delta 拼接成完整 assistant 消息。"""
@@ -51,7 +65,7 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result.assistant_message["content"] == "Hello World"
+        assert result.assistant_message.content == "Hello World"
         assert result.is_done is True
 
     async def test_tool_call_only_no_text(self):
@@ -66,7 +80,7 @@ class TestThinkNode:
 
         assert result.is_done is False  # 不设 transition——由后续节点决定
         assert len(result.tool_calls) == 1
-        assert result.tool_calls[0]["function"]["name"] == "get_cpu"
+        assert result.tool_calls[0].function.name == "get_cpu"
 
     async def test_text_and_tool_calls_combined(self):
         """LLM 先输出文本，再调工具 → 文本和 tool_calls 同时返回。"""
@@ -79,8 +93,8 @@ class TestThinkNode:
         ])
         result = await think_node(_state(), llm=llm)
 
-        assert result.assistant_message["role"] == "assistant"
-        assert result.assistant_message["content"] == "Let me check."
+        assert result.assistant_message.role == "assistant"
+        assert result.assistant_message.content == "Let me check."
         assert len(result.tool_calls) == 1
         assert result.is_done is False  # 有 tool_call，不应设 DONE
 
@@ -98,8 +112,8 @@ class TestThinkNode:
         result = await think_node(_state(), llm=llm)
 
         assert len(result.tool_calls) == 2
-        assert result.tool_calls[0]["function"]["name"] == "get_cpu"
-        assert result.tool_calls[1]["function"]["name"] == "get_memory"
+        assert result.tool_calls[0].function.name == "get_cpu"
+        assert result.tool_calls[1].function.name == "get_memory"
 
     async def test_streaming_tool_use_chunks_are_merged(self):
         """tool_call 可能分多个 chunk 到达（name 先到，arguments 后到）。"""
@@ -115,9 +129,9 @@ class TestThinkNode:
         result = await think_node(_state(), llm=llm)
 
         assert len(result.tool_calls) == 1
-        fn = result.tool_calls[0]["function"]
-        assert fn["name"] == "bash"
-        assert "ls" in fn["arguments"]
+        fn = result.tool_calls[0].function
+        assert fn.name == "bash"
+        assert fn.arguments == {"cmd": "ls"}
 
 
 class MockExecutor:
@@ -139,9 +153,18 @@ def _state_with_tools(approved=None):
     return AgentState(
         messages=[{"role": "user", "content": "check"}],
         available_tools=[],
-        approved_tool_calls=approved or [],
+        approved_tool_calls=[_call(**_call_kwargs(c)) for c in (approved or [])],
         transition=None,
     )
+
+
+def _call_kwargs(raw: dict) -> dict:
+    fn = raw["function"]
+    return {
+        "name": fn["name"],
+        "arguments": json.loads(fn.get("arguments", "{}")),
+        **{k: v for k, v in raw.items() if k != "function"},
+    }
 
 
 class TestActNode:
@@ -202,8 +225,8 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        assert result.results[0]["result"]["execution_status"] == "FAILED"
-        assert "permission denied" in str(result.results[0]["result"])
+        assert result.results[0].result["execution_status"] == "FAILED"
+        assert "permission denied" in str(result.results[0].result)
 
     async def test_tool_results_include_tool_name(self):
         executor = MockExecutor()
@@ -212,7 +235,7 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        assert result.results[0]["tool_name"] == "get_cpu"
+        assert result.results[0].tool_name == "get_cpu"
 
     async def test_no_fake_execution_time_per_tool(self):
         """act_node does not fabricate per-tool execution_time_ms for parallel batch."""
@@ -222,7 +245,7 @@ class TestActNode:
         ])
         result = await act_node(state, executor=executor)
 
-        et = result.results[0]["result"].get("execution_time_ms")
+        et = result.results[0].result.get("execution_time_ms")
         assert et is None
 
     async def test_passes_result_to_lifecycle_mark_executed(self):
@@ -266,7 +289,7 @@ class TestStreamingThink:
         result = await think_node(state, llm=llm, executor=executor)
 
         assert len(result.pre_executed) == 1
-        assert result.pre_executed[0]["tool_name"] == "get_cpu"
+        assert result.pre_executed[0].tool_name == "get_cpu"
         assert result.tool_calls == []
 
     async def test_non_readonly_stays_in_tool_calls(self):
@@ -286,7 +309,7 @@ class TestStreamingThink:
 
         assert result.pre_executed == []
         assert len(result.tool_calls) == 1
-        assert result.tool_calls[0]["function"]["name"] == "restart_service"
+        assert result.tool_calls[0].function.name == "restart_service"
 
     async def test_mixed_readonly_and_highrisk(self):
         """Mixed: readonly pre-executed, write stays in tool_calls."""
@@ -308,9 +331,9 @@ class TestStreamingThink:
         result = await think_node(state, llm=llm, executor=executor)
 
         assert len(result.pre_executed) == 1
-        assert result.pre_executed[0]["tool_name"] == "get_cpu"
+        assert result.pre_executed[0].tool_name == "get_cpu"
         assert len(result.tool_calls) == 1
-        assert result.tool_calls[0]["function"]["name"] == "restart_service"
+        assert result.tool_calls[0].function.name == "restart_service"
 
     async def test_mutable_tool_stays_pending(self):
         """Mutable pool — not pre-executed, stays in tool_calls for review_node classification."""
@@ -330,9 +353,9 @@ class TestStreamingThink:
         assert result.pre_executed == []
         assert len(result.tool_calls) == 1
         tc = result.tool_calls[0]
-        assert tc["function"]["name"] == "bash"
-        assert tc["mutable"] is True
-        assert tc["server_name"] == "tool-server"
+        assert tc.function.name == "bash"
+        assert tc.mutable is True
+        assert tc.server_name == "tool-server"
 
     async def test_prefix_parsing_attaches_server_name(self):
         """Server prefix is parsed once and attached to the tool_call dict (Q24)."""
@@ -351,7 +374,7 @@ class TestStreamingThink:
 
         assert result.tool_calls == []
         assert len(result.pre_executed) == 1
-        assert result.pre_executed[0]["tool_name"] == "get_cpu_info"
+        assert result.pre_executed[0].tool_name == "get_cpu_info"
 
 
 class TestObserveNode:
@@ -365,9 +388,9 @@ class TestObserveNode:
         ])
 
         assert len(result.tool_messages) == 2
-        assert result.tool_messages[0]["role"] == "tool"
-        assert "get_cpu" in result.tool_messages[0]["content"]
-        assert "get_memory" in result.tool_messages[1]["content"]
+        assert result.tool_messages[0].role == "tool"
+        assert "get_cpu" in result.tool_messages[0].content
+        assert "get_memory" in result.tool_messages[1].content
         assert result.transition == Transition.TOOL_RESULTS
 
     def test_empty_results_returns_empty(self):
@@ -380,7 +403,7 @@ class TestObserveNode:
         """AG-007: observe_node 合并 streaming_tool_results 和 tool_results。"""
         state = _state_with_tools()
         state.streaming_tool_results = [
-            {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}},
+            _result("get_cpu", {"execution_status": "SUCCEEDED", "output": "CPU: 45%"})
         ]
 
         result = observe_node(state, tool_results=[
@@ -394,7 +417,7 @@ class TestObserveNode:
         """observe_node clears streaming_tool_results and tool_results, preserves emitted_results."""
         state = _state_with_tools()
         state.streaming_tool_results = [
-            {"tool_name": "get_cpu", "tool_call_id": "t1", "result": {"execution_status": "SUCCEEDED"}},
+            _result("get_cpu", {"execution_status": "SUCCEEDED"}, tool_call_id="t1")
         ]
 
         result = observe_node(state, tool_results=[
@@ -501,44 +524,42 @@ class TestMergeToolBlock:
 
     def test_new_block_has_id(self):
         """First chunk (with name) must create a block with a valid id."""
-        blocks: list[dict] = []
+        blocks = []
         chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
         _merge_tool_block(blocks, chunk)
         assert len(blocks) == 1
-        assert "id" in blocks[0]
-        assert blocks[0]["id"] != ""
+        assert blocks[0].id != ""
 
     def test_chunk_with_id_preserves_it(self):
         """If the chunk carries an id, it should be used."""
-        blocks: list[dict] = []
+        blocks = []
         chunk = {"id": "explicit-id", "function": {"name": "get_cpu", "arguments": "{}"}}
         _merge_tool_block(blocks, chunk)
-        assert blocks[0]["id"] == "explicit-id"
+        assert blocks[0].id == "explicit-id"
 
     def test_arguments_only_chunk_appends(self):
         """Arguments-only chunk appends to the last block without creating a new one."""
-        blocks = [{"id": "t1", "function": {"name": "get_cpu", "arguments": '{"unit":'}}]
+        blocks = [_call("get_cpu", {"_raw": '{"unit":'}, id="t1")]
         chunk = {"function": {"arguments": '"percent"}'}}
         _merge_tool_block(blocks, chunk)
         assert len(blocks) == 1
-        assert blocks[0]["function"]["arguments"] == '{"unit":"percent"}'
+        assert blocks[0].function.arguments == {"unit": "percent"}
 
     def test_new_block_has_type_function(self):
         """Every tool_call block must have type=function (DeepSeek/OpenAI API requirement)."""
-        blocks: list[dict] = []
+        blocks = []
         chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
         _merge_tool_block(blocks, chunk)
-        assert blocks[0]["type"] == "function"
+        assert blocks[0].function.name == "get_cpu"
 
     def test_arguments_only_block_has_type_function(self):
         """Arguments-only chunk that creates a new block must also have type=function."""
-        blocks: list[dict] = []
+        blocks = []
         chunk = {"function": {"name": "", "arguments": '{"cmd":"ls"}'}}
         _merge_tool_block(blocks, chunk)
         assert len(blocks) == 1
-        assert blocks[0]["type"] == "function"
-        assert blocks[0]["function"]["name"] == ""
-        assert blocks[0]["function"]["arguments"] == '{"cmd":"ls"}'
+        assert blocks[0].function.name == ""
+        assert blocks[0].function.arguments == {"cmd": "ls"}
 
 
 class TestReasoningStreaming:
@@ -555,7 +576,7 @@ class TestReasoningStreaming:
 
         result = await think_node(_state(), ctx, llm=llm)
 
-        assert result.assistant_message["reasoning_content"] == "Let me check"
+        assert result.assistant_message.reasoning_content == "Let me check"
         # stream_chunks records (type, delta) tuples for later emission by EventEmitter
         assert len(result.stream_chunks) == 4  # 2 reasoning + 2 assistant
         types = [t for t, _ in result.stream_chunks]
@@ -568,7 +589,7 @@ class TestReasoningStreaming:
             {"event": "done", "data": "{}"},
         ])
         result = await think_node(_state(), llm=llm)
-        assert result.assistant_message["reasoning_content"] == "think"
+        assert result.assistant_message.reasoning_content == "think"
         assert result.is_done is True
 
     async def test_content_streamed_to_queue_without_message_id(self):
@@ -582,7 +603,7 @@ class TestReasoningStreaming:
 
         result = await think_node(_state(), ctx, llm=llm)
 
-        assert result.assistant_message["content"] == "Hello world"
+        assert result.assistant_message.content == "Hello world"
         # stream_chunks records (type, delta) tuples for later emission by EventEmitter
         assert len(result.stream_chunks) == 2
         assert result.stream_chunks == [("assistant", "Hello "), ("assistant", "world")]
@@ -611,5 +632,5 @@ class TestReasoningStreaming:
 
         result = await think_node(_state(), ctx, llm=llm)
 
-        assert result.assistant_message["content"] == "Hello"
-        assert result.assistant_message["reasoning_content"] == "thinking"
+        assert result.assistant_message.content == "Hello"
+        assert result.assistant_message.reasoning_content == "thinking"

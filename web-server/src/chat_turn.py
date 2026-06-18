@@ -14,6 +14,7 @@ from src.agent.events import (
     TurnStarted,
 )
 from src.agent.state import AgentState
+from src.agent.mappers import messages_from_wire
 from src.agent.shared import is_disconnected
 from src.models.message import Message, MessageType
 from src.observability.debug_log import log as debug_log
@@ -124,7 +125,7 @@ class ChatTurn:
         await self._session_manager.add_message(session.id, user_msg)
 
         return AgentState(
-            messages=history + [{"role": "user", "content": self._user_message}],
+            messages=messages_from_wire(history + [{"role": "user", "content": self._user_message}]),
             available_tools=self._tool_executor.list_tools(),
             system=self._prompt_manager.build_system_prompt(),
         )

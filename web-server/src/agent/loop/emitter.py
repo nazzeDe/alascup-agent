@@ -1,8 +1,8 @@
 """EventEmitter — single owner of DomainEvent emission. Converts step outputs + scratch → DomainEvent → EventChannel."""
 
-import json
 from uuid import uuid4
 
+from src.agent.domain import AgentToolCall, AgentToolResult
 from src.agent.events import (
     ApprovalRequired,
     AssistantDelta,
@@ -43,34 +43,27 @@ class EventEmitter:
 
     # ── Tool call lifecycle ──
 
-    def emit_tool_started(self, tc: dict) -> None:
-        fn = tc.get("function", {})
-        params = fn.get("arguments", "{}")
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except (json.JSONDecodeError, TypeError):
-                params = {}
-        call_id = tc.get("id") or str(uuid4())
+    def emit_tool_started(self, tc: AgentToolCall) -> None:
+        params = tc.function.arguments
+        call_id = tc.id or str(uuid4())
         debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                  id=call_id, tool=fn.get("name", ""), tc_keys=list(tc.keys()))
+                  id=call_id, tool=tc.function.name)
         self._channel.send_nowait(ToolCallStarted(
             call_id=call_id,
-            tool_name=fn.get("name", ""),
+            tool_name=tc.function.name,
             params=params,
-            is_read_only=tc.get("is_read_only", False),
-            server=tc.get("server_name", ""),
+            is_read_only=bool(tc.is_read_only),
+            server=tc.server_name,
         ))
 
-    def emit_tool_finished(self, r: dict) -> None:
-        res = r.get("result", {})
+    def emit_tool_finished(self, r: AgentToolResult) -> None:
+        res = r.result
         if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
             res = res["result"]
-        call_id = r.get("tool_call_id") or str(uuid4())
+        call_id = r.tool_call_id or str(uuid4())
         debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
                   id=call_id,
-                  status=res.get("execution_status", "SUCCEEDED"),
-                  r_keys=list(r.keys()))
+                  status=res.get("execution_status", "SUCCEEDED"))
         d = {
             "call_id": call_id,
             "execution_status": res.get("execution_status", "SUCCEEDED"),
@@ -100,29 +93,29 @@ class EventEmitter:
 
     # ── Batch helpers used by orchestrator ──
 
-    def emit_tools_started(self, tool_calls: list, *, skip_ids: set | None = None) -> None:
+    def emit_tools_started(self, tool_calls: list[AgentToolCall], *, skip_ids: set | None = None) -> None:
         """Emit ToolCallStarted for each tool call, skipping pending approval IDs."""
         skip = skip_ids or set()
         for tc in tool_calls:
-            if tc.get("id") in skip:
+            if tc.id in skip:
                 continue
             self.emit_tool_started(tc)
 
-    def emit_tools_finished(self, results: list) -> None:
+    def emit_tools_finished(self, results: list[AgentToolResult]) -> None:
         """Emit ToolCallFinished for each result."""
         for r in results:
             self.emit_tool_finished(r)
 
     # ── Streaming tool results (pre-executed) ──
 
-    def emit_streaming_tool_results(self, results: list) -> None:
+    def emit_streaming_tool_results(self, results: list[AgentToolResult]) -> None:
         """Emit ToolCallStarted + ToolCallFinished for pre-executed streaming results."""
         for sr in results:
             self._channel.send_nowait(ToolCallStarted(
-                call_id=sr.get("tool_call_id") or str(uuid4()),
-                tool_name=sr.get("tool_name", ""),
+                call_id=sr.tool_call_id or str(uuid4()),
+                tool_name=sr.tool_name,
                 params={},
-                is_read_only=sr.get("is_read_only", False),
-                server=sr.get("server_name", ""),
+                is_read_only=sr.is_read_only,
+                server=sr.server_name,
             ))
             self.emit_tool_finished(sr)

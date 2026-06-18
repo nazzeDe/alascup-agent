@@ -1,11 +1,13 @@
 """Shared helpers for agent steps: message formatting, tool dispatch, arg parsing."""
 
 import json
+from typing import Any
 from uuid import uuid4
 
 from loguru import logger
 
-from src.agent.messages import normalize_message
+from src.agent.domain import AgentToolCall, AgentToolResult, ToolFunction
+from src.agent.mappers import message_to_openai, tool_call_to_dispatch
 
 
 # ── Message formatting ──
@@ -13,26 +15,7 @@ from src.agent.messages import normalize_message
 
 def _messages(state) -> list[dict]:
     """Convert messages to OpenAI-compatible dicts for LLM call."""
-    result: list[dict] = []
-    for m in state.messages:
-        entry = normalize_message(m)
-        msg: dict = {"role": entry["role"], "content": entry["content"]}
-        if entry["role"] == "assistant":
-            tcs = entry.get("tool_calls")
-            if tcs:
-                msg["tool_calls"] = tcs
-            rc = entry.get("reasoning_content", "")
-            if rc:
-                msg["reasoning_content"] = rc
-        elif entry["role"] in ("tool", "tool_result"):
-            tc_id = entry.get("tool_call_id", "")
-            if tc_id:
-                msg["tool_call_id"] = tc_id
-            nm = entry.get("name", "")
-            if nm:
-                msg["name"] = nm
-        result.append(msg)
-    return result
+    return [message_to_openai(m) for m in state.messages]
 
 
 def _format_tools(tools: list) -> list[dict]:
@@ -62,7 +45,7 @@ def _format_tools(tools: list) -> list[dict]:
 # ── Tool dispatch ──
 
 
-def _parse_args(args: str) -> dict:
+def _parse_args(args: str | dict[str, Any]) -> dict[str, Any]:
     """Parse JSON arguments string to dict. Returns {} on failure."""
     try:
         return json.loads(args) if isinstance(args, str) else args
@@ -71,44 +54,47 @@ def _parse_args(args: str) -> dict:
 
 
 async def _dispatch_tool_calls(
-    tool_call_blocks: list[dict], executor, available_tools: list[dict]
-) -> tuple[list[dict], list[dict]]:
+    tool_call_blocks: list[AgentToolCall], executor, available_tools: list[dict]
+) -> tuple[list[AgentToolCall], list[AgentToolResult]]:
     """Parse server_name prefix, attach metadata, pre-execute readonly tools."""
     tool_index = _build_tool_index(available_tools)
 
-    pending: list[dict] = []
-    dispatch: list[dict] = []
+    pending: list[AgentToolCall] = []
+    dispatch: list[dict[str, Any]] = []
     dispatch_call_ids: list[str] = []
     for tc in tool_call_blocks:
-        fn = tc.get("function", {})
-        full_name = fn.get("name", "")
-        args = _parse_args(fn.get("arguments", "{}"))
-        tc_id = tc.get("id", str(uuid4()))
+        full_name = tc.function.name
+        args = tc.function.arguments
+        tc_id = tc.id
 
         server_name, tool_name = _split_server_tool(full_name)
-        tc["function"]["name"] = tool_name
+        tc.function = ToolFunction(name=tool_name, arguments=args)
 
         meta = tool_index.get(full_name, {})
         if not server_name:
             server_name = meta.get("server_name", "")
-        tc["server_name"] = server_name
+        tc.server_name = server_name
 
         _classify_and_route(tc, tool_name, args, server_name, tc_id, meta, pending, dispatch, dispatch_call_ids)
 
-    pre_executed: list[dict] = []
+    pre_executed: list[AgentToolResult] = []
     if dispatch:
         disp_results = await _execute_with_error_handling(executor, dispatch)
         for i, dr in enumerate(disp_results):
-            pre_executed.append({
-                "tool_name": dispatch[i]["tool_name"],
-                "result": dr,
-                "tool_call_id": dispatch_call_ids[i],
-            })
+            pre_executed.append(AgentToolResult(
+                tool_name=dispatch[i]["tool_name"],
+                result=dr,
+                tool_call_id=dispatch_call_ids[i],
+                is_read_only=True,
+                server_name=dispatch[i]["server_name"],
+            ))
 
     return pending, pre_executed
 
 
-async def _execute_with_error_handling(executor, dispatch_list: list[dict]) -> list[dict]:
+async def _execute_with_error_handling(
+    executor, dispatch_list: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Execute tool calls with error handling. Returns list of result dicts."""
     try:
         return await executor.execute_parallel(dispatch_list)
@@ -137,25 +123,31 @@ def _split_server_tool(full_name: str) -> tuple[str, str]:
     return "", full_name
 
 
-def _classify_and_route(tc, tool_name, args, server_name, tc_id, meta, pending, dispatch, dispatch_call_ids):
+def _classify_and_route(
+    tc: AgentToolCall,
+    tool_name: str,
+    args: dict[str, Any],
+    server_name: str,
+    tc_id: str,
+    meta: dict,
+    pending: list[AgentToolCall],
+    dispatch: list[dict[str, Any]],
+    dispatch_call_ids: list[str],
+) -> None:
     """Classify a tool_call as mutable/readonly/write and route to pending or dispatch."""
     is_mutable = meta.get("mutable", False)
     is_read_only = meta.get("is_read_only", False)
 
     if is_mutable:
-        tc["mutable"] = True
-        tc["is_read_only"] = None
+        tc.mutable = True
+        tc.is_read_only = None
         pending.append(tc)
     elif is_read_only:
-        dispatch.append({
-            "tool_name": tool_name,
-            "arguments": args,
-            "server_name": server_name,
-            "approval_status": "APPROVED",
-            "request_id": str(uuid4()),
-        })
+        tc.approval_status = "APPROVED"
+        tc.request_id = str(uuid4())
+        dispatch.append(tool_call_to_dispatch(tc))
         dispatch_call_ids.append(tc_id)
     else:
-        tc["mutable"] = False
-        tc["is_read_only"] = False
+        tc.mutable = False
+        tc.is_read_only = False
         pending.append(tc)

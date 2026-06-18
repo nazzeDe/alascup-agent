@@ -9,6 +9,7 @@ from src.agent.loop.approval import ApprovalHandler, _inject_rejection_messages
 from src.agent.loop.emitter import EventEmitter
 from src.agent.loop.circuit_breaker import CircuitBreaker
 from src.agent.loop.step import AgentStep, sync_scratch_from_state
+from src.agent.mappers import messages_from_wire, messages_to_openai
 from src.agent.state import AgentState, Transition, TurnScratch, get_transition, init_scratch
 from src.agent.turn_context import TurnContext, Auditor
 from src.models.audit import AuditActor
@@ -51,7 +52,7 @@ class AgentLoop:
         approval: ApprovalHandler,
         breaker: CircuitBreaker,
         auditor_factory,  # callable: (ctx: TurnContext) -> Auditor
-        emitter: EventEmitter,
+        emitter: EventEmitter | None,
         context_manager,
         error_recovery,
         llm,
@@ -89,7 +90,7 @@ class AgentLoop:
         auditor = self._auditor_factory(ctx)
 
         emitted_assistant_count = sum(
-            1 for m in state.messages if m.get("role", "") == "assistant"
+            1 for m in state.messages if m.role == "assistant"
         )
         debug_log(
             "INFO",
@@ -271,7 +272,7 @@ class AgentLoop:
     def _emit_approval_started(self, scratch: TurnScratch, emitter: EventEmitter) -> None:
         debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
                   count=len(scratch.approved_tool_calls),
-                  ids=[tc.get("id") for tc in scratch.approved_tool_calls],
+                  ids=[tc.id for tc in scratch.approved_tool_calls],
                   phase="approval")
         emitter.emit_tools_started(scratch.approved_tool_calls)
 
@@ -290,7 +291,7 @@ class AgentLoop:
         result_sources = scratch.emitted_results or scratch.streaming_tool_results
         debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
                   count=len(result_sources),
-                  ids=[r.get("tool_call_id") for r in result_sources],
+                  ids=[r.tool_call_id for r in result_sources],
                   phase="approval")
         emitter.emit_tools_finished(result_sources)
         scratch.emitted_results = []
@@ -312,7 +313,7 @@ class AgentLoop:
         debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
                   msg_count=len(state.messages),
                   phase="main_emit")
-        pending_ids = {tc.get("id") for tc in scratch.pending_approval if tc.get("id")}
+        pending_ids = {tc.id for tc in scratch.pending_approval if tc.id}
         self._emit_started_events(state, scratch, emitter, pending_ids)
         self._emit_finished_events(state, scratch, emitter)
         self._emit_streaming_events(state, scratch, emitter)
@@ -322,7 +323,7 @@ class AgentLoop:
     ) -> None:
         tc_list = scratch.tool_calls
         if tc_list:
-            tc_to_emit = [tc for tc in tc_list if tc.get("id") not in pending_ids]
+            tc_to_emit = [tc for tc in tc_list if tc.id not in pending_ids]
             debug_log(
                 "DEBUG",
                 "emit_tools_started",
@@ -330,7 +331,7 @@ class AgentLoop:
                 total=len(tc_list),
                 skipped_pending=len(tc_list) - len(tc_to_emit),
                 emitting=len(tc_to_emit),
-                ids=[tc.get("id", "?") for tc in tc_to_emit],
+                ids=[tc.id for tc in tc_to_emit],
             )
         else:
             debug_log(
@@ -350,7 +351,7 @@ class AgentLoop:
                 "emit_tools_finished",
                 chat_id=str(state.chat_id),
                 count=len(tr_list),
-                ids=[tr.get("tool_call_id", "?") for tr in tr_list],
+                ids=[tr.tool_call_id for tr in tr_list],
             )
         else:
             debug_log(
@@ -370,7 +371,7 @@ class AgentLoop:
                 "emit_streaming_tool_results",
                 chat_id=str(state.chat_id),
                 count=len(stream_src),
-                ids=[r.get("tool_call_id", "?") for r in stream_src],
+                ids=[r.tool_call_id for r in stream_src],
                 source="emitted_results" if scratch.emitted_results else "streaming_tool_results",
             )
         else:
@@ -395,7 +396,7 @@ class AgentLoop:
         return True
 
     async def _compress_context(self, state: AgentState, auditor: Auditor) -> None:
-        messages = state.messages
+        messages = messages_to_openai(state.messages)
         tokens = self._context_manager.count_tokens(messages)
         ws = getattr(self._context_manager, "window_size", 128000)
         th = getattr(self._context_manager, "threshold", 0.7)
@@ -409,7 +410,7 @@ class AgentLoop:
                 msg_count=len(messages),
                 chat_id=str(state.chat_id),
             )
-            state.messages = await self._context_manager.compress(messages)
+            state.messages = messages_from_wire(await self._context_manager.compress(messages))
             await auditor.transition(
                 Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM
             )
@@ -417,7 +418,7 @@ class AgentLoop:
     async def _check_token_ceiling(
         self, state: AgentState, auditor: Auditor
     ) -> bool:
-        messages = state.messages
+        messages = messages_to_openai(state.messages)
         tokens = self._context_manager.count_tokens(messages)
         if self._breaker.check_token_ceiling(tokens):
             debug_log(
@@ -468,7 +469,7 @@ class AgentLoop:
                 msg=str(orig_msg)[:500],
             )
             return "return", TurnFailed(
-                code=llm_error.get("code", 500),
+                code=_error_code(llm_error.get("code", 500)),
                 message=f"LLM error (code={llm_error.get('code', '?')}): {orig_msg}",
             )
 
@@ -498,7 +499,7 @@ class AgentLoop:
                 Transition.ERROR_EXIT, actor=AuditActor.SYSTEM
             )
             return "return", TurnFailed(
-                code=llm_error.get("code", 500),
+                code=_error_code(llm_error.get("code", 500)),
                 message=f"Recovery exhausted (cause: code={llm_error.get('code', '?')}, {orig_msg})",
             )
         # Clear llm_error from state on success
@@ -510,10 +511,13 @@ class AgentLoop:
         from src.services.llm_adapter import classify_error
 
         error = state.llm_error or {}
+        status_code = _int_code(error.get("code", 0))
+        message = str(error.get("message", ""))
+        stop_reason = error.get("stop_reason")
         error_type = classify_error(
-            error.get("code", 0),
-            error.get("message", ""),
-            error.get("stop_reason"),
+            status_code,
+            message,
+            str(stop_reason) if stop_reason is not None else None,
         )
         if not error_type:
             return False
@@ -525,18 +529,20 @@ class AgentLoop:
         action = strategy["action"]
 
         if action == "compress_context":
-            compressed = await self._context_manager.compress(state.messages)
-            state.messages = compressed
+            compressed = await self._context_manager.compress(messages_to_openai(state.messages))
+            state.messages = messages_from_wire(compressed)
             await auditor.transition(Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM)
         elif action == "aggressive_compress":
-            compressed = await self._context_manager.compress(state.messages)
-            state.messages = compressed
+            compressed = await self._context_manager.compress(messages_to_openai(state.messages))
+            state.messages = messages_from_wire(compressed)
             await auditor.transition(Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM)
         elif action == "escalate_token_limit":
             self._llm.escalate_max_tokens()
         elif action == "continue_inject":
             msgs = list(state.messages)
-            msgs.append({"role": "user", "content": "Please continue from where you stopped."})
+            from src.agent.domain import AgentMessage
+
+            msgs.append(AgentMessage(role="user", content="Please continue from where you stopped."))
             state.messages = msgs
         elif action == "switch_fallback_model":
             self._llm.switch_to_fallback()
@@ -567,3 +573,18 @@ class AgentLoop:
         if transition == Transition.APPROVAL_GRANTED:
             return "continue"
         return None
+
+
+def _error_code(value: object) -> str | int:
+    return value if isinstance(value, (str, int)) else str(value)
+
+
+def _int_code(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0

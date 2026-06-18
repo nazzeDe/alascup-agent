@@ -1,8 +1,13 @@
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
 
 ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool", "tool_result": "tool", "tool_call": "assistant"}
+
+StreamChunk = tuple[str, str]
+LLMError = dict[str, object]
 
 
 class Transition(StrEnum):
@@ -22,19 +27,21 @@ class Transition(StrEnum):
 
 
 class AgentState(BaseModel):
-    messages: list[dict] = Field(default_factory=list)
+    model_config = ConfigDict(validate_assignment=True)
+
+    messages: list[AgentMessage] = Field(default_factory=list)
     system: str | None = None
     available_tools: list[dict] = Field(default_factory=list)
     transition: Transition | None = None
-    tool_calls: list[dict] = Field(default_factory=list)
-    approved_tool_calls: list[dict] = Field(default_factory=list)
-    rejected_tool_calls: list[dict] = Field(default_factory=list)
-    pending_approval: list[dict] = Field(default_factory=list)
-    tool_results: list[dict] = Field(default_factory=list)
-    llm_error: dict | None = None
-    streaming_tool_results: list[dict] = Field(default_factory=list)
-    emitted_results: list[dict] = Field(default_factory=list)
-    stream_chunks: list = Field(default_factory=list)
+    tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    approved_tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    rejected_tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    pending_approval: list[AgentToolCall] = Field(default_factory=list)
+    tool_results: list[AgentToolResult] = Field(default_factory=list)
+    llm_error: LLMError | None = None
+    streaming_tool_results: list[AgentToolResult] = Field(default_factory=list)
+    emitted_results: list[AgentToolResult] = Field(default_factory=list)
+    stream_chunks: list[StreamChunk] = Field(default_factory=list)
     chat_id: str = ""
     llm_model: str = ""
 
@@ -42,15 +49,17 @@ class AgentState(BaseModel):
 class TurnScratch(BaseModel):
     """Per-iteration scratch data. Recreated each iteration."""
 
-    tool_calls: list[dict] = Field(default_factory=list)
-    pending_approval: list[dict] = Field(default_factory=list)
-    approved_tool_calls: list[dict] = Field(default_factory=list)
-    rejected_tool_calls: list[dict] = Field(default_factory=list)
-    tool_results: list[dict] = Field(default_factory=list)
-    streaming_tool_results: list[dict] = Field(default_factory=list)
-    emitted_results: list[dict] = Field(default_factory=list)
-    stream_chunks: list = Field(default_factory=list)
-    llm_error: dict | None = None
+    model_config = ConfigDict(validate_assignment=True)
+
+    tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    pending_approval: list[AgentToolCall] = Field(default_factory=list)
+    approved_tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    rejected_tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    tool_results: list[AgentToolResult] = Field(default_factory=list)
+    streaming_tool_results: list[AgentToolResult] = Field(default_factory=list)
+    emitted_results: list[AgentToolResult] = Field(default_factory=list)
+    stream_chunks: list[StreamChunk] = Field(default_factory=list)
+    llm_error: LLMError | None = None
     transition: Transition | None = None
 
 

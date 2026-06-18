@@ -3,45 +3,45 @@
 from uuid import uuid4
 
 from src.agent.loop.emitter import EventEmitter
-from src.agent.nodes._helpers import _parse_args
-from src.agent.shared import parse_json_object
 from src.agent.state import AgentState, Transition, TurnScratch
+from src.agent.domain import AgentMessage, AgentToolCall
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
 from src.observability.debug_log import log as debug_log
 
 
-def _apply_decisions(pending: list[dict], decisions: list[dict]) -> tuple[list[dict], list[dict]]:
+def _apply_decisions(
+    pending: list[AgentToolCall], decisions: list[dict]
+) -> tuple[list[AgentToolCall], list[AgentToolCall]]:
     """Split pending tool calls into approved and rejected based on decisions.
 
     Attaches rejection_reason to rejected tool calls so _inject_rejection_messages
     and observe_node can include the user's message in the LLM-facing tool result.
     """
-    approved = []
-    rejected = []
+    approved: list[AgentToolCall] = []
+    rejected: list[AgentToolCall] = []
     for i, tc in enumerate(pending):
         d = decisions[i] if i < len(decisions) else {"status": "EXPIRED", "reason": None}
         status = d["status"] if isinstance(d, dict) else d
         if status == "APPROVED":
-            tc["approval_status"] = "APPROVED"
+            tc.approval_status = "APPROVED"
             approved.append(tc)
         else:
-            tc["approval_status"] = "EXPIRED" if status == "EXPIRED" else "REJECTED"
-            tc["rejection_reason"] = d.get("reason") if isinstance(d, dict) else None
+            tc.approval_status = "EXPIRED" if status == "EXPIRED" else "REJECTED"
+            tc.rejection_reason = d.get("reason") if isinstance(d, dict) else None
             rejected.append(tc)
     return approved, rejected
 
 
-def _format_rejection_message(tc: dict) -> str:
+def _format_rejection_message(tc: AgentToolCall) -> str:
     """Build the LLM-facing tool-result string for a rejected tool call.
 
     Includes the user's rejection reason when provided, and omits the
     "propose an alternative approach" instruction that previously caused
     the LLM to retry with different tools.
     """
-    fn = tc.get("function", {})
-    name = fn.get("name", "unknown")
-    reason = tc.get("rejection_reason")
+    name = tc.function.name or "unknown"
+    reason = tc.rejection_reason
     parts = [f"[{name}] execution_status=REJECTED"]
     if reason:
         parts.append(f"rejection_reason={reason}")
@@ -49,20 +49,21 @@ def _format_rejection_message(tc: dict) -> str:
     return "\n".join(parts)
 
 
-def _inject_rejection_messages(state: AgentState, rejected: list[dict]) -> None:
+def _inject_rejection_messages(
+    state: AgentState, rejected: list[AgentToolCall]
+) -> None:
     """Append tool-role rejection messages so LLM can respond to the rejection."""
     if not rejected:
         return
-    messages: list[dict] = []
+    messages = []
     for tc in rejected:
-        fn = tc.get("function", {})
-        name = fn.get("name", "unknown")
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tc.get("id", "rejected"),
-            "name": name,
-            "content": _format_rejection_message(tc),
-        })
+        name = tc.function.name or "unknown"
+        messages.append(AgentMessage(
+            role="tool",
+            tool_call_id=tc.id or "rejected",
+            name=name,
+            content=_format_rejection_message(tc),
+        ))
     state.messages.extend(messages)
 
 
@@ -78,7 +79,14 @@ class ApprovalHandler:
         self._audit = audit_logger
         self._lifecycle = lifecycle
 
-    async def resolve(self, scratch: TurnScratch, *, profiler=None, turn_ctx: TurnContext = None, emitter: EventEmitter = None) -> None:
+    async def resolve(
+        self,
+        scratch: TurnScratch,
+        *,
+        profiler=None,
+        turn_ctx: TurnContext | None = None,
+        emitter: EventEmitter | None = None,
+    ) -> None:
         """Process scratch.pending_approval, emit ApprovalRequired events, apply decisions.
 
         Receives TurnContext and EventEmitter from the orchestrator.
@@ -93,13 +101,13 @@ class ApprovalHandler:
         if not scratch.pending_approval:
             return
 
-        chat_id = str(turn_ctx.chat_id) if turn_ctx.chat_id else ""
+        chat_id = str(turn_ctx.chat_id) if turn_ctx and turn_ctx.chat_id else ""
         auditor = Auditor(audit_logger=self._audit, ctx=turn_ctx)
 
         debug_log("INFO", "Approval required — SSE stays connected", chat_id=chat_id)
         pending = scratch.pending_approval
-        all_approved: list[dict] = []
-        all_rejected: list[dict] = []
+        all_approved: list[AgentToolCall] = []
+        all_rejected: list[AgentToolCall] = []
         for tc in pending:
             approved, rejected = await self._resolve_one(tc, chat_id, auditor, emitter, profiler)
             all_approved.extend(approved)
@@ -109,7 +117,8 @@ class ApprovalHandler:
 
         await self._audit_approved(auditor, all_approved)
         await self._audit_rejected(auditor, all_rejected)
-        await self._update_lifecycle(turn_ctx.chat_id, all_approved, all_rejected)
+        lifecycle_chat_id = turn_ctx.chat_id if turn_ctx else None
+        await self._update_lifecycle(lifecycle_chat_id, all_approved, all_rejected)
         scratch.approved_tool_calls = scratch.approved_tool_calls + all_approved
         scratch.rejected_tool_calls = scratch.rejected_tool_calls + all_rejected
         scratch.pending_approval = []
@@ -120,13 +129,14 @@ class ApprovalHandler:
 
     async def _resolve_one(
         self,
-        tc: dict,
+        tc: AgentToolCall,
         chat_id: str,
         auditor: Auditor,
         emitter: EventEmitter | None,
         profiler,
-    ) -> tuple[list[dict], list[dict]]:
-        request_id = tc.get("request_id", str(uuid4()))
+    ) -> tuple[list[AgentToolCall], list[AgentToolCall]]:
+        request_id = tc.request_id or str(uuid4())
+        tc.request_id = request_id
 
         if self._bridge:
             self._bridge.create(request_id, chat_id)
@@ -143,64 +153,59 @@ class ApprovalHandler:
         return _apply_decisions([tc], decisions)
 
     def _emit_approval_required(
-        self, emitter: EventEmitter, tc: dict, chat_id: str, request_id: str
+        self, emitter: EventEmitter, tc: AgentToolCall, chat_id: str, request_id: str
     ) -> None:
-        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-        params = parse_json_object(fn.get("arguments", "{}"))
         emitter.emit_approval_required(
             chat_id=chat_id,
             request_id=request_id,
-            tool_name=fn.get("name", ""),
-            params=params,
-            reason=fn.get("name", "") + " needs your approval to execute",
-            call_id=tc.get("id", ""),
+            tool_name=tc.function.name,
+            params=tc.function.arguments,
+            reason=tc.function.name + " needs your approval to execute",
+            call_id=tc.id,
         )
 
-    async def _audit_approved(self, auditor: Auditor, approved: list[dict]) -> None:
+    async def _audit_approved(
+        self, auditor: Auditor, approved: list[AgentToolCall]
+    ) -> None:
         if not self._audit:
             return
         for tc in approved:
-            fn = tc.get("function", {})
             await auditor.tool_event(
                 "TOOL_APPROVED",
                 actor=AuditActor.POLICY,
-                tool_name=fn.get("name"),
-                request_id=_safe_uuid(tc.get("request_id", "")),
-                params=_approval_args(fn),
+                tool_name=tc.function.name,
+                request_id=_safe_uuid(tc.request_id or ""),
+                params=tc.function.arguments,
                 decision="APPROVED",
             )
 
-    async def _audit_rejected(self, auditor: Auditor, rejected: list[dict]) -> None:
+    async def _audit_rejected(
+        self, auditor: Auditor, rejected: list[AgentToolCall]
+    ) -> None:
         if not self._audit:
             return
         for tc in rejected:
-            fn = tc.get("function", {})
-            rejection_reason = tc.get("rejection_reason")
+            rejection_reason = tc.rejection_reason
             await auditor.tool_event(
                 "TOOL_REJECTED",
                 actor=AuditActor.POLICY,
-                tool_name=fn.get("name"),
-                request_id=_safe_uuid(tc.get("request_id", "")),
-                params=_approval_args(fn),
+                tool_name=tc.function.name,
+                request_id=_safe_uuid(tc.request_id or ""),
+                params=tc.function.arguments,
                 level=AuditLevel.WARN,
                 decision="REJECTED",
                 error={"rejection_reason": rejection_reason} if rejection_reason else None,
             )
 
     async def _update_lifecycle(
-        self, chat_id, approved: list[dict], rejected: list[dict]
+        self, chat_id, approved: list[AgentToolCall], rejected: list[AgentToolCall]
     ) -> None:
         if self._lifecycle is None:
             return
         for tc in approved:
-            await self._lifecycle.mark_approved(chat_id, tc.get("call_id"))
+            await self._lifecycle.mark_approved(chat_id, tc.call_id)
         for tc in rejected:
-            if tc.get("approval_status") == "EXPIRED":
-                await self._lifecycle.mark_expired(chat_id, tc.get("call_id"))
+            if tc.approval_status == "EXPIRED":
+                await self._lifecycle.mark_expired(chat_id, tc.call_id)
             else:
-                await self._lifecycle.mark_rejected(chat_id, tc.get("call_id"))
-
-
-def _approval_args(fn: dict) -> dict:
-    args = fn.get("arguments", "{}")
-    return _parse_args(args) if isinstance(args, str) else (args or {})
+                await self._lifecycle.mark_rejected(chat_id, tc.call_id)

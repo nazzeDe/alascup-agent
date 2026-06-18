@@ -1,15 +1,21 @@
 import json
+from typing import Literal
 from uuid import uuid4
 
 from src.agent.nodes._helpers import _format_tools, _messages
 from src.agent.nodes._helpers import _dispatch_tool_calls
 from src.agent.results import ThinkOutput
+from src.agent.domain import AgentMessage, AgentToolCall, ToolFunction
+from src.agent.mappers import message_to_db_wire
+from src.agent.state import LLMError, StreamChunk
 from src.agent.turn_context import TurnContext
 from src.observability.debug_log import log as debug_log
 from src.observability.timing import start_feature, complete_feature
 
 
-async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, lifecycle=None):
+async def think_node(
+    state, ctx: TurnContext | None = None, *, llm, executor=None, lifecycle=None
+):
     if state.approved_tool_calls:
         return ThinkOutput()
 
@@ -20,8 +26,8 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
 
     accumulated_text: list[str] = []
     accumulated_reasoning: list[str] = []
-    tool_call_blocks: list[dict] = []
-    stream_chunks: list[tuple] = []
+    tool_call_blocks: list[AgentToolCall] = []
+    stream_chunks: list[StreamChunk] = []
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     stream_sink = getattr(ctx, "stream_sink", None) if ctx else None
     feature = f"llm_call:{chat_id}"
@@ -47,7 +53,7 @@ async def _stream_llm(
     llm, messages, tools, system, chat_id, feature,
     accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
     stream_sink=None,
-) -> dict | None:
+) -> LLMError | None:
     """Drive the LLM stream. Returns error dict or None on success."""
     emitted_live_stream = False
     try:
@@ -55,7 +61,7 @@ async def _stream_llm(
             try:
                 result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
             except Exception as exc:
-                error: dict = {
+                error: LLMError = {
                     "code": 0,
                     "message": f"Stream event processing failed: {exc}",
                     "raw_event_type": event.get("event", "?") if isinstance(event, dict) else type(event).__name__,
@@ -92,7 +98,7 @@ async def _stream_llm(
 def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
     tc_count = len(tool_call_blocks)
     if tc_count:
-        names = [b.get("function", {}).get("name", "?") for b in tool_call_blocks]
+        names = [b.function.name for b in tool_call_blocks]
         debug_log("DEBUG", "LLM generated tool calls", chat_id=str(chat_id),
                   count=tc_count, tools=",".join(names))
     else:
@@ -115,7 +121,7 @@ def _log_stream_error(result, messages, chat_id):
     msg_shapes = []
     for i, m in enumerate(messages):
         shape = {"idx": i, "role": m.get("role", "?"), "keys": sorted(m.keys())}
-        tcs = m.get("tool_calls")
+        tcs = getattr(m, "tool_calls", None)
         if tcs:
             shape["tc_count"] = len(tcs)
             shape["tc_keys"] = [sorted(tc.keys()) for tc in tcs]
@@ -123,7 +129,9 @@ def _log_stream_error(result, messages, chat_id):
     debug_log("DEBUG", "LLM message shapes", chat_id=str(chat_id), shapes=json.dumps(msg_shapes, default=str))
 
 
-def _record_stream_chunks(data_str: str, stream_chunks: list[tuple], stream_sink=None) -> bool:
+def _record_stream_chunks(
+    data_str: str, stream_chunks: list[StreamChunk], stream_sink=None
+) -> bool:
     """Record (type, delta) tuples for ThinkOutput.stream_chunks."""
     data = json.loads(data_str)
     emitted = False
@@ -144,7 +152,17 @@ def _record_stream_chunks(data_str: str, stream_chunks: list[tuple], stream_sink
     return emitted
 
 
-async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks, executor, available_tools, llm=None, lifecycle=None, ctx=None) -> ThinkOutput:
+async def _build_think_result(
+    accumulated_text,
+    accumulated_reasoning,
+    tool_call_blocks: list[AgentToolCall],
+    stream_chunks: list[StreamChunk],
+    executor,
+    available_tools,
+    llm=None,
+    lifecycle=None,
+    ctx=None,
+) -> ThinkOutput:
     """Assemble ThinkOutput from accumulated stream data."""
     assistant_msg = _assemble_assistant_message("".join(accumulated_text), "".join(accumulated_reasoning), tool_call_blocks)
 
@@ -162,7 +180,7 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
     if lifecycle is not None:
         chat_id = ctx.chat_id if ctx else None
         if assistant_msg:
-            await lifecycle.persist_assistant_message(chat_id, assistant_msg)
+            await lifecycle.persist_assistant_message(chat_id, message_to_db_wire(assistant_msg))
         await lifecycle.register(chat_id, pending_tool_calls, pre_executed, llm_trace_id)
 
     return ThinkOutput(
@@ -174,21 +192,26 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
     )
 
 
-def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict]) -> dict | None:
+def _assemble_assistant_message(
+    text: str, reasoning: str, tool_calls: list[AgentToolCall]
+) -> AgentMessage | None:
     """Build assistant message dict from text, reasoning, and tool calls. Returns None if empty."""
     if not (text or reasoning or tool_calls):
         return None
-    msg: dict = {"role": "assistant", "content": text or ""}
-    if reasoning:
-        msg["reasoning_content"] = reasoning
-    if tool_calls:
-        msg["tool_calls"] = tool_calls
-    return msg
+    return AgentMessage(
+        role="assistant",
+        content=text or "",
+        reasoning_content=reasoning or None,
+        tool_calls=tool_calls,
+    )
 
 
 def _process_stream_event(
-    event: dict, accumulated_text: list[str], accumulated_reasoning: list[str], tool_call_blocks: list[dict]
-) -> dict | bool | None:
+    event: dict,
+    accumulated_text: list[str],
+    accumulated_reasoning: list[str],
+    tool_call_blocks: list[AgentToolCall],
+) -> LLMError | Literal[True] | None:
     if not isinstance(event, dict) or "event" not in event:
         raise ValueError(f"Invalid stream event — expected dict with 'event' key: {type(event).__name__}")
     event_type = event["event"]
@@ -208,22 +231,29 @@ def _process_stream_event(
     return None
 
 
-def _merge_tool_block(blocks: list[dict], chunk: dict) -> None:
+def _merge_tool_block(blocks: list[AgentToolCall], chunk: dict) -> None:
     fn = chunk.get("function", {})
     name = fn.get("name", "")
     args_chunk = fn.get("arguments", "")
 
     if name:
-        blocks.append({
-            "id": chunk.get("id") or str(uuid4()),
-            "type": "function",
-            "function": {"name": name, "arguments": args_chunk},
-        })
+        blocks.append(AgentToolCall(
+            id=chunk.get("id") or str(uuid4()),
+            function=ToolFunction(name=name, arguments=_parse_partial_args(args_chunk)),
+        ))
     elif args_chunk and blocks:
-        blocks[-1]["function"]["arguments"] += args_chunk
+        current = blocks[-1].function.arguments
+        existing = current.get("_raw", json.dumps(current) if current else "")
+        blocks[-1].function.arguments = _parse_partial_args(existing + args_chunk)
     elif args_chunk:
-        blocks.append({
-            "id": chunk.get("id") or str(uuid4()),
-            "type": "function",
-            "function": {"name": "", "arguments": args_chunk},
-        })
+        blocks.append(AgentToolCall(
+            id=chunk.get("id") or str(uuid4()),
+            function=ToolFunction(name="", arguments=_parse_partial_args(args_chunk)),
+        ))
+
+
+def _parse_partial_args(value: str) -> dict:
+    try:
+        return json.loads(value) if value else {}
+    except json.JSONDecodeError:
+        return {"_raw": value}

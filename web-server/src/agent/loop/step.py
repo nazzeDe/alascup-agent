@@ -109,7 +109,7 @@ class AgentStep:
             f"Enter act_node ({phase})",
             chat_id=str(state.chat_id),
             approved_count=len(approved),
-            approved_ids=[tc.get("id", "?") for tc in approved],
+            approved_ids=[tc.id for tc in approved],
         )
         emitter.emit_tools_started(approved)
         exec_out = await self._act(state, ctx)

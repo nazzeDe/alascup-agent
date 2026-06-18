@@ -1,30 +1,34 @@
 from dataclasses import dataclass, field
 
+from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
+from src.agent.state import LLMError, StreamChunk
+
+
 @dataclass
 class ThinkOutput:
-    assistant_message: dict | None = None
-    tool_calls: list = field(default_factory=list)
-    pre_executed: list = field(default_factory=list)
+    assistant_message: AgentMessage | None = None
+    tool_calls: list[AgentToolCall] = field(default_factory=list)
+    pre_executed: list[AgentToolResult] = field(default_factory=list)
     is_done: bool = False
-    stream_chunks: list = field(default_factory=list)  # (type, delta) tuples for streaming
-    llm_error: dict | None = None
+    stream_chunks: list[StreamChunk] = field(default_factory=list)
+    llm_error: LLMError | None = None
 
 
 @dataclass
 class ReviewOutput:
-    approved: list = field(default_factory=list)
-    rejected: list = field(default_factory=list)
-    pending: list = field(default_factory=list)
+    approved: list[AgentToolCall] = field(default_factory=list)
+    rejected: list[AgentToolCall] = field(default_factory=list)
+    pending: list[AgentToolCall] = field(default_factory=list)
     transition: str | None = None
 
 
 @dataclass
 class ExecuteOutput:
-    results: list = field(default_factory=list)
+    results: list[AgentToolResult] = field(default_factory=list)
 
 
 @dataclass
 class ObserveOutput:
-    tool_messages: list = field(default_factory=list)
-    emitted_results: list = field(default_factory=list)
+    tool_messages: list[AgentMessage] = field(default_factory=list)
+    emitted_results: list[AgentToolResult] = field(default_factory=list)
     transition: str = ""

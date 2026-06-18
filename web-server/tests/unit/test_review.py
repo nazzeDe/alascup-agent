@@ -69,8 +69,8 @@ class TestReviewNode:
         )
 
         assert len(result.approved) == 2
-        assert result.approved[0]["function"]["name"] == "get_cpu"
-        assert result.approved[1]["function"]["name"] == "get_memory"
+        assert result.approved[0].function.name == "get_cpu"
+        assert result.approved[1].function.name == "get_memory"
         assert result.rejected == []
 
     async def test_blacklisted_tools_rejected(self):
@@ -89,9 +89,9 @@ class TestReviewNode:
         )
 
         assert len(result.approved) == 1
-        assert result.approved[0]["function"]["name"] == "get_cpu"
+        assert result.approved[0].function.name == "get_cpu"
         assert len(result.rejected) == 1
-        assert result.rejected[0]["function"]["name"] == "blacklist_cmd"
+        assert result.rejected[0].function.name == "blacklist_cmd"
 
     async def test_whitelist_overrides_classification(self):
         """Whitelist overrides: even non-readonly is auto-approved if whitelisted."""
@@ -127,7 +127,7 @@ class TestReviewNode:
         )
 
         assert len(result.pending) == 1
-        assert result.pending[0]["function"]["name"] == "delete_logs"
+        assert result.pending[0].function.name == "delete_logs"
         assert result.approved == []
         assert result.rejected == []
         assert result.transition == Transition.APPROVAL_PENDING
@@ -169,8 +169,8 @@ class TestReviewNode:
             _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
         )
 
-        approved_names = [tc["function"]["name"] for tc in result.approved]
-        pending_names = [tc["function"]["name"] for tc in result.pending]
+        approved_names = [tc.function.name for tc in result.approved]
+        pending_names = [tc.function.name for tc in result.pending]
         assert "get_cpu" in approved_names
         assert "get_memory" in approved_names
         assert "delete_logs" in pending_names

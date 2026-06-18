@@ -9,9 +9,22 @@ from src.agent.events import (
     EventChannel,
     TurnFailed,
 )
+from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult, ToolFunction
 from src.agent.state import AgentState, Transition, TurnScratch, get_transition
 from src.agent.turn_context import TurnContext, Auditor
 from src.models.audit import AuditActor
+
+
+def _msg(role: str, content: str) -> AgentMessage:
+    return AgentMessage(role=role, content=content)
+
+
+def _call(name: str, arguments: dict | None = None, **kwargs) -> AgentToolCall:
+    return AgentToolCall(function=ToolFunction(name=name, arguments=arguments or {}), **kwargs)
+
+
+def _result(tool_name: str, tool_call_id: str, result: dict, **kwargs) -> AgentToolResult:
+    return AgentToolResult(tool_name=tool_name, tool_call_id=tool_call_id, result=result, **kwargs)
 
 
 # ── collect_events helper ──────────────────────────────────────────────────
@@ -99,7 +112,7 @@ class TestOrchestratorTermination:
 
         async def mock_think(state, ctx=None):
             return ThinkOutput(
-                assistant_message={"role": "assistant", "content": "OK"},
+                assistant_message=_msg("assistant", "OK"),
                 is_done=True,
             )
 
@@ -134,18 +147,14 @@ class TestOrchestratorTermination:
             if call_count == 1:
                 # First call: return tool call that needs execution
                 return ThinkOutput(
-                    assistant_message={"role": "assistant", "content": "checking"},
-                    tool_calls=[
-                        {"id": "t1", "function": {"name": "get_cpu_info", "arguments": "{}"}}
-                    ],
-                    pre_executed=[
-                        {"tool_name": "get_cpu_info", "tool_call_id": "t1", "result": {"execution_status": "SUCCEEDED"}}
-                    ],
+                    assistant_message=_msg("assistant", "checking"),
+                    tool_calls=[_call("get_cpu_info", id="t1")],
+                    pre_executed=[_result("get_cpu_info", "t1", {"execution_status": "SUCCEEDED"})],
                     is_done=False,
                 )
             # Second call: done
             return ThinkOutput(
-                assistant_message={"role": "assistant", "content": "done"},
+                assistant_message=_msg("assistant", "done"),
                 is_done=True,
             )
 
@@ -160,12 +169,7 @@ class TestOrchestratorTermination:
             tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
-                fn = tc.get("function", {})
-                results.append({
-                    "tool_name": fn.get("name", "?"),
-                    "tool_call_id": tc.get("id", "?"),
-                    "result": {"execution_status": "SUCCEEDED"},
-                })
+                results.append(_result(tc.function.name, tc.id, {"execution_status": "SUCCEEDED"}))
             return ExecuteOutput(results=results)
 
         orch = LoopOrchestrator(
@@ -213,7 +217,7 @@ class TestOrchestratorRecoveryEmission:
                     is_done=True,
                 )
             return ThinkOutput(
-                assistant_message={"role": "assistant", "content": "Recovered response"},
+                assistant_message=_msg("assistant", "Recovered response"),
                 is_done=True,
             )
 
@@ -322,15 +326,15 @@ class TestApprovalFlowCallIdConsistency:
             if think_calls == 1:
                 # First call: generate a mutable tool that needs approval
                 return ThinkOutput(
-                    assistant_message={"role": "assistant", "content": "Creating tmp file"},
-                    tool_calls=[{
-                        "id": approved_call_id,
-                        "type": "function",
-                        "function": {"name": "bash", "arguments": '{"command": "mkdir -p ~/tmp"}'},
-                        "mutable": True,
-                        "is_read_only": None,
-                        "server_name": "tool-server",
-                    }],
+                    assistant_message=_msg("assistant", "Creating tmp file"),
+                    tool_calls=[_call(
+                        "bash",
+                        {"command": "mkdir -p ~/tmp"},
+                        id=approved_call_id,
+                        mutable=True,
+                        is_read_only=None,
+                        server_name="tool-server",
+                    )],
                     is_done=False,
                 )
             elif think_calls == 3:
@@ -338,20 +342,20 @@ class TestApprovalFlowCallIdConsistency:
                 # the first tool's result. This triggers the bug — causes
                 # emitted_results overwrite in observe_node.
                 return ThinkOutput(
-                    assistant_message={"role": "assistant", "content": "Verifying"},
-                    tool_calls=[{
-                        "id": second_call_id,
-                        "type": "function",
-                        "function": {"name": "ls", "arguments": '{"path": "~/tmp"}'},
-                        "is_read_only": True,
-                        "server_name": "tool-server",
-                    }],
+                    assistant_message=_msg("assistant", "Verifying"),
+                    tool_calls=[_call(
+                        "ls",
+                        {"path": "~/tmp"},
+                        id=second_call_id,
+                        is_read_only=True,
+                        server_name="tool-server",
+                    )],
                     is_done=False,
                 )
             else:
                 # Fourth (or subsequent) call: text response, done
                 return ThinkOutput(
-                    assistant_message={"role": "assistant", "content": "Done"},
+                    assistant_message=_msg("assistant", "Done"),
                     is_done=True,
                 )
 
@@ -361,15 +365,14 @@ class TestApprovalFlowCallIdConsistency:
             pending = []
             rejected = []
             for tc in tool_calls:
-                fn = tc.get("function", {})
-                name = fn.get("name", "")
+                name = tc.function.name
                 if name == "bash":
                     # Needs approval
                     pending.append(tc)
                 else:
                     # Auto-approve everything else
-                    tc["is_read_only"] = tc.get("is_read_only", False)
-                    tc["request_id"] = "req-auto"
+                    tc.is_read_only = bool(tc.is_read_only)
+                    tc.request_id = "req-auto"
                     approved.append(tc)
             if pending:
                 return ReviewOutput(
@@ -384,14 +387,13 @@ class TestApprovalFlowCallIdConsistency:
             tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
-                fn = tc.get("function", {})
-                results.append({
-                    "tool_name": fn.get("name", "?"),
-                    "tool_call_id": tc.get("id", "?"),
-                    "result": {"execution_status": "SUCCEEDED", "output": "ok"},
-                    "is_read_only": tc.get("is_read_only", False),
-                    "is_rollbackable": tc.get("is_rollbackable", False),
-                })
+                results.append(_result(
+                    tc.function.name,
+                    tc.id,
+                    {"execution_status": "SUCCEEDED", "output": "ok"},
+                    is_read_only=bool(tc.is_read_only),
+                    is_rollbackable=tc.is_rollbackable,
+                ))
             return ExecuteOutput(results=results)
 
         orch = LoopOrchestrator(
@@ -448,10 +450,8 @@ class TestCircuitBreaker:
 
         async def mock_think(state, ctx=None):
             return ThinkOutput(
-                assistant_message={"role": "assistant", "content": "looping"},
-                pre_executed=[
-                    {"tool_name": "x", "tool_call_id": "t1", "result": {}}
-                ],
+                assistant_message=_msg("assistant", "looping"),
+                pre_executed=[_result("x", "t1", {})],
                 is_done=False,
             )
 

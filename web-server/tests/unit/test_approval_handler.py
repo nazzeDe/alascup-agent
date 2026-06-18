@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.agent.events import ApprovalRequired, EventChannel
+from src.agent.domain import AgentToolCall, ToolFunction
 from src.agent.loop.approval import (
     ApprovalHandler,
     _apply_decisions,
@@ -20,6 +21,27 @@ from src.models.tool import ApprovalStatus, ExecutionStatus
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _call(name: str = "", *, id: str = "", arguments: dict | None = None, **kwargs) -> AgentToolCall:
+    return AgentToolCall(
+        id=id,
+        function=ToolFunction(name=name, arguments=arguments or {}),
+        **kwargs,
+    )
+
+
+def _calls(raw: list[dict]) -> list[AgentToolCall]:
+    result = []
+    for item in raw:
+        fn = item.get("function", {})
+        result.append(_call(
+            fn.get("name", ""),
+            id=item.get("id", ""),
+            arguments=fn.get("arguments", {}),
+            **{k: v for k, v in item.items() if k not in {"function", "id"}},
+        ))
+    return result
 
 
 def _make_turn_ctx(chat_id: UUID | None = None, turn_id: UUID = None, iteration: int = 1, model: str = "test-model") -> TurnContext:
@@ -59,6 +81,8 @@ def _make_scratch(**overrides) -> TurnScratch:
         "transition": None,
     }
     defaults.update(overrides)
+    for key in ("pending_approval", "approved_tool_calls", "rejected_tool_calls", "tool_calls"):
+        defaults[key] = _calls(defaults[key])
     return TurnScratch(**defaults)
 
 
@@ -67,38 +91,29 @@ def _make_scratch(**overrides) -> TurnScratch:
 
 class TestApplyDecisions:
     def test_splits_approved_and_rejected(self):
-        pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "rm_file"}, "id": "2"},
-        ]
+        pending = [_call("get_cpu", id="1"), _call("rm_file", id="2")]
         decisions = [{"status": "APPROVED", "reason": None},
                      {"status": "REJECTED", "reason": "not needed"}]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
-        assert approved[0]["id"] == "1"
-        assert approved[0]["approval_status"] == "APPROVED"
+        assert approved[0].id == "1"
+        assert approved[0].approval_status == "APPROVED"
         assert len(rejected) == 1
-        assert rejected[0]["id"] == "2"
-        assert rejected[0]["rejection_reason"] == "not needed"
+        assert rejected[0].id == "2"
+        assert rejected[0].rejection_reason == "not needed"
 
     def test_missing_decisions_default_to_expired(self):
-        pending = [
-            {"function": {"name": "get_cpu"}, "id": "1"},
-            {"function": {"name": "rm_file"}, "id": "2"},
-        ]
+        pending = [_call("get_cpu", id="1"), _call("rm_file", id="2")]
         decisions = [{"status": "APPROVED", "reason": None}]  # Only one decision for two tools
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
-        assert approved[0]["id"] == "1"
+        assert approved[0].id == "1"
         assert len(rejected) == 1
-        assert rejected[0]["id"] == "2"
-        assert "rejection_reason" in rejected[0]
+        assert rejected[0].id == "2"
+        assert rejected[0].rejection_reason is None
 
     def test_all_approved(self):
-        pending = [
-            {"function": {"name": "a"}, "id": "1"},
-            {"function": {"name": "b"}, "id": "2"},
-        ]
+        pending = [_call("a", id="1"), _call("b", id="2")]
         approved, rejected = _apply_decisions(pending, [
             {"status": "APPROVED", "reason": None},
             {"status": "APPROVED", "reason": None},
@@ -107,10 +122,7 @@ class TestApplyDecisions:
         assert len(rejected) == 0
 
     def test_all_expired_default(self):
-        pending = [
-            {"function": {"name": "a"}, "id": "1"},
-            {"function": {"name": "b"}, "id": "2"},
-        ]
+        pending = [_call("a", id="1"), _call("b", id="2")]
         decisions = [{"status": "EXPIRED", "reason": None},
                      {"status": "EXPIRED", "reason": None}]
         approved, rejected = _apply_decisions(pending, decisions)
@@ -124,28 +136,24 @@ class TestApplyDecisions:
 class TestInjectRejectionMessages:
     def test_appends_tool_messages(self):
         state = AgentState(messages=[{"role": "user", "content": "hello"}])
-        rejected = [
-            {"function": {"name": "get_cpu"}, "id": "tc-1", "rejection_reason": "not needed"},
-        ]
+        rejected = [_call("get_cpu", id="tc-1", rejection_reason="not needed")]
         _inject_rejection_messages(state, rejected)
         assert len(state.messages) == 2
         tool_msg = state.messages[-1]
-        assert tool_msg["role"] == "tool"
-        assert tool_msg["tool_call_id"] == "tc-1"
-        assert tool_msg["name"] == "get_cpu"
-        assert "REJECTED" in tool_msg["content"]
-        assert "not needed" in tool_msg["content"]
-        assert "do not retry" in tool_msg["content"].lower()
+        assert tool_msg.role == "tool"
+        assert tool_msg.tool_call_id == "tc-1"
+        assert tool_msg.name == "get_cpu"
+        assert "REJECTED" in tool_msg.content
+        assert "not needed" in tool_msg.content
+        assert "do not retry" in tool_msg.content.lower()
 
     def test_rejection_without_reason(self):
         state = AgentState(messages=[{"role": "user", "content": "hello"}])
-        rejected = [
-            {"function": {"name": "rm_file"}, "id": "tc-x"},
-        ]
+        rejected = [_call("rm_file", id="tc-x")]
         _inject_rejection_messages(state, rejected)
         tool_msg = state.messages[-1]
-        assert "rejection_reason=" not in tool_msg["content"]
-        assert "do not retry" in tool_msg["content"].lower()
+        assert "rejection_reason=" not in tool_msg.content
+        assert "do not retry" in tool_msg.content.lower()
 
     def test_empty_rejected_no_change(self):
         state = AgentState(messages=[{"role": "user", "content": "hello"}])
@@ -155,21 +163,21 @@ class TestInjectRejectionMessages:
     def test_multiple_rejected(self):
         state = AgentState()
         rejected = [
-            {"function": {"name": "tool_a"}, "id": "a", "rejection_reason": "nope"},
-            {"function": {"name": "tool_b"}, "id": "b", "rejection_reason": "stop"},
+            _call("tool_a", id="a", rejection_reason="nope"),
+            _call("tool_b", id="b", rejection_reason="stop"),
         ]
         _inject_rejection_messages(state, rejected)
         assert len(state.messages) == 2
-        assert state.messages[0]["name"] == "tool_a"
-        assert "nope" in state.messages[0]["content"]
-        assert state.messages[1]["name"] == "tool_b"
-        assert "stop" in state.messages[1]["content"]
+        assert state.messages[0].name == "tool_a"
+        assert "nope" in state.messages[0].content
+        assert state.messages[1].name == "tool_b"
+        assert "stop" in state.messages[1].content
 
     def test_unknown_function_name(self):
         state = AgentState()
-        rejected = [{"id": "no-fn"}]
+        rejected = [_call(id="no-fn")]
         _inject_rejection_messages(state, rejected)
-        assert state.messages[0]["name"] == "unknown"
+        assert state.messages[0].name == "unknown"
 
 
 # ── _format_rejection_message ──────────────────────────────────────────────
@@ -177,8 +185,7 @@ class TestInjectRejectionMessages:
 
 class TestFormatRejectionMessage:
     def test_with_reason(self):
-        tc = {"function": {"name": "rm_file"}, "id": "tc-1",
-              "rejection_reason": "I don't want to create this"}
+        tc = _call("rm_file", id="tc-1", rejection_reason="I don't want to create this")
         msg = _format_rejection_message(tc)
         assert "[rm_file] execution_status=REJECTED" in msg
         assert "rejection_reason=I don't want to create this" in msg
@@ -186,14 +193,14 @@ class TestFormatRejectionMessage:
         assert "propose an alternative" not in msg
 
     def test_without_reason(self):
-        tc = {"function": {"name": "get_cpu"}, "id": "tc-2"}
+        tc = _call("get_cpu", id="tc-2")
         msg = _format_rejection_message(tc)
         assert "[get_cpu] execution_status=REJECTED" in msg
         assert "rejection_reason=" not in msg
         assert "error=Tool was rejected by human. Do NOT retry." in msg
 
     def test_unknown_tool_name(self):
-        tc = {"id": "bare"}
+        tc = _call(id="bare")
         msg = _format_rejection_message(tc)
         assert "[unknown] execution_status=REJECTED" in msg
 
@@ -322,7 +329,7 @@ class TestApprovalHandlerResolve:
         channel.close()
 
         assert len(scratch.approved_tool_calls) == 1
-        assert scratch.approved_tool_calls[0]["approval_status"] == "APPROVED"
+        assert scratch.approved_tool_calls[0].approval_status == "APPROVED"
         assert scratch.pending_approval == []
         assert scratch.transition == Transition.APPROVAL_GRANTED
 
@@ -441,9 +448,10 @@ class TestApprovalHandlerResolve:
             lifecycle=lifecycle,
         )
         chat_id = "12345678-1234-5678-1234-567812345678"
+        call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-1"},
+                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
             ],
         )
         channel = EventChannel()
@@ -453,7 +461,7 @@ class TestApprovalHandlerResolve:
 
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
-        assert update["call_id"] == "call-1"
+        assert update["call_id"] == call_id
         assert update["approval_status"] == ApprovalStatus.APPROVED
         assert update["execution_status"] == ExecutionStatus.RUNNING
 
@@ -468,9 +476,10 @@ class TestApprovalHandlerResolve:
             lifecycle=lifecycle,
         )
         chat_id = "12345678-1234-5678-1234-567812345678"
+        call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-2"},
+                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
             ],
         )
         channel = EventChannel()
@@ -480,7 +489,7 @@ class TestApprovalHandlerResolve:
 
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
-        assert update["call_id"] == "call-2"
+        assert update["call_id"] == call_id
         assert update["approval_status"] == ApprovalStatus.REJECTED
         assert update["execution_status"] == ExecutionStatus.FAILED
 
@@ -495,9 +504,10 @@ class TestApprovalHandlerResolve:
             lifecycle=lifecycle,
         )
         chat_id = "12345678-1234-5678-1234-567812345678"
+        call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": "call-3"},
+                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
             ],
         )
         channel = EventChannel()
@@ -507,7 +517,7 @@ class TestApprovalHandlerResolve:
 
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
-        assert update["call_id"] == "call-3"
+        assert update["call_id"] == call_id
         assert update["approval_status"] == ApprovalStatus.EXPIRED
         assert update["execution_status"] == ExecutionStatus.FAILED
 

@@ -537,6 +537,7 @@ class TestPersistToolResultMessage:
     @pytest.mark.asyncio
     async def test_persists_tool_result_metadata(self):
         from src.services.tool_lifecycle import ToolCallLifecycle
+        from src.agent.domain import AgentMessage
         from src.models.message import Message, MessageType
 
         sm = MagicMock()
@@ -545,12 +546,14 @@ class TestPersistToolResultMessage:
         lifecycle = ToolCallLifecycle(sm)
         chat_id = uuid.uuid4()
 
-        await lifecycle.persist_tool_result(chat_id, [{
-            "role": "tool",
-            "content": "[get_cpu] execution_status=SUCCEEDED",
-            "tool_call_id": "call_abc",
-            "name": "get_cpu",
-        }])
+        await lifecycle.persist_tool_result(chat_id, [
+            AgentMessage(
+                role="tool",
+                content="[get_cpu] execution_status=SUCCEEDED",
+                tool_call_id="call_abc",
+                name="get_cpu",
+            )
+        ])
 
         sm.add_message.assert_called_once()
         msg_arg = sm.add_message.call_args[0][1]

@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from loguru import logger
@@ -40,7 +41,7 @@ class AssistantDone:
 class ToolCallStarted:
     call_id: str
     tool_name: str
-    params: dict
+    params: dict[str, Any]
     is_read_only: bool
     server: str
 
@@ -50,7 +51,7 @@ class ToolCallFinished:
     call_id: str
     execution_status: str
     output: str | None = None
-    error: dict | None = None
+    error: dict[str, Any] | None = None
     execution_time_ms: int | None = None
 
 
@@ -59,7 +60,7 @@ class ApprovalRequired:
     chat_id: str
     request_id: str
     tool_name: str
-    params: dict
+    params: dict[str, Any]
     reason: str
     call_id: str = ""
 
@@ -78,7 +79,7 @@ class EventChannel:
     """Thin wrapper over asyncio.Queue[DomainEvent | None] with close() sentinel."""
 
     def __init__(self):
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: asyncio.Queue[DomainEvent | None] = asyncio.Queue()
         self._closed = False
         self._instance_id = id(self)
 
