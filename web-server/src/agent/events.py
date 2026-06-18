@@ -1,6 +1,7 @@
 """Typed domain events for the agent loop. Serialization happens once at the SSEStream boundary."""
 
 import asyncio
+from collections.abc import Awaitable, Callable, AsyncIterator
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -159,3 +160,83 @@ class EventChannel:
 
     def is_closed(self) -> bool:
         return self._closed
+
+
+EventProducer = Callable[[EventChannel], Awaitable[None]]
+DisconnectCheck = Callable[[], Awaitable[bool]]
+
+
+class EventFlow:
+    """Owns producer task, channel close/drain, and DomainEvent output."""
+
+    def __init__(
+        self,
+        producer: EventProducer,
+        *,
+        disconnect_check: DisconnectCheck | None = None,
+        poll_interval: float = 0.1,
+    ) -> None:
+        self._producer = producer
+        self._disconnect_check = disconnect_check
+        self._poll_interval = poll_interval
+
+    async def events(self) -> AsyncIterator[DomainEvent]:
+        channel = EventChannel()
+        task = asyncio.create_task(self._run_producer(channel))
+        try:
+            while True:
+                event = await self._receive_event(channel, task)
+                if event == "continue":
+                    continue
+                if event == "drain":
+                    for drained in self._drain_channel(channel, task):
+                        yield drained
+                    break
+                if event is None:
+                    break
+                yield event
+                if await self._is_disconnected():
+                    break
+        finally:
+            await self._cancel_task(task)
+            channel.close()
+
+    async def _run_producer(self, channel: EventChannel) -> None:
+        try:
+            await self._producer(channel)
+        finally:
+            channel.close()
+
+    async def _receive_event(self, channel: EventChannel, task: asyncio.Task):
+        try:
+            return await asyncio.wait_for(channel.receive(), timeout=self._poll_interval)
+        except asyncio.TimeoutError:
+            return "drain" if await self._should_drain(channel, task) else "continue"
+
+    async def _should_drain(self, channel: EventChannel, task: asyncio.Task) -> bool:
+        return (task.done() and channel.is_closed()) or await self._is_disconnected()
+
+    def _drain_channel(self, channel: EventChannel, task: asyncio.Task):
+        if not channel.is_closed():
+            channel.close()
+        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_START,
+                  orch_done=task.done(), channel_closed=channel.is_closed())
+        drained_count = 0
+        for event in channel.drain_nowait():
+            drained_count += 1
+            yield event
+        debug_log("DEBUG", tp.CHAT_TURN_DRAIN_DONE, drained_events=drained_count)
+
+    async def _is_disconnected(self) -> bool:
+        if self._disconnect_check is None:
+            return False
+        return await self._disconnect_check()
+
+    async def _cancel_task(self, task: asyncio.Task | None) -> None:
+        if not task or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

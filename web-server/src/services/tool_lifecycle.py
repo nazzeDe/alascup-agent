@@ -92,7 +92,7 @@ class ToolCallLifecycle:
                 params = json.loads(args_str) if isinstance(args_str, str) else args_str
             except json.JSONDecodeError:
                 params = {}
-            tc_id_str = tc.get("id", "")
+            tc_id_str = str(tc.get("id", ""))
             server_name = tc.get("server_name", "tool-server")
 
             call = ToolCall(
@@ -177,26 +177,26 @@ class ToolCallLifecycle:
             result=result,
         )
 
-    async def mark_approved(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_approved(self, chat_id: UUID | None, tool_call: dict) -> None:
         await self.update(
             chat_id,
-            call_id,
+            tool_call.get("call_id"),
             approval_status=ApprovalStatus.APPROVED,
             execution_status=ExecutionStatus.RUNNING,
         )
 
-    async def mark_rejected(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_rejected(self, chat_id: UUID | None, tool_call: dict) -> None:
         await self.update(
             chat_id,
-            call_id,
+            tool_call.get("call_id"),
             approval_status=ApprovalStatus.REJECTED,
             execution_status=ExecutionStatus.FAILED,
         )
 
-    async def mark_expired(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_expired(self, chat_id: UUID | None, tool_call: dict) -> None:
         await self.update(
             chat_id,
-            call_id,
+            tool_call.get("call_id"),
             approval_status=ApprovalStatus.EXPIRED,
             execution_status=ExecutionStatus.FAILED,
         )
@@ -204,7 +204,7 @@ class ToolCallLifecycle:
     async def mark_executed(
         self,
         chat_id: UUID | None,
-        call_id,
+        tool_call: dict,
         result: dict,
     ) -> None:
         exec_status_str = result.get("execution_status", "UNKNOWN")
@@ -214,7 +214,7 @@ class ToolCallLifecycle:
             exec_status = ExecutionStatus.FAILED
         await self.update(
             chat_id,
-            call_id,
+            tool_call.get("call_id"),
             execution_status=exec_status,
             error=result.get("error"),
             backup_ref=result.get("backup_ref"),

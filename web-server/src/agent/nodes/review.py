@@ -82,7 +82,7 @@ async def _apply_decision(
             params=args, decision="REJECT",
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.mark_rejected(chat_id_uuid, tc.get("call_id"))
+            await lifecycle.mark_rejected(chat_id_uuid, tc)
     elif decision == "AUTO_APPROVE":
         tc["is_read_only"] = is_read_only
         tc["request_id"] = str(uuid4())
@@ -93,7 +93,7 @@ async def _apply_decision(
             params=args,
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.mark_approved(chat_id_uuid, tc.get("call_id"))
+            await lifecycle.mark_approved(chat_id_uuid, tc)
     else:
         tc["is_read_only"] = is_read_only
         pending.append(tc)

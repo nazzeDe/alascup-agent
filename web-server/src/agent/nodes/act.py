@@ -75,7 +75,7 @@ async def _record_execution_lifecycle(lifecycle, chat_id: str | None, tc: dict, 
     if lifecycle is None:
         return
     cid = UUID(chat_id) if chat_id else None
-    await lifecycle.mark_executed(cid, tc.get("call_id"), result)
+    await lifecycle.mark_executed(cid, tc, result)
 
 
 def _log_failed_execution(call: dict, result: dict) -> None:

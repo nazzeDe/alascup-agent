@@ -1,4 +1,4 @@
-from src.agent.nodes.think import think_node, _merge_tool_block
+from src.agent.nodes.think import think_node
 from src.agent.nodes.review import review_node
 from src.agent.nodes.act import act_node
 from src.agent.nodes.observe import observe_node, route_after_review, route_after_think
@@ -13,7 +13,6 @@ __all__ = [
     "route_after_review",
     "route_after_think",
     "_messages",
-    "_merge_tool_block",
     "_format_tools",
     "_parse_args",
 ]

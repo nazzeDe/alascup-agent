@@ -195,12 +195,12 @@ class ApprovalHandler:
         if self._lifecycle is None:
             return
         for tc in approved:
-            await self._lifecycle.mark_approved(chat_id, tc.get("call_id"))
+            await self._lifecycle.mark_approved(chat_id, tc)
         for tc in rejected:
             if tc.get("approval_status") == "EXPIRED":
-                await self._lifecycle.mark_expired(chat_id, tc.get("call_id"))
+                await self._lifecycle.mark_expired(chat_id, tc)
             else:
-                await self._lifecycle.mark_rejected(chat_id, tc.get("call_id"))
+                await self._lifecycle.mark_rejected(chat_id, tc)
 
 
 def _approval_args(fn: dict) -> dict:

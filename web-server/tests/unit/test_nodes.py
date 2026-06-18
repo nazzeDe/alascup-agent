@@ -7,7 +7,6 @@ from src.agent.nodes import (
     observe_node,
     think_node,
     _messages,
-    _merge_tool_block,
 )
 from src.agent.state import AgentState, Transition
 from src.agent.turn_context import TurnContext
@@ -235,12 +234,12 @@ class TestActNode:
         lifecycle = MagicMock()
         lifecycle.mark_executed = AsyncMock()
 
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": uuid4()},
-        ])
+        tool_call = {"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": uuid4()}
+        state = _state_with_tools([tool_call])
         await act_node(state, executor=executor, lifecycle=lifecycle)
 
         lifecycle.mark_executed.assert_called_once()
+        assert lifecycle.mark_executed.call_args.args[1] is tool_call
         assert lifecycle.mark_executed.call_args.args[2]["output"] == "CPU: 45%"
 
 
@@ -494,51 +493,6 @@ class TestMessagesConversion:
         result = _messages(state)
         assert result[0]["role"] == "assistant"
         assert "tool_calls" in result[0]
-
-
-class TestMergeToolBlock:
-    """Verify _merge_tool_block sets required fields."""
-
-    def test_new_block_has_id(self):
-        """First chunk (with name) must create a block with a valid id."""
-        blocks: list[dict] = []
-        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert "id" in blocks[0]
-        assert blocks[0]["id"] != ""
-
-    def test_chunk_with_id_preserves_it(self):
-        """If the chunk carries an id, it should be used."""
-        blocks: list[dict] = []
-        chunk = {"id": "explicit-id", "function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert blocks[0]["id"] == "explicit-id"
-
-    def test_arguments_only_chunk_appends(self):
-        """Arguments-only chunk appends to the last block without creating a new one."""
-        blocks = [{"id": "t1", "function": {"name": "get_cpu", "arguments": '{"unit":'}}]
-        chunk = {"function": {"arguments": '"percent"}'}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert blocks[0]["function"]["arguments"] == '{"unit":"percent"}'
-
-    def test_new_block_has_type_function(self):
-        """Every tool_call block must have type=function (DeepSeek/OpenAI API requirement)."""
-        blocks: list[dict] = []
-        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert blocks[0]["type"] == "function"
-
-    def test_arguments_only_block_has_type_function(self):
-        """Arguments-only chunk that creates a new block must also have type=function."""
-        blocks: list[dict] = []
-        chunk = {"function": {"name": "", "arguments": '{"cmd":"ls"}'}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert blocks[0]["type"] == "function"
-        assert blocks[0]["function"]["name"] == ""
-        assert blocks[0]["function"]["arguments"] == '{"cmd":"ls"}'
 
 
 class TestReasoningStreaming:

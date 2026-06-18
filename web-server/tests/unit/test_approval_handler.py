@@ -244,26 +244,26 @@ class _MockLifecycle:
     async def update(self, chat_id, call_id, **kwargs):
         self.updates.append({"chat_id": chat_id, "call_id": call_id, **kwargs})
 
-    async def mark_approved(self, chat_id, call_id):
+    async def mark_approved(self, chat_id, tool_call):
         self.updates.append({
             "chat_id": chat_id,
-            "call_id": call_id,
+            "call_id": tool_call.get("call_id"),
             "approval_status": ApprovalStatus.APPROVED,
             "execution_status": ExecutionStatus.RUNNING,
         })
 
-    async def mark_rejected(self, chat_id, call_id):
+    async def mark_rejected(self, chat_id, tool_call):
         self.updates.append({
             "chat_id": chat_id,
-            "call_id": call_id,
+            "call_id": tool_call.get("call_id"),
             "approval_status": ApprovalStatus.REJECTED,
             "execution_status": ExecutionStatus.FAILED,
         })
 
-    async def mark_expired(self, chat_id, call_id):
+    async def mark_expired(self, chat_id, tool_call):
         self.updates.append({
             "chat_id": chat_id,
-            "call_id": call_id,
+            "call_id": tool_call.get("call_id"),
             "approval_status": ApprovalStatus.EXPIRED,
             "execution_status": ExecutionStatus.FAILED,
         })

@@ -1,5 +1,4 @@
 import json
-from uuid import uuid4
 
 from src.agent.nodes._helpers import _format_tools, _messages
 from src.agent.nodes._helpers import _dispatch_tool_calls
@@ -7,6 +6,7 @@ from src.agent.results import ThinkOutput
 from src.agent.turn_context import TurnContext
 from src.observability.debug_log import log as debug_log
 from src.observability.timing import start_feature, complete_feature
+from src.services.llm_stream_assembly import LLMStreamAssembly, LLMStreamError
 
 
 async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, lifecycle=None):
@@ -18,9 +18,7 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
     messages = _messages(state)
     system = state.get("system")
 
-    accumulated_text: list[str] = []
-    accumulated_reasoning: list[str] = []
-    tool_call_blocks: list[dict] = []
+    assembly = LLMStreamAssembly()
     stream_chunks: list[tuple] = []
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     stream_sink = getattr(ctx, "stream_sink", None) if ctx else None
@@ -30,30 +28,31 @@ async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, life
 
     error = await _stream_llm(
         llm, messages, tools, system, chat_id, feature,
-        accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
-        stream_sink=stream_sink,
+        assembly, stream_chunks, stream_sink=stream_sink,
     )
     if error is not None:
         return ThinkOutput(llm_error=error, is_done=True)
 
     return await _build_think_result(
-        accumulated_text, accumulated_reasoning, tool_call_blocks,
-        stream_chunks, executor, available_tools, llm=llm, lifecycle=lifecycle,
+        assembly, stream_chunks, executor, available_tools, llm=llm, lifecycle=lifecycle,
         ctx=ctx,
     )
 
 
 async def _stream_llm(
     llm, messages, tools, system, chat_id, feature,
-    accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks,
-    stream_sink=None,
+    assembly: LLMStreamAssembly, stream_chunks, stream_sink=None,
 ) -> dict | None:
     """Drive the LLM stream. Returns error dict or None on success."""
     emitted_live_stream = False
     try:
         async for event in llm.generate_stream(messages, tools=tools, system=system, chat_id=chat_id):
             try:
-                result = _process_stream_event(event, accumulated_text, accumulated_reasoning, tool_call_blocks)
+                chunks = assembly.process(event)
+            except LLMStreamError as exc:
+                _log_stream_error(exc.error, messages, chat_id)
+                complete_feature(feature, status="error")
+                return exc.error
             except Exception as exc:
                 error: dict = {
                     "code": 0,
@@ -63,21 +62,16 @@ async def _stream_llm(
                 _log_stream_error(error, messages, chat_id)
                 complete_feature(feature, status="error")
                 return error
-            if result is True:
+            if assembly.done:
                 if stream_sink is not None and emitted_live_stream:
                     stream_sink.emit_stream_done()
                 complete_feature(feature)
-                _log_stream_complete(accumulated_text, tool_call_blocks, chat_id)
+                _log_stream_complete(assembly, chat_id)
                 return None
-            if result is not None:
-                _log_stream_error(result, messages, chat_id)
-                complete_feature(feature, status="error")
-                return result
-            if event["event"] == "assistant":
-                emitted_live_stream = (
-                    _record_stream_chunks(event["data"], stream_chunks, stream_sink=stream_sink)
-                    or emitted_live_stream
-                )
+            emitted_live_stream = (
+                _record_stream_chunks(chunks, stream_chunks, stream_sink=stream_sink)
+                or emitted_live_stream
+            )
     except Exception as exc:
         error = {
             "code": 0,
@@ -89,15 +83,17 @@ async def _stream_llm(
     return None
 
 
-def _log_stream_complete(accumulated_text, tool_call_blocks, chat_id):
-    tc_count = len(tool_call_blocks)
+def _log_stream_complete(assembly: LLMStreamAssembly, chat_id):
+    tool_calls = assembly.tool_calls
+    tc_count = len(tool_calls)
     if tc_count:
-        names = [b.get("function", {}).get("name", "?") for b in tool_call_blocks]
+        names = [b.get("function", {}).get("name", "?") for b in tool_calls]
         debug_log("DEBUG", "LLM generated tool calls", chat_id=str(chat_id),
                   count=tc_count, tools=",".join(names))
     else:
+        assistant_msg = assembly.assistant_message() or {}
         debug_log("DEBUG", "LLM call complete (text only)", chat_id=str(chat_id),
-                  text_len=len("".join(accumulated_text)))
+                  text_len=len(assistant_msg.get("content", "")))
 
 
 def _log_stream_error(result, messages, chat_id):
@@ -123,30 +119,22 @@ def _log_stream_error(result, messages, chat_id):
     debug_log("DEBUG", "LLM message shapes", chat_id=str(chat_id), shapes=json.dumps(msg_shapes, default=str))
 
 
-def _record_stream_chunks(data_str: str, stream_chunks: list[tuple], stream_sink=None) -> bool:
+def _record_stream_chunks(chunks: list[tuple[str, str]], stream_chunks: list[tuple], stream_sink=None) -> bool:
     """Record (type, delta) tuples for ThinkOutput.stream_chunks."""
-    data = json.loads(data_str)
     emitted = False
-    rc = data.get("reasoning_content", "")
-    if rc:
+    for chunk_type, delta in chunks:
         if stream_sink is not None:
-            stream_sink.emit_stream_delta("reasoning", rc)
+            stream_sink.emit_stream_delta(chunk_type, delta)
         else:
-            stream_chunks.append(("reasoning", rc))
-        emitted = True
-    content_chunk = data.get("delta", "")
-    if content_chunk:
-        if stream_sink is not None:
-            stream_sink.emit_stream_delta("assistant", content_chunk)
-        else:
-            stream_chunks.append(("assistant", content_chunk))
+            stream_chunks.append((chunk_type, delta))
         emitted = True
     return emitted
 
 
-async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call_blocks, stream_chunks, executor, available_tools, llm=None, lifecycle=None, ctx=None) -> ThinkOutput:
+async def _build_think_result(assembly: LLMStreamAssembly, stream_chunks, executor, available_tools, llm=None, lifecycle=None, ctx=None) -> ThinkOutput:
     """Assemble ThinkOutput from accumulated stream data."""
-    assistant_msg = _assemble_assistant_message("".join(accumulated_text), "".join(accumulated_reasoning), tool_call_blocks)
+    assistant_msg = assembly.assistant_message()
+    tool_call_blocks = assembly.tool_calls
 
     if executor is not None and tool_call_blocks:
         pending_tool_calls, pre_executed = await _dispatch_tool_calls(
@@ -173,57 +161,3 @@ async def _build_think_result(accumulated_text, accumulated_reasoning, tool_call
         stream_chunks=stream_chunks,
     )
 
-
-def _assemble_assistant_message(text: str, reasoning: str, tool_calls: list[dict]) -> dict | None:
-    """Build assistant message dict from text, reasoning, and tool calls. Returns None if empty."""
-    if not (text or reasoning or tool_calls):
-        return None
-    msg: dict = {"role": "assistant", "content": text or ""}
-    if reasoning:
-        msg["reasoning_content"] = reasoning
-    if tool_calls:
-        msg["tool_calls"] = tool_calls
-    return msg
-
-
-def _process_stream_event(
-    event: dict, accumulated_text: list[str], accumulated_reasoning: list[str], tool_call_blocks: list[dict]
-) -> dict | bool | None:
-    if not isinstance(event, dict) or "event" not in event:
-        raise ValueError(f"Invalid stream event — expected dict with 'event' key: {type(event).__name__}")
-    event_type = event["event"]
-    if event_type == "assistant":
-        data = json.loads(event["data"])
-        accumulated_text.append(data.get("delta", ""))
-        rc = data.get("reasoning_content", "")
-        if rc:
-            accumulated_reasoning.append(rc)
-    elif event_type == "tool_call":
-        data = json.loads(event["data"])
-        _merge_tool_block(tool_call_blocks, data)
-    elif event_type == "error":
-        return json.loads(event["data"])
-    elif event_type == "done":
-        return True
-    return None
-
-
-def _merge_tool_block(blocks: list[dict], chunk: dict) -> None:
-    fn = chunk.get("function", {})
-    name = fn.get("name", "")
-    args_chunk = fn.get("arguments", "")
-
-    if name:
-        blocks.append({
-            "id": chunk.get("id") or str(uuid4()),
-            "type": "function",
-            "function": {"name": name, "arguments": args_chunk},
-        })
-    elif args_chunk and blocks:
-        blocks[-1]["function"]["arguments"] += args_chunk
-    elif args_chunk:
-        blocks.append({
-            "id": chunk.get("id") or str(uuid4()),
-            "type": "function",
-            "function": {"name": "", "arguments": args_chunk},
-        })
