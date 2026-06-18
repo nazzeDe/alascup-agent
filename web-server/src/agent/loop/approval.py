@@ -135,6 +135,7 @@ class ApprovalHandler:
         await auditor.transition(Transition.APPROVAL_PENDING, actor=AuditActor.POLICY)
 
         if emitter is not None:
+            emitter.emit_tool_started(tc)
             self._emit_approval_required(emitter, tc, chat_id, request_id)
         if profiler:
             profiler.checkpoint("approval_events_emitted")

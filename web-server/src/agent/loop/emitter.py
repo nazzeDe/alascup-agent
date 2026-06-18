@@ -22,6 +22,7 @@ class EventEmitter:
 
     def __init__(self, channel: EventChannel):
         self._channel = channel
+        self._started_call_ids: set[str] = set()
 
     # ── Streaming (from think_node) ──
 
@@ -45,46 +46,64 @@ class EventEmitter:
 
     def emit_tool_started(self, tc: dict) -> None:
         fn = tc.get("function", {})
-        params = fn.get("arguments", "{}")
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except (json.JSONDecodeError, TypeError):
-                params = {}
-        call_id = tc.get("id") or str(uuid4())
+        call_id = self._stable_call_id(tc)
+        if call_id in self._started_call_ids:
+            return
+        self._started_call_ids.add(call_id)
         debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
                   id=call_id, tool=fn.get("name", ""), tc_keys=list(tc.keys()))
         self._channel.send_nowait(ToolCallStarted(
             call_id=call_id,
             tool_name=fn.get("name", ""),
-            params=params,
+            params=self._tool_params(fn),
             is_read_only=tc.get("is_read_only", False),
             server=tc.get("server_name", ""),
         ))
 
     def emit_tool_finished(self, r: dict) -> None:
-        res = r.get("result", {})
-        if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
-            res = res["result"]
         call_id = r.get("tool_call_id") or str(uuid4())
+        res = self._result_payload(r)
         debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
                   id=call_id,
                   status=res.get("execution_status", "SUCCEEDED"),
                   r_keys=list(r.keys()))
-        d = {
+        self._channel.send_nowait(ToolCallFinished(**self._tool_finished_data(call_id, res)))
+
+    def _stable_call_id(self, tc: dict) -> str:
+        call_id = tc.get("id") or str(uuid4())
+        tc["id"] = call_id
+        return call_id
+
+    def _tool_params(self, fn: dict) -> dict:
+        params = fn.get("arguments", "{}")
+        if not isinstance(params, str):
+            return params if isinstance(params, dict) else {}
+        try:
+            parsed = json.loads(params)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _result_payload(self, r: dict) -> dict:
+        res = r.get("result", {})
+        if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
+            return res["result"]
+        return res if isinstance(res, dict) else {}
+
+    def _tool_finished_data(self, call_id: str, res: dict) -> dict:
+        data = {
             "call_id": call_id,
             "execution_status": res.get("execution_status", "SUCCEEDED"),
         }
-        output = res.get("output")
-        if output is not None:
-            d["output"] = output
-        error = res.get("error")
-        if error is not None:
-            d["error"] = error
-        et = res.get("execution_time_ms")
-        if et is not None:
-            d["execution_time_ms"] = et
-        self._channel.send_nowait(ToolCallFinished(**d))
+        for source_key, target_key in (
+            ("output", "output"),
+            ("error", "error"),
+            ("execution_time_ms", "execution_time_ms"),
+        ):
+            value = res.get(source_key)
+            if value is not None:
+                data[target_key] = value
+        return data
 
     # ── Approval ──
 

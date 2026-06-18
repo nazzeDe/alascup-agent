@@ -250,7 +250,6 @@ class AgentLoop:
             ):
                 break
 
-            self._emit_approval_started(scratch, emitter)
             await step.run(state, ctx, emitter, phase="approval re-entry")
             profiler.checkpoint("graph_resume")
             sync_scratch_from_state(scratch, state)
@@ -268,13 +267,6 @@ class AgentLoop:
         state["approved_tool_calls"] = scratch.approved_tool_calls
         state["rejected_tool_calls"] = scratch.rejected_tool_calls
         state["transition"] = scratch.transition
-
-    def _emit_approval_started(self, scratch: TurnScratch, emitter: EventEmitter) -> None:
-        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                  count=len(scratch.approved_tool_calls),
-                  ids=[tc.get("id") for tc in scratch.approved_tool_calls],
-                  phase="approval")
-        emitter.emit_tools_started(scratch.approved_tool_calls)
 
     def _log_graph_resumed(self, scratch: TurnScratch) -> None:
         debug_log(
