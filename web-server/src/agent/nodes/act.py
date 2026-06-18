@@ -13,7 +13,7 @@ from src.observability.timing import start_feature, complete_feature
 
 async def act_node(state, ctx: TurnContext = None, *, executor, audit_logger=None, lifecycle=None):
     """Execute approved_tool_calls concurrently."""
-    tool_calls = state.get("approved_tool_calls", []) or []
+    tool_calls = state.approved_tool_calls
     if not tool_calls:
         return ExecuteOutput()
 

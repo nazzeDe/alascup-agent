@@ -16,7 +16,7 @@ async def review_node(state, ctx: TurnContext = None, *, executor, rule_engine, 
     Returns pending_approval when human decision is needed — the orchestrator
     handles the approval loop externally (no interrupt/resume).
     """
-    tool_calls = state.get("tool_calls", []) or []
+    tool_calls = state.tool_calls
     auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     debug_log("DEBUG", "review_node entered", tc_count=len(tool_calls))

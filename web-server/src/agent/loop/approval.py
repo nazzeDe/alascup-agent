@@ -5,7 +5,7 @@ from uuid import uuid4
 from src.agent.loop.emitter import EventEmitter
 from src.agent.nodes._helpers import _parse_args
 from src.agent.shared import parse_json_object
-from src.agent.state import Transition, TurnScratch
+from src.agent.state import AgentState, Transition, TurnScratch
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
 from src.observability.debug_log import log as debug_log
@@ -49,7 +49,7 @@ def _format_rejection_message(tc: dict) -> str:
     return "\n".join(parts)
 
 
-def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
+def _inject_rejection_messages(state: AgentState, rejected: list[dict]) -> None:
     """Append tool-role rejection messages so LLM can respond to the rejection."""
     if not rejected:
         return
@@ -63,7 +63,7 @@ def _inject_rejection_messages(state: dict, rejected: list[dict]) -> None:
             "name": name,
             "content": _format_rejection_message(tc),
         })
-    state["messages"] = state.get("messages", []) + messages
+    state.messages.extend(messages)
 
 
 class ApprovalHandler:

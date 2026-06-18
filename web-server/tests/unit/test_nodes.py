@@ -379,7 +379,7 @@ class TestObserveNode:
     def test_merges_streaming_tool_results(self):
         """AG-007: observe_node 合并 streaming_tool_results 和 tool_results。"""
         state = _state_with_tools()
-        state["streaming_tool_results"] = [
+        state.streaming_tool_results = [
             {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}},
         ]
 
@@ -391,9 +391,9 @@ class TestObserveNode:
         assert result.transition == Transition.TOOL_RESULTS
 
     def test_clears_streaming_tool_results(self):
-        """observe_node clears streaming_tool_results and tool_results, preserves _emitted_results."""
+        """observe_node clears streaming_tool_results and tool_results, preserves emitted_results."""
         state = _state_with_tools()
-        state["streaming_tool_results"] = [
+        state.streaming_tool_results = [
             {"tool_name": "get_cpu", "tool_call_id": "t1", "result": {"execution_status": "SUCCEEDED"}},
         ]
 
@@ -409,12 +409,12 @@ class TestMessagesConversion:
 
     def test_preserves_tool_calls_on_assistant(self):
         """Assistant messages must carry tool_calls for the LLM to accept tool responses."""
-        state = {
-            "messages": [
+        state = AgentState(
+            messages=[
                 {"role": "assistant", "content": "Let me check.",
                  "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
             ]
-        }
+        )
         result = _messages(state)
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
@@ -423,15 +423,15 @@ class TestMessagesConversion:
 
     def test_normalizes_tool_calls_type_field(self):
         """Tool calls without type=function get normalized (DeepSeek/OpenAI API requirement)."""
-        state = {
-            "messages": [
+        state = AgentState(
+            messages=[
                 {"role": "assistant", "content": "Let me check.",
                  "tool_calls": [
                      {"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}},
                      {"id": "tc2", "function": {"name": "get_mem", "arguments": "{}"}},
                  ]},
             ]
-        }
+        )
         result = _messages(state)
         tcs = result[0]["tool_calls"]
         for tc in tcs:
@@ -439,11 +439,11 @@ class TestMessagesConversion:
 
     def test_preserves_tool_call_id_on_tool(self):
         """Tool messages must carry tool_call_id for the LLM to associate with tool_calls."""
-        state = {
-            "messages": [
+        state = AgentState(
+            messages=[
                 {"role": "tool", "content": "[get_cpu] SUCCEEDED", "tool_call_id": "tc1"},
             ]
-        }
+        )
         result = _messages(state)
         assert len(result) == 1
         assert result[0]["role"] == "tool"
@@ -451,12 +451,12 @@ class TestMessagesConversion:
 
     def test_preserves_name_on_tool(self):
         """Tool messages must carry name — DeepSeek requires this field."""
-        state = {
-            "messages": [
+        state = AgentState(
+            messages=[
                 {"role": "tool", "content": "[get_cpu] SUCCEEDED",
                  "tool_call_id": "tc1", "name": "get_cpu"},
             ]
-        }
+        )
         result = _messages(state)
         assert len(result) == 1
         assert result[0]["role"] == "tool"
@@ -464,22 +464,22 @@ class TestMessagesConversion:
 
     def test_maps_human_to_user(self):
         """Human-style role → user for API."""
-        state = {"messages": [{"role": "human", "content": "hello"}]}
+        state = AgentState(messages=[{"role": "human", "content": "hello"}])
         result = _messages(state)
         assert result[0]["role"] == "user"
 
     def test_maps_ai_to_assistant(self):
         """AI-style role → assistant for API."""
-        state = {"messages": [{"role": "ai", "content": "hello there"}]}
+        state = AgentState(messages=[{"role": "ai", "content": "hello there"}])
         result = _messages(state)
         assert result[0]["role"] == "assistant"
 
     def test_maps_tool_result_to_tool(self):
         """tool_result role (from DB history) → tool for LLM API."""
-        state = {"messages": [
+        state = AgentState(messages=[
             {"role": "tool_result", "content": "[get_cpu] SUCCEEDED",
              "tool_call_id": "tc1", "name": "get_cpu"},
-        ]}
+        ])
         result = _messages(state)
         assert result[0]["role"] == "tool"
         assert result[0]["tool_call_id"] == "tc1"
@@ -487,10 +487,10 @@ class TestMessagesConversion:
 
     def test_maps_tool_call_to_assistant(self):
         """tool_call role → assistant for LLM API."""
-        state = {"messages": [
+        state = AgentState(messages=[
             {"role": "tool_call", "content": "",
              "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
-        ]}
+        ])
         result = _messages(state)
         assert result[0]["role"] == "assistant"
         assert "tool_calls" in result[0]

@@ -10,13 +10,13 @@ from src.observability.timing import start_feature, complete_feature
 
 
 async def think_node(state, ctx: TurnContext = None, *, llm, executor=None, lifecycle=None):
-    if state.get("approved_tool_calls"):
+    if state.approved_tool_calls:
         return ThinkOutput()
 
-    available_tools = state.get("available_tools", [])
+    available_tools = state.available_tools
     tools = _format_tools(available_tools)
     messages = _messages(state)
-    system = state.get("system")
+    system = state.system
 
     accumulated_text: list[str] = []
     accumulated_reasoning: list[str] = []

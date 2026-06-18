@@ -4,6 +4,8 @@ Extracted from LoopOrchestrator. Uses the same hard-limit pattern as agent
 systems with max-turn controls. No interactive pause — just stop and report.
 """
 
+from src.agent.state import AgentState
+
 
 class CircuitBreaker:
     """Hard limits to prevent token explosion and infinite loops."""
@@ -21,7 +23,7 @@ class CircuitBreaker:
         """Return True if token count exceeds hard ceiling."""
         return tokens > self.token_ceiling
 
-    def inject_hint(self, state: dict, it: int) -> str | None:
+    def inject_hint(self, state: AgentState, it: int) -> str | None:
         """Inject progressive hints to LLM when approaching iteration limit.
 
         Injects once at 70% threshold, then replaces with a stronger hint
@@ -35,12 +37,12 @@ class CircuitBreaker:
         else:
             return None
 
-        system = state.get("system") or ""
+        system = state.system or ""
         prev = self._last_hint
         if prev and prev in system:
             system = system.replace(prev, hint)
         else:
             system += hint
         self._last_hint = hint
-        state["system"] = system
+        state.system = system
         return hint

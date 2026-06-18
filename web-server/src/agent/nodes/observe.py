@@ -11,13 +11,10 @@ def observe_node(state, *, tool_results=None):
     them into role=tool messages so the LLM can adjust its approach.
     """
     results = list(tool_results or [])
-    state_tr = state.get("tool_results") or []
-    results.extend(state_tr)
-    streaming = state.get("streaming_tool_results") or []
-    results.extend(streaming)
+    results.extend(state.tool_results)
+    results.extend(state.streaming_tool_results)
 
-    rejected = state.get("rejected_tool_calls") or []
-    for tc in rejected:
+    for tc in state.rejected_tool_calls:
         fn = tc.get("function", {})
         result = {
             "execution_status": "REJECTED",
@@ -70,20 +67,17 @@ def _format_tool_result(r: dict) -> str:
 
 def route_after_review(state) -> str:
     """Route after review: pending_approval → END, otherwise → act."""
-    if state.get("pending_approval"):
+    if state.pending_approval:
         return "__end__"
     return "act"
 
 
 def route_after_think(state) -> str:
     """Route after think: approved → act, tool_call → review, streaming → observe, none → END."""
-    approved = state.get("approved_tool_calls") or []
-    if approved:
+    if state.approved_tool_calls:
         return "act"
-    tool_calls = state.get("tool_calls") or []
-    streaming_results = state.get("streaming_tool_results") or []
-    if tool_calls:
+    if state.tool_calls:
         return "review"
-    if streaming_results:
+    if state.streaming_tool_results:
         return "observe"
     return "__end__"

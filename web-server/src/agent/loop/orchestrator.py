@@ -8,6 +8,7 @@ from src.agent.loop.approval import ApprovalHandler
 from src.agent.loop.circuit_breaker import CircuitBreaker
 from src.agent.loop.runner import AgentLoop
 from src.agent.nodes import act_node, observe_node, review_node, think_node
+from src.agent.state import AgentState
 from src.agent.turn_context import TurnContext, Auditor
 
 
@@ -65,14 +66,12 @@ class LoopOrchestrator:
             token_ceiling=int(ws * agent_token_ceiling_ratio),
         )
 
-    async def run(self, initial_state: dict, *, channel: EventChannel) -> None:
+    async def run(self, initial_state: AgentState, *, channel: EventChannel) -> None:
         """Execute ReAct loop, sending DomainEvents to channel. channel.close() in finally."""
 
-        state = dict(initial_state)
-
-        # Store metadata in state for AgentLoop to pick up
-        state["_chat_id"] = self._chat_id
-        state["_model"] = self._model
+        state = initial_state.model_copy(deep=True)
+        state.chat_id = self._chat_id
+        state.llm_model = self._model
 
         # Build AgentLoop with bound node functions (or use injectables from tests)
         thinker = self._think_fn or partial(
@@ -123,8 +122,7 @@ class LoopOrchestrator:
         finally:
             channel.close()
 
-    async def _check_token_ceiling(self, state: dict) -> bool:
+    async def _check_token_ceiling(self, state: AgentState) -> bool:
         """Public accessor for tests — delegates to circuit breaker check."""
-        messages = state.get("messages", [])
-        tokens = self._context_manager.count_tokens(messages)
+        tokens = self._context_manager.count_tokens(state.messages)
         return self._breaker.check_token_ceiling(tokens)

@@ -13,7 +13,7 @@ from src.agent.loop.approval import (
     _inject_rejection_messages,
 )
 from src.agent.loop.emitter import EventEmitter
-from src.agent.state import Transition, TurnScratch
+from src.agent.state import AgentState, Transition, TurnScratch
 from src.agent.turn_context import TurnContext
 from src.models.audit import AuditLevel
 from src.models.tool import ApprovalStatus, ExecutionStatus
@@ -54,7 +54,7 @@ def _make_scratch(**overrides) -> TurnScratch:
         "tool_calls": [],
         "tool_results": [],
         "streaming_tool_results": [],
-        "_emitted_results": [],
+        "emitted_results": [],
         "llm_error": None,
         "transition": None,
     }
@@ -123,13 +123,13 @@ class TestApplyDecisions:
 
 class TestInjectRejectionMessages:
     def test_appends_tool_messages(self):
-        state = {"messages": [{"role": "user", "content": "hello"}]}
+        state = AgentState(messages=[{"role": "user", "content": "hello"}])
         rejected = [
             {"function": {"name": "get_cpu"}, "id": "tc-1", "rejection_reason": "not needed"},
         ]
         _inject_rejection_messages(state, rejected)
-        assert len(state["messages"]) == 2
-        tool_msg = state["messages"][-1]
+        assert len(state.messages) == 2
+        tool_msg = state.messages[-1]
         assert tool_msg["role"] == "tool"
         assert tool_msg["tool_call_id"] == "tc-1"
         assert tool_msg["name"] == "get_cpu"
@@ -138,38 +138,38 @@ class TestInjectRejectionMessages:
         assert "do not retry" in tool_msg["content"].lower()
 
     def test_rejection_without_reason(self):
-        state = {"messages": [{"role": "user", "content": "hello"}]}
+        state = AgentState(messages=[{"role": "user", "content": "hello"}])
         rejected = [
             {"function": {"name": "rm_file"}, "id": "tc-x"},
         ]
         _inject_rejection_messages(state, rejected)
-        tool_msg = state["messages"][-1]
+        tool_msg = state.messages[-1]
         assert "rejection_reason=" not in tool_msg["content"]
         assert "do not retry" in tool_msg["content"].lower()
 
     def test_empty_rejected_no_change(self):
-        state = {"messages": [{"role": "user", "content": "hello"}]}
+        state = AgentState(messages=[{"role": "user", "content": "hello"}])
         _inject_rejection_messages(state, [])
-        assert len(state["messages"]) == 1
+        assert len(state.messages) == 1
 
     def test_multiple_rejected(self):
-        state = {"messages": []}
+        state = AgentState()
         rejected = [
             {"function": {"name": "tool_a"}, "id": "a", "rejection_reason": "nope"},
             {"function": {"name": "tool_b"}, "id": "b", "rejection_reason": "stop"},
         ]
         _inject_rejection_messages(state, rejected)
-        assert len(state["messages"]) == 2
-        assert state["messages"][0]["name"] == "tool_a"
-        assert "nope" in state["messages"][0]["content"]
-        assert state["messages"][1]["name"] == "tool_b"
-        assert "stop" in state["messages"][1]["content"]
+        assert len(state.messages) == 2
+        assert state.messages[0]["name"] == "tool_a"
+        assert "nope" in state.messages[0]["content"]
+        assert state.messages[1]["name"] == "tool_b"
+        assert "stop" in state.messages[1]["content"]
 
     def test_unknown_function_name(self):
-        state = {"messages": []}
+        state = AgentState()
         rejected = [{"id": "no-fn"}]
         _inject_rejection_messages(state, rejected)
-        assert state["messages"][0]["name"] == "unknown"
+        assert state.messages[0]["name"] == "unknown"
 
 
 # ── _format_rejection_message ──────────────────────────────────────────────

@@ -14,7 +14,7 @@ from src.agent.messages import normalize_message
 def _messages(state) -> list[dict]:
     """Convert messages to OpenAI-compatible dicts for LLM call."""
     result: list[dict] = []
-    for m in state.get("messages", []):
+    for m in state.messages:
         entry = normalize_message(m)
         msg: dict = {"role": entry["role"], "content": entry["content"]}
         if entry["role"] == "assistant":

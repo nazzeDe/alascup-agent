@@ -1,5 +1,35 @@
 
-from src.agent.state import Transition
+import pytest
+from pydantic import ValidationError
+
+from src.agent.state import AgentState, Transition, TurnScratch
+
+
+class TestAgentState:
+    def test_defaults_are_independent_lists(self):
+        left = AgentState()
+        right = AgentState()
+
+        left.messages.append({"role": "user", "content": "hi"})
+
+        assert right.messages == []
+
+    def test_rejects_dict_style_access(self):
+        state = AgentState(system="base")
+
+        with pytest.raises(TypeError):
+            _ = state["system"]
+
+    def test_validates_transition_enum(self):
+        with pytest.raises(ValidationError):
+            AgentState(transition="not-a-transition")
+
+
+class TestTurnScratch:
+    def test_uses_pydantic_model(self):
+        scratch = TurnScratch(transition=Transition.DONE)
+
+        assert scratch.model_dump()["transition"] == Transition.DONE
 
 
 class TestTransition:
@@ -21,5 +51,4 @@ class TestTransition:
         }
         actual = {t.value for t in Transition}
         assert actual == expected
-
 

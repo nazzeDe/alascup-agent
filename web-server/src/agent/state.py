@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TypedDict
+
+from pydantic import BaseModel, Field
 
 ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool", "tool_result": "tool", "tool_call": "assistant"}
 
@@ -21,19 +21,37 @@ class Transition(StrEnum):
     ERROR_EXIT = "error_exit"
 
 
-@dataclass
-class TurnScratch:
-    """Per-iteration scratch data. Recreated each iteration — no manual cleanup."""
-    tool_calls: list = field(default_factory=list)
-    pending_approval: list = field(default_factory=list)
-    approved_tool_calls: list = field(default_factory=list)
-    rejected_tool_calls: list = field(default_factory=list)
-    tool_results: list = field(default_factory=list)
-    streaming_tool_results: list = field(default_factory=list)
-    _emitted_results: list = field(default_factory=list)
-    stream_chunks: list = field(default_factory=list)
+class AgentState(BaseModel):
+    messages: list[dict] = Field(default_factory=list)
+    system: str | None = None
+    available_tools: list[dict] = Field(default_factory=list)
+    transition: Transition | None = None
+    tool_calls: list[dict] = Field(default_factory=list)
+    approved_tool_calls: list[dict] = Field(default_factory=list)
+    rejected_tool_calls: list[dict] = Field(default_factory=list)
+    pending_approval: list[dict] = Field(default_factory=list)
+    tool_results: list[dict] = Field(default_factory=list)
     llm_error: dict | None = None
-    transition: str | None = None
+    streaming_tool_results: list[dict] = Field(default_factory=list)
+    emitted_results: list[dict] = Field(default_factory=list)
+    stream_chunks: list = Field(default_factory=list)
+    chat_id: str = ""
+    llm_model: str = ""
+
+
+class TurnScratch(BaseModel):
+    """Per-iteration scratch data. Recreated each iteration."""
+
+    tool_calls: list[dict] = Field(default_factory=list)
+    pending_approval: list[dict] = Field(default_factory=list)
+    approved_tool_calls: list[dict] = Field(default_factory=list)
+    rejected_tool_calls: list[dict] = Field(default_factory=list)
+    tool_results: list[dict] = Field(default_factory=list)
+    streaming_tool_results: list[dict] = Field(default_factory=list)
+    emitted_results: list[dict] = Field(default_factory=list)
+    stream_chunks: list = Field(default_factory=list)
+    llm_error: dict | None = None
+    transition: Transition | None = None
 
 
 def init_scratch() -> TurnScratch:
@@ -44,19 +62,3 @@ def init_scratch() -> TurnScratch:
 def get_transition(scratch: TurnScratch) -> Transition | None:
     """Get the current transition from scratch state."""
     return scratch.transition
-
-
-class AgentState(TypedDict, total=False):
-    messages: list
-    system: str | None
-    available_tools: list
-    transition: Transition | None
-    tool_calls: list
-    approved_tool_calls: list
-    rejected_tool_calls: list
-    pending_approval: list
-    tool_results: list
-    llm_error: dict | None
-    streaming_tool_results: list
-    _emitted_results: list
-    stream_chunks: list

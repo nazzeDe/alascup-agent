@@ -9,7 +9,7 @@ from src.agent.events import (
     EventChannel,
     TurnFailed,
 )
-from src.agent.state import Transition, TurnScratch, get_transition
+from src.agent.state import AgentState, Transition, TurnScratch, get_transition
 from src.agent.turn_context import TurnContext, Auditor
 from src.models.audit import AuditActor
 
@@ -112,13 +112,7 @@ class TestOrchestratorTermination:
             chat_id="test",
             think_fn=mock_think,
         )
-        state = {
-            "messages": [{"role": "user", "content": "hello"}],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
+        state = AgentState(messages=[{"role": "user", "content": "hello"}])
 
         await orch.run(state, channel=channel)
         # Channel should be closed after run() completes
@@ -159,11 +153,11 @@ class TestOrchestratorTermination:
             from src.agent.results import ReviewOutput
             # Auto-approve all
             return ReviewOutput(
-                approved=state.get("tool_calls", []),
+                approved=state.tool_calls,
             )
 
         async def mock_act(state, ctx=None):
-            tcs = state.get("approved_tool_calls", [])
+            tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
                 fn = tc.get("function", {})
@@ -185,13 +179,7 @@ class TestOrchestratorTermination:
             review_fn=mock_review,
             act_fn=mock_act,
         )
-        state = {
-            "messages": [{"role": "user", "content": "check CPU"}],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
+        state = AgentState(messages=[{"role": "user", "content": "check CPU"}])
 
         await orch.run(state, channel=channel)
         assert call_count >= 2, f"orchestrator should loop at least once, got {call_count} iterations"
@@ -258,13 +246,7 @@ class TestOrchestratorRecoveryEmission:
             chat_id="test",
             think_fn=mock_think,
         )
-        state = {
-            "messages": [{"role": "user", "content": "long input"}],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
+        state = AgentState(messages=[{"role": "user", "content": "long input"}])
 
         await orch.run(state, channel=channel)
         events = await collect_channel_events(channel)
@@ -302,7 +284,7 @@ class TestApprovalFlowCallIdConsistency:
 
     When the inner for loop in the approval re-entry path iterates more than
     once (e.g., LLM generates a second tool call after the approved tool
-    executes), observe_node overwrites state["_emitted_results"], losing
+    executes), observe_node overwrites state["emitted_results"], losing
     the first tool's result. This causes:
     - First tool: ToolCallStarted emitted, but ToolCallFinished NEVER emitted
     - Second tool: ToolCallFinished emitted, but ToolCallStarted NEVER emitted
@@ -331,7 +313,7 @@ class TestApprovalFlowCallIdConsistency:
         async def mock_think(state, ctx=None):
             nonlocal think_calls
             think_calls += 1
-            approved = state.get("approved_tool_calls", [])
+            approved = state.approved_tool_calls
 
             if approved:
                 # approved_tool_calls present → return early (think_node skips)
@@ -354,7 +336,7 @@ class TestApprovalFlowCallIdConsistency:
             elif think_calls == 3:
                 # Third real call: LLM generates another tool after seeing
                 # the first tool's result. This triggers the bug — causes
-                # _emitted_results overwrite in observe_node.
+                # emitted_results overwrite in observe_node.
                 return ThinkOutput(
                     assistant_message={"role": "assistant", "content": "Verifying"},
                     tool_calls=[{
@@ -374,7 +356,7 @@ class TestApprovalFlowCallIdConsistency:
                 )
 
         async def mock_review(state, ctx=None):
-            tool_calls = state.get("tool_calls", [])
+            tool_calls = state.tool_calls
             approved = []
             pending = []
             rejected = []
@@ -399,7 +381,7 @@ class TestApprovalFlowCallIdConsistency:
             return ReviewOutput(approved=approved, rejected=rejected)
 
         async def mock_act(state, ctx=None):
-            tcs = state.get("approved_tool_calls", [])
+            tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
                 fn = tc.get("function", {})
@@ -423,13 +405,7 @@ class TestApprovalFlowCallIdConsistency:
             review_fn=mock_review,
             act_fn=mock_act,
         )
-        state = {
-            "messages": [{"role": "user", "content": "create tmp file in home dir"}],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
+        state = AgentState(messages=[{"role": "user", "content": "create tmp file in home dir"}])
 
         await orch.run(state, channel=channel)
         events = await collect_channel_events(channel)
@@ -491,13 +467,7 @@ class TestCircuitBreaker:
             agent_max_iterations=2,
             think_fn=mock_think,
         )
-        state = {
-            "messages": [{"role": "user", "content": "loop"}],
-            "transition": None,
-            "tool_calls": [],
-            "tool_results": [],
-            "streaming_tool_results": [],
-        }
+        state = AgentState(messages=[{"role": "user", "content": "loop"}])
 
         await orch.run(state, channel=channel)
         events = await collect_channel_events(channel)
@@ -520,10 +490,10 @@ class TestCircuitBreaker:
             chat_id="test",
         )
         # max_iterations=30 (default), 70% = 21
-        state = {"system": "base prompt"}
+        state = AgentState(system="base prompt")
         orch._breaker.inject_hint(state, 21)
-        assert "turn limit" in state["system"].lower()
-        assert "base prompt" in state["system"]
+        assert "turn limit" in state.system.lower()
+        assert "base prompt" in state.system
         assert orch._breaker._last_hint is not None
 
     def test_inject_turn_hint_replaces_not_accumulates(self):
@@ -538,16 +508,16 @@ class TestCircuitBreaker:
             chat_id="test",
         )
         # First hint at 70%
-        state = {"system": "base prompt"}
+        state = AgentState(system="base prompt")
         orch._breaker.inject_hint(state, 21)
-        first_hint_count = state["system"].count("[SYSTEM]")
+        first_hint_count = state.system.count("[SYSTEM]")
         assert first_hint_count == 1
 
         # Second hint at <=3 turns remaining -> replaces, not appends
         orch._breaker.inject_hint(state, 28)
-        second_hint_count = state["system"].count("[SYSTEM]")
-        assert second_hint_count == 1, f"Hint accumulated: {state['system']}"
-        assert "base prompt" in state["system"]
+        second_hint_count = state.system.count("[SYSTEM]")
+        assert second_hint_count == 1, f"Hint accumulated: {state.system}"
+        assert "base prompt" in state.system
 
     def test_inject_turn_hint_skips_below_threshold(self):
         from src.agent.loop.orchestrator import LoopOrchestrator
@@ -560,9 +530,9 @@ class TestCircuitBreaker:
             llm=None,
             chat_id="test",
         )
-        state = {"system": "clean"}
+        state = AgentState(system="clean")
         orch._breaker.inject_hint(state, 10)  # Well below 70% of 30
-        assert state["system"] == "clean"
+        assert state.system == "clean"
         assert orch._breaker._last_hint is None
 
     @pytest.mark.asyncio
@@ -586,7 +556,7 @@ class TestCircuitBreaker:
             llm=None,
             chat_id="test",
         )
-        state = {"messages": [{"role": "user", "content": "hi"}]}
+        state = AgentState(messages=[{"role": "user", "content": "hi"}])
         result = await orch._check_token_ceiling(state)
         assert result is True
 
@@ -602,6 +572,6 @@ class TestCircuitBreaker:
             llm=None,
             chat_id="test",
         )
-        state = {"messages": []}
+        state = AgentState()
         result = await orch._check_token_ceiling(state)
         assert result is False
