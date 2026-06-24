@@ -110,6 +110,8 @@ docker run -d \
     --network "$NETWORK" \
     --restart "$RESTART" \
     -e TOOLSERVER_HOST_EXEC=nsenter \
+    -e TOOLSERVER_LOG_DIR=/app/logs \
+    -e POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup \
     -v "/var/log:/host/var/log:ro" \
     -v "/proc:/host/proc:ro" \
     -v "/sys:/host/sys:ro" \

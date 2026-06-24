@@ -43,11 +43,11 @@ services:
     restart: "no"
     working_dir: /app
     environment:
-      - PROC_PATH=/tmp/test-proc
-      - SYS_PATH=/tmp/test-sys
-      - LOG_PATH=/tmp/test-log
-      - SANDBOX_ROOT=/tmp/sandbox
-      - LOG_LEVEL=DEBUG
+      - TOOLSERVER_PROC_PATH=/tmp/test-proc
+      - TOOLSERVER_LOG_DIR=/tmp/test-log
+      - TOOLSERVER_SANDBOX_ROOT=/tmp/sandbox
+      - TOOL_SERVER_LOG_LEVEL=DEBUG
+      - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:
       - /sys/kernel/tracing:/sys/kernel/tracing:ro,Z
       - /sys/kernel/btf:/sys/kernel/btf:ro,Z

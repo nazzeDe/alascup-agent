@@ -1,9 +1,11 @@
 {
     "proc_path": "/proc",
-    "log_path": "/var/log",
+    "log_dir": "/app/logs",
     "sandbox_root": "/tmp/tool-server-sandbox",
     "cache_ttl": 600,
     "bash_timeout": 30,
     "host_exec": "direct",
-    "port": 11451
+    "port": 11451,
+    "postgres_statement_timeout_ms": 5000,
+    "postgres_max_rows": 1000
 }

@@ -99,8 +99,8 @@ flowchart TD
     %% 声明
     receive["收到 tool_call<br/>JSON-RPC params"]
     check_approval{"approval_status<br/>== APPROVED？"}
-    check_uuid{"request_id<br/>非空且符合 UUID 格式？"}
-    check_highrisk{"isReadOnly == false<br/>且 request_id 缺失？"}
+    check_readonly{"isReadOnly == true？"}
+    check_request{"request_id<br/>非空且符合 UUID 格式？"}
     pass["校验通过<br/>执行工具"]
     fail["SECURITY_VIOLATION<br/>返回 error code=403"]
     log["web-server 记录 CRITICAL 审计事件"]
@@ -108,11 +108,11 @@ flowchart TD
     %% 连线
     receive --> check_approval
     check_approval -- "否" --> fail
-    check_approval -- "是" --> check_uuid
-    check_uuid -- "否" --> fail
-    check_uuid -- "是" --> check_highrisk
-    check_highrisk -- "是（缺少 request_id）" --> fail
-    check_highrisk -- "否" --> pass
+    check_approval -- "是" --> check_readonly
+    check_readonly -- "是（只读免 request_id）" --> pass
+    check_readonly -- "否（高风险）" --> check_request
+    check_request -- "否" --> fail
+    check_request -- "是" --> pass
     fail --> log
 ```
 

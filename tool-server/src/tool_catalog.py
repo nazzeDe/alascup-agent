@@ -9,6 +9,7 @@ from src.cache import ToolCache
 from src.config import ToolServerConfig
 from src.handlers import handle_execute_tool
 from src.security.bash_classify import classify_bash
+from src.tools.data import get_postgres_schema, postgres_readonly_query
 from src.tools.operation import run_bash
 from src.tools.perception import (
     get_cpu_info,
@@ -27,6 +28,7 @@ from src.tools.perception.ebpf import (
     watch_process_exit,
     watch_tcp_connections,
 )
+from src.tools.runtime import get_tool_server_logs, get_tool_server_status
 
 _ANY_OBJECT: dict[str, Any] = {"type": "object"}
 
@@ -35,6 +37,17 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
     """Register tool-server tools on FastMCP without owning server lifecycle."""
     classify_fns: dict[str, Callable] = {}
 
+    _register_perception_tools(server, config)
+    _register_runtime_tools(server, config)
+    _register_postgres_tools(server, config)
+    _register_operation_tools(server, config, classify_fns)
+    _register_execute_tool(server, cache)
+    _register_ebpf_tools(server)
+    _register_health_tool(server)
+    _register_classify_companions(server, classify_fns)
+
+
+def _register_perception_tools(server: FastMCP, config: ToolServerConfig) -> None:
     @server.tool(
         name="get_cpu_info",
         description="获取 CPU 型号、核心数、负载和利用率",
@@ -80,6 +93,53 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
     def _get_process_list() -> dict:
         return {"processes": get_process_list(config)}
 
+
+def _register_runtime_tools(server: FastMCP, config: ToolServerConfig) -> None:
+    @server.tool(
+        name="get_tool_server_status",
+        description="获取 tool-server 自身运行状态、启动信息、资源占用和配置摘要",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _get_tool_server_status() -> dict:
+        tools = await server.list_tools()
+        return get_tool_server_status(config, tool_count=len(tools))
+
+    @server.tool(
+        name="get_tool_server_logs",
+        description="读取 tool-server 日志目录内日志文件的最近 N 行",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    def _get_tool_server_logs(filename: str | None = None, lines: int = 200) -> dict:
+        return get_tool_server_logs(config, filename=filename, lines=lines)
+
+
+def _register_postgres_tools(server: FastMCP, config: ToolServerConfig) -> None:
+    @server.tool(
+        name="get_postgres_schema",
+        description="查看 POSTGRES_DSN 指向的应用数据库 schema、表和列",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _get_postgres_schema(schema: str = "public") -> dict:
+        return await get_postgres_schema(config, schema=schema)
+
+    @server.tool(
+        name="postgres_readonly_query",
+        description="对 POSTGRES_DSN 指向的应用数据库执行只读 SELECT/WITH/EXPLAIN 查询",
+        output_schema=_ANY_OBJECT,
+        meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
+    )
+    async def _postgres_readonly_query(sql: str = "", max_rows: int = 200) -> dict:
+        return await postgres_readonly_query(config, sql=sql, max_rows=max_rows)
+
+
+def _register_operation_tools(
+    server: FastMCP,
+    config: ToolServerConfig,
+    classify_fns: dict[str, Callable],
+) -> None:
     @server.tool(
         name="bash",
         description="在沙箱环境中执行 Shell 命令",
@@ -91,6 +151,8 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
 
     classify_fns["bash"] = classify_bash
 
+
+def _register_execute_tool(server: FastMCP, cache: ToolCache) -> None:
     @server.tool(
         name="execute_tool",
         description="安全执行工具（需 APPROVED 状态 + 有效 request_id）",
@@ -123,6 +185,8 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
             cache=cache,
         )
 
+
+def _register_ebpf_tools(server: FastMCP) -> None:
     @server.tool(
         name="watch_process_exec",
         description="实时进程启动事件流（基于 eBPF 的持续跟踪）",
@@ -195,6 +259,8 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
     async def _trace_oom_events(duration: int = 30) -> dict:
         return await trace_oom_events(duration=duration)
 
+
+def _register_health_tool(server: FastMCP) -> None:
     @server.tool(
         name="health",
         description="Liveness 探针，返回工具列表和节点信息",
@@ -210,8 +276,6 @@ def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: Tool
     async def health() -> dict:
         tools = await server.list_tools()
         return {"status": "healthy", "tool_count": len(tools)}
-
-    _register_classify_companions(server, classify_fns)
 
 
 def _register_classify_companions(server: FastMCP, classify_fns: dict[str, Callable]) -> None:

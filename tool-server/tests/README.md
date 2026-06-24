@@ -16,7 +16,7 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 | 模块 | 单元测试 | 集成测试 |
 |------|---------|---------|
 | 安全校验 | approval_status + request_id 格式校验 | — |
-| 伴生分类工具 | bash AST 分类、fail-closed | `bash_classify` MCP 调用 |
+| 伴生分类工具 | bash 只读免审批分类、fail-closed | `bash_classify` MCP 调用 |
 | ToolResult 构造 | 结构化输出 | — |
 | 错误格式化 | SECURITY_VIOLATION 响应 | — |
 | 感知工具 | CPU、内存、磁盘、网络、进程结果转换 | — |
@@ -38,7 +38,31 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 | 输入 | `bash_classify(command="rm -rf /var/lib/mysql")` |
 | 预期 | `{"safe": false}` |
 
-### CF-103 伴生分类工具通过 MCP 调用
+### CF-103 敏感读取需要审批
+
+| 前置 | tool-server 正常 |
+| 输入 | `bash_classify(command="cat /etc/shadow")`、`bash_classify(command="cat ~/.ssh/id_rsa")`、`bash_classify(command="cat /proc/1/environ")` |
+| 预期 | `{"safe": false}` |
+
+### CF-104 运维观测命令可免审批
+
+| 前置 | tool-server 正常 |
+| 输入 | `bash_classify(command="ss -tulpn \| grep nginx")`、`bash_classify(command="systemctl --no-pager status nginx")` |
+| 预期 | `{"safe": true}` |
+
+### CF-105 执行面与网络请求需要审批
+
+| 前置 | tool-server 正常 |
+| 输入 | `bash_classify(command="bash -c 'whoami'")`、`bash_classify(command="curl -I https://example.com")`、`bash_classify(command="find /tmp -name '*.log' -exec cat {} \\;")` |
+| 预期 | `{"safe": false}` |
+
+### CF-106 可写 flag 与危险子命令需要审批
+
+| 前置 | tool-server 正常 |
+| 输入 | `bash_classify(command="sed -i 's/a/b/' file.txt")`、`bash_classify(command="git reset --hard")`、`bash_classify(command="systemctl restart nginx")` |
+| 预期 | `{"safe": false}` |
+
+### CF-107 伴生分类工具通过 MCP 调用
 
 | 前置 | FastMCP server 已创建 |
 | 输入 | `Client(server).call_tool("bash_classify", {"command": "ls /tmp"})` |

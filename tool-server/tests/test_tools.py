@@ -102,6 +102,81 @@ class TestBashClassify:
         result = classify_bash("echo $HOME")
         assert result["safe"] is True
 
+    def test_sensitive_shadow_read_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("cat /etc/shadow")
+        assert result["safe"] is False
+
+    def test_sensitive_ssh_key_read_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("cat ~/.ssh/id_rsa")
+        assert result["safe"] is False
+
+    def test_proc_environ_read_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("cat /proc/1/environ")
+        assert result["safe"] is False
+
+    def test_simple_operational_network_observation_safe(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("ss -tulpn | grep nginx")
+        assert result["safe"] is True
+
+    def test_network_request_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("curl -I https://example.com")
+        assert result["safe"] is False
+
+    def test_shell_wrapper_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("bash -c 'whoami'")
+        assert result["safe"] is False
+
+    def test_xargs_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("find /var/log -name '*.log' | xargs grep error")
+        assert result["safe"] is False
+
+    def test_sed_read_mode_safe(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("sed -n '1,10p' /var/log/syslog")
+        assert result["safe"] is True
+
+    def test_sed_in_place_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("sed -i 's/a/b/' file.txt")
+        assert result["safe"] is False
+
+    def test_find_exec_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("find /tmp -name '*.log' -exec cat {} \\;")
+        assert result["safe"] is False
+
+    def test_git_status_safe(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("git status --short")
+        assert result["safe"] is True
+
+    def test_systemctl_status_safe(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("systemctl --no-pager status nginx")
+        assert result["safe"] is True
+
+    def test_systemctl_restart_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("systemctl restart nginx")
+        assert result["safe"] is False
+
+    def test_git_reset_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash("git reset --hard")
+        assert result["safe"] is False
+
+    def test_variable_flag_obfuscation_requires_approval(self):
+        from src.security.bash_classify import classify_bash
+        result = classify_bash('git diff "$Z--output=/tmp/pwned"')
+        assert result["safe"] is False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Security Validation
@@ -185,6 +260,74 @@ class TestPerceptionTools:
             assert "cpu_time" in p
             assert "mem_mb" in p
             assert "status" in p
+
+
+class TestRuntimeTools:
+    def test_get_tool_server_status_reports_config(self, config):
+        from src.tools.runtime.status import get_tool_server_status
+
+        result = get_tool_server_status(config, tool_count=12)
+
+        assert result["status"] == "healthy"
+        assert result["tool_count"] == 12
+        assert result["config"]["postgres_configured"] is False
+        assert result["config"]["log_dir"] == config.log_dir
+
+    def test_get_tool_server_logs_reads_latest_file(self, tmp_path):
+        from src.config import ToolServerConfig
+        from src.tools.runtime.status import get_tool_server_logs
+
+        log_file = tmp_path / "tool-server.log"
+        log_file.write_text("one\ntwo\nthree\n", encoding="utf-8")
+        config = ToolServerConfig(log_dir=str(tmp_path))
+
+        result = get_tool_server_logs(config, lines=2)
+
+        assert result["filename"] == "tool-server.log"
+        assert result["lines"] == ["two\n", "three\n"]
+        assert "error" not in result
+
+    def test_get_tool_server_logs_rejects_escape(self, tmp_path):
+        from src.config import ToolServerConfig
+        from src.tools.runtime.status import get_tool_server_logs
+
+        config = ToolServerConfig(log_dir=str(tmp_path))
+        result = get_tool_server_logs(config, filename="../secret", lines=1)
+
+        assert result["error"] == "log file not found"
+        assert result["lines"] == []
+
+
+class TestPostgresTools:
+    def test_readonly_sql_accepts_select_with_explain(self):
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        assert _validate_readonly_sql("select * from audit_events")[0] is True
+        assert _validate_readonly_sql("with x as (select 1) select * from x")[0] is True
+        assert _validate_readonly_sql("explain select * from audit_events")[0] is True
+
+    def test_readonly_sql_rejects_writes_and_multi_statement(self):
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        assert _validate_readonly_sql("update audit_events set event_type = 'x'")[0] is False
+        assert _validate_readonly_sql("select 1; select 2")[0] is False
+        assert _validate_readonly_sql("copy audit_events to stdout")[0] is False
+
+    def test_readonly_sql_ignores_keywords_inside_literals(self):
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        ok, error = _validate_readonly_sql("select 'drop table users' as message")
+
+        assert ok is True
+        assert error == ""
+
+    @pytest.mark.asyncio
+    async def test_postgres_query_without_dsn_returns_error(self, config):
+        from src.tools.data.postgres import postgres_readonly_query
+
+        result = await postgres_readonly_query(config, "select 1")
+
+        assert result == {"error": "POSTGRES_DSN is not configured"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -505,6 +648,10 @@ class TestToolRegistrationContract:
             "get_disk_usage",
             "get_network_info",
             "get_process_list",
+            "get_tool_server_status",
+            "get_tool_server_logs",
+            "get_postgres_schema",
+            "postgres_readonly_query",
             "bash",
             "execute_tool",
             "watch_process_exec",
@@ -540,6 +687,10 @@ class TestToolRegistrationContract:
             "get_disk_usage": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
             "get_network_info": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
             "get_process_list": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_tool_server_status": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_tool_server_logs": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "get_postgres_schema": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
+            "postgres_readonly_query": {"is_read_only": True, "is_rollbackable": True, "mutable": False},
             "bash": {"is_read_only": False, "is_rollbackable": False, "mutable": True},
             "execute_tool": {"hidden": True},
             "watch_process_exec": {"is_read_only": True, "is_rollbackable": True, "mutable": False},

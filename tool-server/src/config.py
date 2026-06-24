@@ -7,21 +7,29 @@ from pydantic import BaseModel
 
 _ENV_TO_FIELD: dict[str, str] = {
     "TOOLSERVER_PROC_PATH": "proc_path",
+    "TOOLSERVER_LOG_DIR": "log_dir",
     "TOOLSERVER_SANDBOX_ROOT": "sandbox_root",
     "TOOLSERVER_CACHE_TTL": "cache_ttl",
     "TOOLSERVER_BASH_TIMEOUT": "bash_timeout",
     "TOOLSERVER_HOST_EXEC": "host_exec",
     "TOOLSERVER_PORT": "port",
+    "POSTGRES_DSN": "postgres_dsn",
+    "TOOLSERVER_POSTGRES_STATEMENT_TIMEOUT_MS": "postgres_statement_timeout_ms",
+    "TOOLSERVER_POSTGRES_MAX_ROWS": "postgres_max_rows",
 }
 
 
 class ToolServerConfig(BaseModel):
     proc_path: str = "/proc"
+    log_dir: str = "/app/logs"
     sandbox_root: str = "/tmp/tool-server-sandbox"
     cache_ttl: int = 600
     bash_timeout: int = 30
     host_exec: str = "direct"
     port: int = 11451
+    postgres_dsn: str | None = None
+    postgres_statement_timeout_ms: int = 5000
+    postgres_max_rows: int = 1000
 
 
 def load_config() -> ToolServerConfig:

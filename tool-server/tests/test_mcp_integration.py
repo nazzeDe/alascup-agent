@@ -37,6 +37,10 @@ class TestMcpIntegration:
         names = {tool.name for tool in tools}
 
         assert "get_cpu_info" in names
+        assert "get_tool_server_status" in names
+        assert "get_tool_server_logs" in names
+        assert "get_postgres_schema" in names
+        assert "postgres_readonly_query" in names
         assert "bash" in names
         assert "bash_classify" in names
         assert "execute_tool" in names

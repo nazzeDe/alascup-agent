@@ -24,7 +24,7 @@
 | fastmcp | MCP Server 框架 |
 | psutil | 系统指标采集（CPU/内存/磁盘/网络/进程） |
 | systemd-python | systemd 服务管理（首版：status + restart） |
-| tree-sitter | bash 命令 AST 解析（安全分级） |
+| tree-sitter | bash 命令 AST 解析（只读免审批分类） |
 | tree-sitter-bash | tree-sitter bash grammar |
 
 ## 工具注册
@@ -54,8 +54,8 @@ def run_bash(command: str, config: ToolServerConfig = Depends()):
 可变工具（`meta.mutable = true`）需要附加分类函数 `__classify__`：
 
 ```python
-def classify_bash(command: str) -> bool:
-    """使用 tree-sitter 解析命令 AST 判定安全/危险。FAIL-CLOSED。"""
+def classify_bash(command: str) -> dict:
+    """判定 bash 命令是否可作为只读操作免审批。FAIL-CLOSED。"""
     ...
 
 run_bash.__classify__ = classify_bash
@@ -67,7 +67,29 @@ tool-server 启动时自动扫描已注册工具，对带有 `__classify__` 属�
 - `meta.hidden = true`，不暴露给 LLM
 - `meta.mutable = false`，`meta.is_read_only = true`
 - `inputSchema` 由 `classify_fn` 的函数签名自动推断（仅关键参数）
-- 返回 `{"safe": bool}`
+- 返回 `{"safe": bool}`。`safe=true` 仅表示“可免审批只读执行”；`safe=false` 表示“需要审批”，不表示 tool-server 强制禁止该命令。
+
+#### bash 分类规则
+
+`bash_classify` 按本项目运维工具定位收窄为“只读免审批”判定：
+
+| 类别 | `safe=true` 例子 | `safe=false` 例子 |
+|------|------------------|-------------------|
+| 文件与日志读取 | `ls /tmp`、`cat /var/log/syslog`、`sed -n '1,10p' /var/log/syslog` | `sed -i 's/a/b/' file`、`echo hi > file` |
+| 系统观测 | `ps aux`、`free -h`、`dmesg -T`、`journalctl -u nginx --no-pager` | `kill 123`、`systemctl restart nginx` |
+| 网络观测 | `ss -tulpn`、`ip addr`、`netstat -tulpn` | `curl https://...`、`wget ...`、`ssh host`、`nc host 443` |
+| Git 诊断 | `git status --short`、`git log --oneline`、`git diff --stat` | `git reset --hard`、`git clean -fd`、`git push --force` |
+| 敏感读取 | — | `cat /etc/shadow`、`cat ~/.ssh/id_rsa`、`cat /proc/1/environ` |
+| Shell 执行面 | 普通只读 pipeline：`ps aux \| grep nginx \| wc -l` | `bash -c ...`、`sh -c ...`、`eval ...`、`xargs ...`、命令替换 `$()` |
+
+分类流程：
+
+1. 空命令直接 fail-closed。
+2. 使用 `tree-sitter-bash` 解析 AST；解析失败、未知节点、重定向、命令替换、子 shell、循环/条件/函数等复杂结构均为 `safe=false`。
+3. 对命令文本做危险模式检测：反引号、`$()`、`${...}`、`$[...]`、进程替换、`$IFS`、重定向符、危险换行等均为 `safe=false`。
+4. 将 pipeline / `&&` / `||` / `;` 分段，每段必须命中运维只读命令 allowlist。
+5. 对每个命令做 flag 级校验；可写、执行、网络、远程、in-place、output 等 flag 均为 `safe=false`。
+6. 对路径做敏感读取校验；密钥、凭据、`/proc/*/environ` 等路径均为 `safe=false`。
 
 注册流程见 `main.py` 的 `_register_classify_companions()`。
 
@@ -89,8 +111,8 @@ tool-server 收到 tool_call 时执行防御性校验（不查询 web-server 状
 | 校验项 | 规则 |
 |--------|------|
 | `approval_status` | 必须为 `APPROVED` |
-| `request_id` | 非空，符合 UUID 格式 |
-| 高风险工具 | `isReadOnly=false` 必须携带 `request_id` |
+| 只读工具 | `isReadOnly=true` 可不携带 `request_id` |
+| 高风险工具 | `isReadOnly=false` 必须携带非空 UUID 格式 `request_id` |
 
 未通过 → 返回 `SECURITY_VIOLATION`（CRITICAL），拒绝执行。
 

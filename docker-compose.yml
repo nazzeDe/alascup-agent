@@ -75,6 +75,8 @@ services:
     restart: unless-stopped
     environment:
       - TOOLSERVER_HOST_EXEC=nsenter
+      - TOOLSERVER_LOG_DIR=/app/logs
+      - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:
       - /var/log:/host/var/log:ro,Z
       - /proc:/host/proc:ro,Z
