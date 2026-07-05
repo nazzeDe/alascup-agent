@@ -641,8 +641,15 @@ _SENSITIVE_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"^/(?:root|home/[^/]+)/\.(?:aws|azure|gnupg|kube|docker|config/gcloud)(?:$|/)"
     ),
+    re.compile(
+        r"^(?:\.\.?/)*(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.docker|\.config/gcloud)(?:$|/)"
+    ),
     re.compile(r"^/proc/(?:self|\d+|[^/]+)/environ$"),
     re.compile(r"^/proc/.*/cmdline$"),
+)
+_SENSITIVE_PATH_PART = re.compile(
+    r"^(?:\.env(?:\..*)?|.*(?:credential|secret|token|passwd|password|private).*|.*\.pem)$",
+    re.IGNORECASE,
 )
 
 _DANGEROUS_TEXT_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -900,9 +907,7 @@ def _match_command_config(tokens: list[str]) -> tuple[str | None, CommandConfig 
 
 
 def _token_has_unsafe_expansion(token: str) -> bool:
-    if "$" not in token:
-        return False
-    return not re.fullmatch(r"(?:[^$]|\$[A-Za-z_][A-Za-z0-9_]*)+", token)
+    return "$" in token
 
 
 def _validate_flags(args: list[str], config: CommandConfig, command_name: str) -> bool:
@@ -1118,7 +1123,12 @@ def _ps_dangerous(_pattern: str, args: list[str]) -> bool:
     return bool(
         re.search(r"\b(?:e|auxe|axe)\b", joined)
         or re.search(r"-[A-Za-z]*e[A-Za-z]*", joined)
+        or any(_ps_bsd_options_include_environment(arg) for arg in args)
     )
+
+
+def _ps_bsd_options_include_environment(arg: str) -> bool:
+    return not arg.startswith("-") and arg.isalpha() and "e" in arg
 
 
 def _journalctl_dangerous(_pattern: str, args: list[str]) -> bool:
@@ -1155,7 +1165,33 @@ def _ip_dangerous(_pattern: str, args: list[str]) -> bool:
         "monitor",
     }
     global_flags = {"-br", "-j", "-o", "-s", "-d", "-4", "-6"}
-    return bool(args and args[0] not in read_only_objects | global_flags)
+    read_only_verbs = {"show", "list", "lst", "get"}
+    mutating_verbs = {
+        "add",
+        "append",
+        "change",
+        "del",
+        "delete",
+        "replace",
+        "set",
+        "exec",
+    }
+
+    object_index = next(
+        (index for index, arg in enumerate(args) if arg not in global_flags), None
+    )
+    if object_index is None:
+        return False
+
+    obj = args[object_index]
+    if obj not in read_only_objects:
+        return True
+
+    if obj == "monitor":
+        return False
+
+    verb = args[object_index + 1] if object_index + 1 < len(args) else ""
+    return bool(verb and (verb in mutating_verbs or verb not in read_only_verbs))
 
 
 def _git_command_dangerous(args: list[str]) -> bool:
@@ -1224,9 +1260,17 @@ def _extract_path_like_args(pattern: str, args: list[str]) -> list[str]:
             if "=" not in arg and flags_with_args.get(flag) not in {None, "none"}:
                 skip_next = True
             continue
-        if "/" in arg or arg.startswith((".", "~")):
+        if _looks_like_path_argument(pattern, arg):
             paths.append(arg)
     return paths
+
+
+def _looks_like_path_argument(pattern: str, arg: str) -> bool:
+    return (
+        "/" in arg
+        or arg.startswith((".", "~"))
+        or (pattern.startswith("git ") and ":" in arg)
+    )
 
 
 def _paths_safe(paths: list[str]) -> bool:
@@ -1245,11 +1289,26 @@ def _path_safe(path: str) -> bool:
         return False
     if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", stripped):
         return False
-    expanded = _expand_home(stripped)
-    normalized = _normalize_posix_path(expanded)
-    if any(pattern.search(normalized) for pattern in _SENSITIVE_PATH_PATTERNS):
-        return False
+    for candidate in _path_candidates(stripped):
+        expanded = _expand_home(candidate)
+        normalized = _normalize_posix_path(expanded)
+        if _sensitive_path(normalized):
+            return False
     return True
+
+
+def _path_candidates(path: str) -> list[str]:
+    candidates = [path]
+    if ":" in path and not path.startswith(":"):
+        candidates.append(path.split(":", 1)[1])
+    return candidates
+
+
+def _sensitive_path(path: str) -> bool:
+    if any(pattern.search(path) for pattern in _SENSITIVE_PATH_PATTERNS):
+        return True
+    parts = [part for part in PurePosixPath(path).parts if part not in {"/", ".", ".."}]
+    return any(_SENSITIVE_PATH_PART.fullmatch(part) for part in parts)
 
 
 def _expand_home(path: str) -> str:

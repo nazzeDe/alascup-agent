@@ -202,6 +202,28 @@ class TestPostgresEdges:
         assert ok is False
         assert "file and program access" in error
 
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "select pg_terminate_backend(pid) from pg_stat_activity",
+            "select pg_cancel_backend(pid) from pg_stat_activity",
+            "select pg_reload_conf()",
+            "select dblink_exec('dbname=postgres', 'create table x(y int)')",
+            "select lo_unlink(123)",
+            "select nextval('audit_id_seq')",
+            "select setval('audit_id_seq', 10)",
+            "select pg_notify('events', 'changed')",
+            "select pg_advisory_lock(1)",
+        ],
+    )
+    def test_readonly_sql_rejects_side_effect_functions(self, sql: str) -> None:
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        ok, error = _validate_readonly_sql(sql)
+
+        assert ok is False
+        assert "side-effecting" in error
+
 
 class TestBashClassifierAdversarial:
     @pytest.mark.parametrize(
@@ -239,11 +261,63 @@ class TestBashClassifierAdversarial:
             "cat /etc/../etc/shadow",
             "cat /home/user/../user/.ssh/id_rsa",
             "cat ~root/.ssh/id_rsa",
+            "cat .ssh/id_rsa",
+            "cat ../.ssh/id_rsa",
+            "cat .aws/credentials",
+            "cat .env",
+            "cat /tmp/.env",
+            "cat /tmp/client.pem",
+            "cat /tmp/secrets/token.txt",
+            "git show HEAD:/etc/shadow",
+            "git show HEAD:secrets/token.txt",
+            "git show HEAD:.env",
         ],
     )
     def test_sensitive_paths_cannot_be_bypassed_with_normalization(
         self, command: str
     ) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash(command) == {"safe": False}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ps eww",
+            "ps auxe",
+            "ps auxwwwe",
+            "ps ef",
+        ],
+    )
+    def test_ps_environment_output_requires_approval(self, command: str) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash(command) == {"safe": False}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ip link set eth0 down",
+            "ip -j link set eth0 down",
+            "ip addr add 127.0.0.2/8 dev lo",
+            "ip route delete default",
+            "ip netns exec prod ip addr",
+        ],
+    )
+    def test_ip_mutating_operations_require_approval(self, command: str) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash(command) == {"safe": False}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo $POSTGRES_DSN",
+            "printf %s $AWS_SECRET_ACCESS_KEY",
+            "cat $POSTGRES_DSN",
+        ],
+    )
+    def test_shell_expansion_requires_approval(self, command: str) -> None:
         from src.security.bash_classify import classify_bash
 
         assert classify_bash(command) == {"safe": False}
@@ -268,6 +342,77 @@ class TestBashExecutionEdges:
 
         assert result["execution_status"] == "FAILED"
         assert result["stderr"] == "denied"
+
+    def test_timeout_kills_process_group(self, sandbox, monkeypatch: pytest.MonkeyPatch):
+        from subprocess import TimeoutExpired
+
+        from src.security.execution_context import controlled_execution
+        from src.tools.operation import bash
+
+        calls: list[tuple[str, int]] = []
+
+        class HangingProcess:
+            pid = 12345
+            returncode = None
+
+            def communicate(self, timeout=None):
+                if timeout is None:
+                    return "", ""
+                raise TimeoutExpired(cmd=["bash"], timeout=timeout)
+
+            def wait(self, timeout=None):
+                self.returncode = -15
+                return self.returncode
+
+            def kill(self):
+                calls.append(("kill", self.pid))
+
+        monkeypatch.setattr(bash.subprocess, "Popen", lambda *_args, **_kwargs: HangingProcess())
+        def record_killpg(pid: int, _signal: int) -> None:
+            calls.append(("killpg", pid))
+
+        monkeypatch.setattr(bash._os, "killpg", record_killpg)
+
+        with controlled_execution():
+            result = bash.run_bash(sandbox, command="sleep 600 & wait", timeout=1)
+
+        assert result["execution_status"] == "FAILED"
+        assert ("killpg", 12345) in calls
+
+
+class TestExecutionLifecycleLogging:
+    @pytest.mark.asyncio
+    async def test_tool_execute_log_redacts_param_values(self, cache):
+        from fastmcp import FastMCP
+        from loguru import logger
+
+        from src.handlers.dispatch import handle_execute_tool
+
+        lines: list[str] = []
+        sink_id = logger.add(lines.append, format="{message}")
+        server = FastMCP(name="logging-test-tool-server")
+
+        @server.tool(name="echo", meta={"is_read_only": True})
+        def echo(command: str, token: str) -> dict:
+            return {"ok": bool(command and token)}
+
+        try:
+            await handle_execute_tool(
+                server=server,
+                tool_name="echo",
+                chat_id="c1",
+                params={"command": "echo sk-secret", "token": "secret-token"},
+                request_id="",
+                approval_status="APPROVED",
+                cache=cache,
+            )
+        finally:
+            logger.remove(sink_id)
+
+        log_text = "\n".join(lines)
+        assert "sk-secret" not in log_text
+        assert "secret-token" not in log_text
+        assert "params={command:<redacted:" in log_text
 
 
 class _FakeProcess:

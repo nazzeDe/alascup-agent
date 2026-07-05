@@ -109,19 +109,17 @@ class TestBashClassify:
         result = classify_bash('grep "hello world" file.txt')
         assert result["safe"] is True
 
-    def test_variable_expansion_safe(self):
-        """ls $HOME — the '$' token must be in the allowlist."""
+    def test_variable_expansion_requires_approval(self):
         from src.security.bash_classify import classify_bash
 
         result = classify_bash("ls $HOME")
-        assert result["safe"] is True
+        assert result["safe"] is False
 
-    def test_echo_variable_safe(self):
-        """echo $HOME should be safe (echo is read-only)."""
+    def test_echo_variable_requires_approval(self):
         from src.security.bash_classify import classify_bash
 
         result = classify_bash("echo $HOME")
-        assert result["safe"] is True
+        assert result["safe"] is False
 
     def test_sensitive_shadow_read_requires_approval(self):
         from src.security.bash_classify import classify_bash
@@ -528,7 +526,7 @@ class TestOperationTools:
         from unittest.mock import patch
 
         with patch(
-            "src.tools.operation.bash.subprocess.run", side_effect=FileNotFoundError
+            "src.tools.operation.bash.subprocess.Popen", side_effect=FileNotFoundError
         ):
             result = self._run_bash(sandbox, command="echo hi", timeout=5)
             assert result["execution_status"] == "FAILED"
@@ -585,12 +583,12 @@ class TestBashWithNsenter:
         from src.config import ToolServerConfig
 
         ns_config = ToolServerConfig(host_exec="nsenter")
-        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "hello"
+        with patch("src.tools.operation.bash.subprocess.Popen") as mock_popen:
+            mock_popen.return_value.returncode = 0
+            mock_popen.return_value.communicate.return_value = ("hello", "")
             result = self._run_bash(ns_config, command="echo hello", timeout=5)
             assert result["execution_status"] == "SUCCEEDED"
-            cmd = mock_run.call_args[0][0]
+            cmd = mock_popen.call_args[0][0]
             assert cmd[:6] == ["nsenter", "-t", "1", "-a", "--", "bash"]
 
     def test_run_bash_nsenter_no_cwd(self):
@@ -598,23 +596,23 @@ class TestBashWithNsenter:
         from src.config import ToolServerConfig
 
         ns_config = ToolServerConfig(host_exec="nsenter")
-        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = ""
+        with patch("src.tools.operation.bash.subprocess.Popen") as mock_popen:
+            mock_popen.return_value.returncode = 0
+            mock_popen.return_value.communicate.return_value = ("", "")
             self._run_bash(ns_config, command="whoami", timeout=5)
-            assert mock_run.call_args[1].get("cwd") is None
+            assert mock_popen.call_args[1].get("cwd") is None
 
     def test_run_bash_uses_chroot(self):
         from unittest.mock import patch
         from src.config import ToolServerConfig
 
         ch_config = ToolServerConfig(host_exec="chroot")
-        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = "hello"
+        with patch("src.tools.operation.bash.subprocess.Popen") as mock_popen:
+            mock_popen.return_value.returncode = 0
+            mock_popen.return_value.communicate.return_value = ("hello", "")
             result = self._run_bash(ch_config, command="echo hello", timeout=5)
             assert result["execution_status"] == "SUCCEEDED"
-            cmd = mock_run.call_args[0][0]
+            cmd = mock_popen.call_args[0][0]
             assert cmd == ["chroot", "/host_root", "bash", "-c", "echo hello"]
 
     def test_run_bash_chroot_no_cwd(self):
@@ -622,11 +620,11 @@ class TestBashWithNsenter:
         from src.config import ToolServerConfig
 
         ch_config = ToolServerConfig(host_exec="chroot")
-        with patch("src.tools.operation.bash.subprocess.run") as mock_run:
-            mock_run.return_value.returncode = 0
-            mock_run.return_value.stdout = ""
+        with patch("src.tools.operation.bash.subprocess.Popen") as mock_popen:
+            mock_popen.return_value.returncode = 0
+            mock_popen.return_value.communicate.return_value = ("", "")
             self._run_bash(ch_config, command="whoami", timeout=5)
-            assert mock_run.call_args[1].get("cwd") is None
+            assert mock_popen.call_args[1].get("cwd") is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

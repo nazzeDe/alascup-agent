@@ -25,6 +25,17 @@ _DANGEROUS_FUNCTIONS = re.compile(
     r")\s*\(",
     re.IGNORECASE,
 )
+_SIDE_EFFECT_FUNCTIONS = re.compile(
+    r"\b("
+    r"dblink_(?:connect|disconnect|exec|send_query)|lo_(?:create|unlink)|"
+    r"nextval|set_config|setval|"
+    r"pg_advisory_(?:lock|xact_lock)|pg_backup_(?:start|stop)|"
+    r"pg_cancel_backend|pg_create_restore_point|pg_log_backend_memory_contexts|"
+    r"pg_notify|pg_promote|pg_reload_conf|pg_rotate_logfile|pg_stat_reset[a-z_]*|"
+    r"pg_switch_wal|pg_terminate_backend"
+    r")\s*\(",
+    re.IGNORECASE,
+)
 
 
 async def get_postgres_schema(
@@ -117,8 +128,11 @@ def _validate_readonly_sql(sql: str) -> tuple[bool, str]:
             "write, DDL, transaction, and session-control statements are not allowed",
         )
     function_scan_sql = _strip_string_literals_and_comments(stripped)
-    if _DANGEROUS_FUNCTIONS.search(_unquote_identifiers(function_scan_sql)):
+    function_scan_sql = _unquote_identifiers(function_scan_sql)
+    if _DANGEROUS_FUNCTIONS.search(function_scan_sql):
         return False, "server-side file and program access functions are not allowed"
+    if _SIDE_EFFECT_FUNCTIONS.search(function_scan_sql):
+        return False, "side-effecting database functions are not allowed"
     return True, ""
 
 

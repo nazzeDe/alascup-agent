@@ -289,13 +289,25 @@ def _params_hash(params: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _params_log_summary(params: dict[str, Any]) -> str:
+    parts = []
+    for key in sorted(params):
+        value = params[key]
+        if isinstance(value, str):
+            parts.append(f"{key}:<redacted:{len(value)} chars>")
+        else:
+            parts.append(f"{key}:<{type(value).__name__}>")
+    digest = _params_hash(params)
+    return "{" + ", ".join(parts) + f"; sha256={digest[:12]}" + "}"
+
+
 async def _invoke_tool(
     fn, params: dict, tool_name: str, chat_id: str, controlled: bool = False
 ) -> dict:
     logger.info(
         "tool_execute tool={name} params={p} chat_id={cid}",
         name=tool_name,
-        p=params,
+        p=_params_log_summary(params),
         cid=chat_id,
     )
     try:

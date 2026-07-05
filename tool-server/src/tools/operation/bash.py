@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os as _os
+import signal
 import subprocess
 
 from loguru import logger
@@ -32,38 +33,16 @@ def run_bash(
     )
     try:
         _ensure_cwd(host_command.cwd)
-        # argv is constructed explicitly and subprocess uses shell=False.
-        result = subprocess.run(  # noqa: S603
-            host_command.argv,
-            capture_output=True,
-            text=True,
-            timeout=effective_timeout,
-            cwd=host_command.cwd,
+        payload = _run_host_command(
+            host_command.argv, host_command.cwd, effective_timeout, command
         )
-        status = "SUCCEEDED" if result.returncode == 0 else "FAILED"
         logger.debug(
             "bash_result rc={rc} stdout_len={so} stderr_len={se}",
-            rc=result.returncode,
-            so=len(result.stdout),
-            se=len(result.stderr),
+            rc=payload["returncode"],
+            so=len(payload["stdout"]),
+            se=len(payload["stderr"]),
         )
-        payload = {
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-        }
-        return succeeded(payload) if status == "SUCCEEDED" else failed(payload)
-    except subprocess.TimeoutExpired:
-        logger.warning(
-            "bash_timeout cmd={c!r} timeout={t}", c=command[:120], t=effective_timeout
-        )
-        return failed(
-            {
-                "returncode": -1,
-                "stdout": "",
-                "stderr": f"command timed out after {effective_timeout}s",
-            }
-        )
+        return succeeded(payload) if payload["returncode"] == 0 else failed(payload)
     except FileNotFoundError as exc:
         logger.error(
             "bash_exec_failed filename={f!r} cmd={c!r}",
@@ -94,3 +73,50 @@ def _ensure_cwd(cwd: str | None) -> None:
     if cwd is None:
         return
     _os.makedirs(cwd, exist_ok=True)
+
+
+def _run_host_command(
+    argv: list[str], cwd: str | None, timeout: int, command: str
+) -> dict[str, int | str]:
+    # argv is constructed explicitly and subprocess uses shell=False.
+    process = subprocess.Popen(  # noqa: S603
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return {"returncode": process.returncode, "stdout": stdout, "stderr": stderr}
+    except subprocess.TimeoutExpired as exc:
+        _terminate_process_group(process)
+        stdout, stderr = process.communicate()
+        logger.warning("bash_timeout cmd={c!r} timeout={t}", c=command[:120], t=timeout)
+        return {
+            "returncode": -1,
+            "stdout": stdout or getattr(exc, "stdout", "") or "",
+            "stderr": stderr
+            or getattr(exc, "stderr", "")
+            or f"command timed out after {timeout}s",
+        }
+
+
+def _terminate_process_group(process: subprocess.Popen) -> None:
+    try:
+        _os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=1)
+    except ProcessLookupError:
+        return
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            return
+
+    if process.returncode is None:
+        try:
+            _os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
