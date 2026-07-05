@@ -1,4 +1,3 @@
-
 import pytest
 from pydantic import ValidationError
 
@@ -51,4 +50,3 @@ class TestTransition:
         }
         actual = {t.value for t in Transition}
         assert actual == expected
-

@@ -78,7 +78,10 @@ class SSEStream:
         return None
 
     def _turn_started_to_wire(self, event: TurnStarted) -> WireEvent:
-        return {"event": "session_init", "data": json.dumps({"chat_id": str(event.chat_id)})}
+        return {
+            "event": "session_init",
+            "data": json.dumps({"chat_id": str(event.chat_id)}),
+        }
 
     def _reasoning_delta_to_wire(self, event: ReasoningDelta) -> WireEvent:
         return {"event": "reasoning", "data": json.dumps({"delta": event.delta})}
@@ -93,17 +96,29 @@ class SSEStream:
         return {"event": "assistant_done", "data": "{}"}
 
     def _tool_call_started_to_wire(self, event: ToolCallStarted) -> WireEvent:
-        debug_log("DEBUG", tp.SSE_TOOL_STARTED, call_id=event.call_id, tool=event.tool_name)
-        return {"event": "tool_call", "data": json.dumps({
-            "call_id": event.call_id,
-            "tool_name": event.tool_name,
-            "params": event.params,
-            "is_read_only": event.is_read_only,
-            "server": event.server,
-        })}
+        debug_log(
+            "DEBUG", tp.SSE_TOOL_STARTED, call_id=event.call_id, tool=event.tool_name
+        )
+        return {
+            "event": "tool_call",
+            "data": json.dumps(
+                {
+                    "call_id": event.call_id,
+                    "tool_name": event.tool_name,
+                    "params": event.params,
+                    "is_read_only": event.is_read_only,
+                    "server": event.server,
+                }
+            ),
+        }
 
     def _tool_call_finished_to_wire(self, event: ToolCallFinished) -> WireEvent:
-        debug_log("DEBUG", tp.SSE_TOOL_FINISHED, call_id=event.call_id, status=event.execution_status)
+        debug_log(
+            "DEBUG",
+            tp.SSE_TOOL_FINISHED,
+            call_id=event.call_id,
+            status=event.execution_status,
+        )
         data: dict = {
             "call_id": event.call_id,
             "execution_status": event.execution_status,
@@ -117,15 +132,23 @@ class SSEStream:
         return {"event": "tool_result", "data": json.dumps(data)}
 
     def _approval_required_to_wire(self, event: ApprovalRequired) -> WireEvent:
-        return {"event": "tool_approval_required", "data": json.dumps({
-            "chat_id": event.chat_id,
-            "request_id": event.request_id,
-            "tool_name": event.tool_name,
-            "params": event.params,
-            "reason": event.reason,
-            "call_id": event.call_id,
-        })}
+        return {
+            "event": "tool_approval_required",
+            "data": json.dumps(
+                {
+                    "chat_id": event.chat_id,
+                    "request_id": event.request_id,
+                    "tool_name": event.tool_name,
+                    "params": event.params,
+                    "reason": event.reason,
+                    "call_id": event.call_id,
+                }
+            ),
+        }
 
     def _turn_failed_to_wire(self, event: TurnFailed) -> WireEvent:
         debug_log("DEBUG", tp.SSE_TURN_FAILED, code=event.code, msg=event.message)
-        return {"event": "error", "data": json.dumps({"code": event.code, "message": event.message})}
+        return {
+            "event": "error",
+            "data": json.dumps({"code": event.code, "message": event.message}),
+        }

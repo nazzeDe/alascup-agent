@@ -24,11 +24,13 @@ def observe_node(state, *, tool_results=None):
         reason = tc.rejection_reason
         if reason:
             result["rejection_reason"] = reason
-        results.append(AgentToolResult(
-            tool_name=tc.function.name or "unknown",
-            tool_call_id=tc.id or "rejected",
-            result=result,
-        ))
+        results.append(
+            AgentToolResult(
+                tool_name=tc.function.name or "unknown",
+                tool_call_id=tc.id or "rejected",
+                result=result,
+            )
+        )
 
     tool_messages = []
 

@@ -56,8 +56,9 @@ paths:
       summary: LLM 聊天入口（SSE 流式响应）
       description: |
         前端发送用户消息。web-server 创建或加载会话，驱动 AgentLoop，
-        通过同一条 SSE 连接返回 session_init、reasoning、assistant、
-        tool_call、tool_result、tool_approval_required、error 和 done 事件。
+        通过同一条 SSE 连接返回 session_init、reasoning、thinking_done、
+        assistant、assistant_done、tool_call、tool_result、
+        tool_approval_required、error 和 done 事件。
         不传 chat_id 时自动创建新会话。
       requestBody:
         required: true
@@ -175,7 +176,7 @@ paths:
   /tool-requests/{request_id}/approval:
     post:
       summary: 审批工具请求
-      description: 前端对 tool_approval_required 事件中的 request_id 做出批准、拒绝或过期决策。后端通过内存 ApprovalBridge 唤醒原 SSE 连接中的 AgentLoop。
+      description: 前端对 tool_approval_required 事件中的 request_id 做出批准或拒绝决策。后端通过内存 ApprovalBridge 唤醒原 SSE 连接中的 AgentLoop；过期由服务端内部超时产生，不能由客户端提交。
       parameters:
         - in: path
           name: request_id
@@ -197,7 +198,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ToolApprovalResult"
         "400":
-          description: approval_status 非法。
+          description: approval_status 非法；请求值必须为 APPROVED 或 REJECTED。
         "404":
           description: 请求不存在、已处理或已过期。
 
@@ -369,7 +370,7 @@ components:
       properties:
         approval_status:
           type: string
-          enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+          enum: [APPROVED, REJECTED]
         reason:
           type: string
           nullable: true
@@ -377,13 +378,14 @@ components:
     ToolApprovalResult:
       type: object
       required: [request_id, approval_status]
+      description: Approval API response for accepted client decisions. Timeout is represented by 404 or server-side lifecycle state, not by this response body.
       properties:
         request_id:
           type: string
           format: uuid
         approval_status:
           type: string
-          enum: [PENDING, APPROVED, REJECTED, EXPIRED]
+          enum: [APPROVED, REJECTED]
         reason:
           type: string
           nullable: true
@@ -394,7 +396,7 @@ components:
       properties:
         execution_status:
           type: string
-          enum: [PENDING_APPROVAL, RUNNING, SUCCEEDED, FAILED, SECURITY_VIOLATION]
+          enum: [SUCCEEDED, FAILED, REJECTED]
         backup_ref:
           type: string
           nullable: true
@@ -472,12 +474,14 @@ components:
     ToolResultEventData:
       type: object
       required: [call_id, execution_status]
+      description: SSE/UI tool result. Rejected or expired approvals are sent as REJECTED even though the persisted tool_calls.execution_status is FAILED.
       properties:
         call_id:
           type: string
+          description: LLM tool_calls[].id, persisted as llm_tool_call_id.
         execution_status:
           type: string
-          enum: [PENDING_APPROVAL, RUNNING, SUCCEEDED, FAILED, SECURITY_VIOLATION]
+          enum: [SUCCEEDED, FAILED, REJECTED]
         output:
           nullable: true
           description: MCP 文本输出或工具自定义结构；当前 web-server 会优先抽取 fastmcp TextContent 为字符串。

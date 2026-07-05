@@ -140,7 +140,7 @@ export class ChatStore {
     this.messages.value = session.messages
     const map = new Map<string, ToolCallInfo>()
     for (const tc of session.executed_tool_list) {
-      map.set(tc.call_id, tc)
+      map.set(tc.call_id, normalizeLoadedToolCall(tc))
     }
     this.toolCalls.value = map
     this.reasonings.value = []
@@ -155,4 +155,15 @@ export class ChatStore {
       }
     }
   }
+}
+
+function normalizeLoadedToolCall(tc: ToolCallInfo): ToolCallInfo {
+  const message = tc.error?.message?.toLowerCase() ?? ''
+  const wasRejected = tc.approval_status === 'REJECTED'
+    || tc.approval_status === 'EXPIRED'
+    || message.includes('rejected by human')
+  if (tc.execution_status === 'FAILED' && wasRejected) {
+    return { ...tc, execution_status: 'REJECTED' }
+  }
+  return tc
 }

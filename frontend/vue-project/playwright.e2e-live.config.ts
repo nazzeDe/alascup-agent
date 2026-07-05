@@ -5,6 +5,7 @@ export default defineConfig({
   timeout: 60000,
   expect: { timeout: 15000 },
   retries: 0,
+  workers: process.env.CI ? 1 : undefined,
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     headless: !process.env.E2E_LIVE_HEADED,

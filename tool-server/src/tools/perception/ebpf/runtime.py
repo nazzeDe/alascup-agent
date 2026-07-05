@@ -35,4 +35,8 @@ class EbpfRuntime:
         }
 
     async def trace(self, script_name: str, duration: int) -> dict:
-        return {"events": await run_on_demand(script_name, timeout=float(duration), resolve_fn=self.resolve)}
+        return {
+            "events": await run_on_demand(
+                script_name, timeout=float(duration), resolve_fn=self.resolve
+            )
+        }

@@ -75,6 +75,7 @@ services:
     restart: unless-stopped
     environment:
       - TOOLSERVER_HOST_EXEC=nsenter
+      - TOOLSERVER_HOST=0.0.0.0
       - TOOLSERVER_LOG_DIR=/app/logs
       - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:
@@ -88,6 +89,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+      - /app/sandbox:size=64m,mode=1777
     security_opt:
       - no-new-privileges:true
     ulimits:

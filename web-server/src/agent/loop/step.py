@@ -17,7 +17,9 @@ class AgentStep:
         self._observe = observe
         self._lifecycle = lifecycle
 
-    async def run(self, state: AgentState, ctx, emitter, *, phase: str = "main") -> None:
+    async def run(
+        self, state: AgentState, ctx, emitter, *, phase: str = "main"
+    ) -> None:
         state.emitted_results = []
         for _ in range(25):
             think_out = await self._think(state, ctx)
@@ -58,7 +60,7 @@ class AgentStep:
                     route=route,
                 )
 
-            await self._run_observe(state, ctx)
+            await self._run_observe(state, ctx, emitter)
 
     def _apply_think_output(self, state: AgentState, think_out) -> None:
         if think_out.assistant_message:
@@ -116,16 +118,31 @@ class AgentStep:
         state.tool_results = exec_out.results
         state.approved_tool_calls = []
 
-    async def _run_observe(self, state: AgentState, ctx) -> None:
+    async def _run_observe(self, state: AgentState, ctx, emitter) -> None:
+        executed_count = len(state.tool_results)
+        streaming_count = len(state.streaming_tool_results)
+        rejected_calls = list(state.rejected_tool_calls)
         obs_out = self._observe(state)
         for tm in obs_out.tool_messages:
             state.messages.append(tm)
         if self._lifecycle and obs_out.tool_messages:
-            await self._lifecycle.persist_tool_result(ctx.chat_id, obs_out.tool_messages)
+            await self._lifecycle.persist_tool_result(
+                ctx.chat_id, obs_out.tool_messages
+            )
+        executed_results = obs_out.emitted_results[:executed_count]
+        streaming_results = obs_out.emitted_results[
+            executed_count : executed_count + streaming_count
+        ]
+        rejected_results = obs_out.emitted_results[executed_count + streaming_count :]
+        emitter.emit_tools_finished(executed_results)
+        emitter.emit_streaming_tool_results(streaming_results)
+        if rejected_calls:
+            emitter.emit_tools_started(rejected_calls)
+            emitter.emit_tools_finished(rejected_results)
         state.streaming_tool_results = []
         state.tool_results = []
         state.rejected_tool_calls = []
-        state.emitted_results.extend(obs_out.emitted_results)
+        state.emitted_results = []
         state.transition = obs_out.transition
 
 

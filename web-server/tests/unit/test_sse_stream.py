@@ -15,8 +15,10 @@ from src.sse_stream import SSEStream
 
 # ── Mocks ────────────────────────────────────────────────────────────────
 
+
 class MockLLM:
     """Yields assistant + done events (minimal happy path)."""
+
     def __init__(self, responses: list[dict] | None = None):
         self.responses = responses or [{"content": "no tools needed"}]
         self._idx = 0
@@ -36,7 +38,10 @@ class MockLLM:
         tool_calls = resp.get("tool_calls")
 
         if reasoning:
-            yield {"event": "assistant", "data": json.dumps({"reasoning_content": reasoning})}
+            yield {
+                "event": "assistant",
+                "data": json.dumps({"reasoning_content": reasoning}),
+            }
 
         if content:
             yield {"event": "assistant", "data": json.dumps({"delta": content})}
@@ -66,17 +71,34 @@ class MockExecutor:
     def __init__(self):
         self.calls: list[dict] = []
 
-    async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None, **kwargs):
+    async def execute(
+        self,
+        tool_name,
+        arguments,
+        *,
+        server_name=None,
+        approval_status=None,
+        request_id=None,
+        **kwargs,
+    ):
         self.calls.append({"tool_name": tool_name, "arguments": arguments})
         return {"execution_status": "SUCCEEDED", "output": f"result of {tool_name}"}
 
     async def execute_parallel(self, calls: list[dict]) -> list[dict]:
         results = []
         for c in calls:
-            self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-            results.append({"tool_call_id": c.get("call_id", ""), "result": {
-                "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-            }})
+            self.calls.append(
+                {"tool_name": c["tool_name"], "arguments": c.get("arguments", {})}
+            )
+            results.append(
+                {
+                    "tool_call_id": c.get("call_id", ""),
+                    "result": {
+                        "execution_status": "SUCCEEDED",
+                        "output": f"result of {c['tool_name']}",
+                    },
+                }
+            )
         return results
 
     async def classify(self, tool_name, params, server_name=""):
@@ -84,8 +106,18 @@ class MockExecutor:
 
     def list_tools(self) -> list[dict]:
         return [
-            {"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True},
-            {"name": "get_memory", "server_name": "tool-server", "mutable": False, "is_read_only": True},
+            {
+                "name": "get_cpu",
+                "server_name": "tool-server",
+                "mutable": False,
+                "is_read_only": True,
+            },
+            {
+                "name": "get_memory",
+                "server_name": "tool-server",
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
 
 
@@ -113,6 +145,7 @@ class MockAuditLogger:
 
 class MockPromptManager:
     """Simple prompt manager that returns a canned system prompt."""
+
     def build_system_prompt(self) -> str:
         return "You are a helpful assistant."
 
@@ -120,13 +153,17 @@ class MockPromptManager:
 class MockSessionManager:
     def __init__(self):
         from src.models.session import ChatSession
+
         self._sessions: dict[UUID, ChatSession] = {}
 
     async def create_session(self):
         from src.models.session import ChatSession
+
         sid = uuid4()
         session = ChatSession(
-            id=sid, title=None, messages=[],
+            id=sid,
+            title=None,
+            messages=[],
             executed_tool_list=[],
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
@@ -171,25 +208,44 @@ async def _collect_events(gen):
 
 # ── Helper: build SSEStream ──────────────────────────────────────────────
 
-def _build_stream(user_message, chat_id, session_mgr, prompt_mgr,
-                  llm, executor, context_mgr, audit, bridge, rule_engine,
-                  agent_max_iterations=30):
+
+def _build_stream(
+    user_message,
+    chat_id,
+    session_mgr,
+    prompt_mgr,
+    llm,
+    executor,
+    context_mgr,
+    audit,
+    bridge,
+    rule_engine,
+    agent_max_iterations=30,
+    lifecycle=None,
+):
     """Build SSEStream with ChatTurn and orchestrator."""
 
     def orch_builder():
         return LoopOrchestrator(
             context_manager=context_mgr,
-            bridge=bridge, audit_logger=audit, error_recovery=None,
-            llm=llm, chat_id=chat_id or "",
+            bridge=bridge,
+            audit_logger=audit,
+            error_recovery=None,
+            llm=llm,
+            chat_id=chat_id or "",
+            lifecycle=lifecycle,
             agent_max_iterations=agent_max_iterations,
             tool_executor=executor,
             rule_engine=rule_engine,
         )
 
     turn = ChatTurn(
-        user_message=user_message, chat_id=chat_id,
-        session_manager=session_mgr, prompt_manager=prompt_mgr,
-        orchestrator_builder=orch_builder, tool_executor=executor,
+        user_message=user_message,
+        chat_id=chat_id,
+        session_manager=session_mgr,
+        prompt_manager=prompt_mgr,
+        orchestrator_builder=orch_builder,
+        tool_executor=executor,
     )
 
     return SSEStream(turn=turn)
@@ -197,34 +253,43 @@ def _build_stream(user_message, chat_id, session_mgr, prompt_mgr,
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def llm():
     return MockLLM()
+
 
 @pytest.fixture
 def rule_engine():
     return MockRuleEngine()
 
+
 @pytest.fixture
 def executor():
     return MockExecutor()
+
 
 @pytest.fixture
 def context_manager():
     return MockContextManager()
 
+
 @pytest.fixture
 def audit():
     return MockAuditLogger()
 
+
 @pytest.fixture
 def bridge():
     from src.security.pending import ApprovalBridge
+
     return ApprovalBridge()
+
 
 @pytest.fixture
 def session_manager():
     return MockSessionManager()
+
 
 @pytest.fixture
 def prompt_manager():
@@ -233,17 +298,35 @@ def prompt_manager():
 
 # ── Tests ────────────────────────────────────────────────────────────────
 
+
 class TestSSEStreamSessionInit:
     """SSEStream first event always session_init, carries real chat_id."""
 
     async def test_first_event_is_session_init_with_real_chat_id(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         llm.responses = [{"content": "Hello.", "tool_calls": None}]
 
-        stream = _build_stream("hello", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "hello",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         assert len(events) >= 2, f"Expected at least 2 events, got {len(events)}"
@@ -255,8 +338,15 @@ class TestSSEStreamSessionInit:
         UUID(chat_id)
 
     async def test_session_init_when_chat_id_provided(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Providing an existing chat_id should still yield session_init first."""
         session = await session_manager.create_session()
@@ -264,8 +354,18 @@ class TestSSEStreamSessionInit:
 
         llm.responses = [{"content": "Welcome back.", "tool_calls": None}]
 
-        stream = _build_stream("continue", existing_id, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "continue",
+            existing_id,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         first = events[0]
@@ -278,35 +378,72 @@ class TestSSEStreamAgentEvents:
     """session_init followed by normal agent event sequence."""
 
     async def test_session_init_followed_by_agent_events(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         llm.responses = [{"content": "CPU is normal.", "tool_calls": None}]
 
-        stream = _build_stream("check CPU", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "check CPU",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]
         assert event_types[0] == "session_init"
-        assert "assistant" in event_types[1:], f"Expected 'assistant' after session_init, got {event_types[1:]}"
+        assert "assistant" in event_types[1:], (
+            f"Expected 'assistant' after session_init, got {event_types[1:]}"
+        )
 
     async def test_assistant_delta_is_emitted_before_llm_stream_done(
-        self, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Assistant deltas should reach SSE while the LLM stream is still open."""
         continue_stream = asyncio.Event()
 
         class PausedLLM(MockLLM):
-            async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+            async def generate_stream(
+                self, messages, tools=None, system=None, chat_id=None
+            ):
                 yield {"event": "assistant", "data": json.dumps({"delta": "partial"})}
                 await continue_stream.wait()
                 yield {"event": "assistant", "data": json.dumps({"delta": " done"})}
                 yield {"event": "done", "data": "{}"}
 
-        stream = _build_stream("stream please", None, session_manager, prompt_manager,
-                               PausedLLM(), executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "stream please",
+            None,
+            session_manager,
+            prompt_manager,
+            PausedLLM(),
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         iterator = stream.__aiter__()
 
         first = await asyncio.wait_for(iterator.__anext__(), timeout=0.5)
@@ -318,19 +455,46 @@ class TestSSEStreamAgentEvents:
         assert json.loads(second["data"])["delta"] == "partial"
 
     async def test_agent_events_include_tool_calls(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
-        executor.list_tools = lambda: [{"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True}]
+        executor.list_tools = lambda: [
+            {
+                "name": "get_cpu",
+                "server_name": "tool-server",
+                "mutable": False,
+                "is_read_only": True,
+            }
+        ]
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                ],
+            },
             {"content": "CPU is 85%.", "tool_calls": None},
         ]
 
-        stream = _build_stream("check CPU", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "check CPU",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]
@@ -338,13 +502,31 @@ class TestSSEStreamAgentEvents:
         assert "tool_call" in event_types
         assert "tool_result" in event_types
         assert "assistant" in event_types
+        assert event_types.count("tool_call") == 1
+        assert event_types.count("tool_result") == 1
+        assert event_types.index("tool_call") < event_types.index("tool_result")
+        assert event_types.index("tool_result") < event_types.index("assistant")
 
     async def test_readonly_tool_events_use_llm_tool_call_id_not_db_call_id(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """SSE tool event pairing uses the LLM tool call id, not persistence row id."""
-        executor.list_tools = lambda: [{"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True}]
+        executor.list_tools = lambda: [
+            {
+                "name": "get_cpu",
+                "server_name": "tool-server",
+                "mutable": False,
+                "is_read_only": True,
+            }
+        ]
         llm_tool_call_id = "call_readonly_llm_id"
         db_call_id = uuid4()
 
@@ -353,14 +535,30 @@ class TestSSEStreamAgentEvents:
 
         session_manager.add_tool_call = add_tool_call
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": llm_tool_call_id, "function": {"name": "get_cpu", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": llm_tool_call_id,
+                        "function": {"name": "get_cpu", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "CPU is 85%.", "tool_calls": None},
         ]
 
-        stream = _build_stream("check CPU", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "check CPU",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         tool_call_ids = [
@@ -377,42 +575,103 @@ class TestSSEStreamDone:
     """done is always the last event."""
 
     async def test_done_is_last_event_text_only(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         llm.responses = [{"content": "OK.", "tool_calls": None}]
 
-        stream = _build_stream("test", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "test",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
         assert events[-1]["event"] == "done", f"Last event: {events[-1]['event']}"
 
     async def test_done_is_last_event_with_tool_calls(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
-        executor.list_tools = lambda: [{"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True}]
+        executor.list_tools = lambda: [
+            {
+                "name": "get_cpu",
+                "server_name": "tool-server",
+                "mutable": False,
+                "is_read_only": True,
+            }
+        ]
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                ],
+            },
             {"content": "Done.", "tool_calls": None},
         ]
 
-        stream = _build_stream("check", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "check",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
         assert events[-1]["event"] == "done", f"Last event: {events[-1]['event']}"
 
     async def test_done_present_even_on_agent_error(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """If the LLM yields an error, done should still be the last event."""
         llm.responses = [{"error": {"code": 500, "message": "LLM crash"}}]
 
-        stream = _build_stream("test", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "test",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         assert events[0]["event"] == "session_init"
@@ -423,13 +682,30 @@ class TestSSEStreamSessionPersistence:
     """Verify session and messages are properly persisted."""
 
     async def test_user_message_persisted(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         llm.responses = [{"content": "Got it.", "tool_calls": None}]
 
-        stream = _build_stream("save this", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "save this",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         data = json.loads(events[0]["data"])
@@ -439,14 +715,30 @@ class TestSSEStreamSessionPersistence:
         assert session is not None
 
     async def test_session_title_set(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         llm.responses = [{"content": "Title test.", "tool_calls": None}]
 
-        stream = _build_stream("Long message that should be truncated for title", None,
-                               session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "Long message that should be truncated for title",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         await _collect_events(stream)
 
 
@@ -457,15 +749,27 @@ class TestSSEStreamApproval:
     """
 
     async def test_approval_flow_yields_tool_call_and_result(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Approval granted should yield tool_call + tool_result events."""
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return [
-                    {"name": "restart_service", "server_name": "tool-server",
-                     "mutable": False, "is_read_only": False},
+                    {
+                        "name": "restart_service",
+                        "server_name": "tool-server",
+                        "mutable": False,
+                        "is_read_only": False,
+                    },
                 ]
 
             async def classify(self, tool_name, params, server_name=""):
@@ -473,21 +777,49 @@ class TestSSEStreamApproval:
 
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                return [{"tool_call_id": c.get("call_id", ""), "result": {
-                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                }} for c in calls]
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                return [
+                    {
+                        "tool_call_id": c.get("call_id", ""),
+                        "result": {
+                            "execution_status": "SUCCEEDED",
+                            "output": f"result of {c['tool_name']}",
+                        },
+                    }
+                    for c in calls
+                ]
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Service restarted.", "tool_calls": None},
         ]
 
-        stream = _build_stream("restart", None, session_manager, prompt_manager,
-                               llm, risky, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "restart",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            risky,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
 
         events: list[dict] = []
         async for e in stream:
@@ -498,21 +830,125 @@ class TestSSEStreamApproval:
 
         event_types = [e["event"] for e in events]
         assert "session_init" in event_types, f"Missing session_init: {event_types}"
-        assert "tool_approval_required" in event_types, f"Missing tool_approval_required: {event_types}"
+        assert "tool_approval_required" in event_types, (
+            f"Missing tool_approval_required: {event_types}"
+        )
         assert "tool_call" in event_types, f"Missing tool_call: {event_types}"
         assert "tool_result" in event_types, f"Missing tool_result: {event_types}"
-        assert event_types[-1] == "done", f"Last event should be done, got: {event_types[-1]}"
+        assert event_types.count("tool_call") == 1
+        assert event_types.count("tool_result") == 1
+        assert event_types.index("tool_call") < event_types.index("tool_result")
+        assert event_types.index("tool_result") < event_types.index("assistant")
+        assert event_types[-1] == "done", (
+            f"Last event should be done, got: {event_types[-1]}"
+        )
 
-    async def test_done_is_last_event_after_approval(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+    async def test_rejected_approval_yields_result_and_persists_tool_message(
+        self,
+        llm,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
-        """After approval flow, done must be the last event."""
+        """Rejected approvals still close the tool_call with a persisted tool result."""
+        from src.services.tool_lifecycle import ToolCallLifecycle
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return [
-                    {"name": "restart_service", "server_name": "tool-server",
-                     "mutable": False, "is_read_only": False},
+                    {
+                        "name": "restart_service",
+                        "server_name": "tool-server",
+                        "mutable": False,
+                        "is_read_only": False,
+                    },
+                ]
+
+        persisted_messages = []
+
+        async def add_message(chat_id, msg):
+            persisted_messages.append(msg)
+
+        session_manager.add_message = add_message
+        risky = RiskyExecutor()
+        llm.responses = [
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-rejected",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
+            {"content": "I will not restart it.", "tool_calls": None},
+        ]
+
+        stream = _build_stream(
+            "restart",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            risky,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+            lifecycle=ToolCallLifecycle(session_manager),
+        )
+
+        events: list[dict] = []
+        async for e in stream:
+            events.append(e)
+            if e["event"] == "tool_approval_required":
+                data = json.loads(e["data"])
+                bridge.complete(data["request_id"], "REJECTED", reason="too risky")
+
+        event_types = [e["event"] for e in events]
+        tool_call_payloads = [
+            json.loads(e["data"]) for e in events if e["event"] == "tool_call"
+        ]
+        tool_result_payloads = [
+            json.loads(e["data"]) for e in events if e["event"] == "tool_result"
+        ]
+
+        assert len(tool_call_payloads) == 1
+        assert len(tool_result_payloads) == 1
+        assert tool_call_payloads[0]["call_id"] == "tc-rejected"
+        assert tool_result_payloads[0]["call_id"] == "tc-rejected"
+        assert tool_result_payloads[0]["execution_status"] == "REJECTED"
+        assert event_types.index("tool_result") < event_types.index("assistant")
+        assert any(
+            msg.tool_call_id == "tc-rejected" and msg.tool_name == "restart_service"
+            for msg in persisted_messages
+        )
+
+    async def test_done_is_last_event_after_approval(
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
+    ):
+        """After approval flow, done must be the last event."""
+
+        class RiskyExecutor(MockExecutor):
+            def list_tools(self):
+                return [
+                    {
+                        "name": "restart_service",
+                        "server_name": "tool-server",
+                        "mutable": False,
+                        "is_read_only": False,
+                    },
                 ]
 
             async def classify(self, tool_name, params, server_name=""):
@@ -520,21 +956,49 @@ class TestSSEStreamApproval:
 
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                return [{"tool_call_id": c.get("call_id", ""), "result": {
-                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                }} for c in calls]
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                return [
+                    {
+                        "tool_call_id": c.get("call_id", ""),
+                        "result": {
+                            "execution_status": "SUCCEEDED",
+                            "output": f"result of {c['tool_name']}",
+                        },
+                    }
+                    for c in calls
+                ]
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "All done.", "tool_calls": None},
         ]
 
-        stream = _build_stream("restart", None, session_manager, prompt_manager,
-                               llm, risky, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "restart",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            risky,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
 
         events: list[dict] = []
         async for e in stream:
@@ -552,15 +1016,27 @@ class TestSSEStreamApprovalEventOrdering:
     """Verify tool events appear before done, and all tools are resolved."""
 
     async def test_tool_finished_before_done_in_approval_flow(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Tool call and tool result events must appear before the done event."""
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return [
-                    {"name": "restart_service", "server_name": "tool-server",
-                     "mutable": False, "is_read_only": False},
+                    {
+                        "name": "restart_service",
+                        "server_name": "tool-server",
+                        "mutable": False,
+                        "is_read_only": False,
+                    },
                 ]
 
             async def classify(self, tool_name, params, server_name=""):
@@ -568,21 +1044,49 @@ class TestSSEStreamApprovalEventOrdering:
 
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                return [{"tool_call_id": c.get("call_id", ""), "result": {
-                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                }} for c in calls]
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                return [
+                    {
+                        "tool_call_id": c.get("call_id", ""),
+                        "result": {
+                            "execution_status": "SUCCEEDED",
+                            "output": f"result of {c['tool_name']}",
+                        },
+                    }
+                    for c in calls
+                ]
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Done.", "tool_calls": None},
         ]
 
-        stream = _build_stream("restart", None, session_manager, prompt_manager,
-                               llm, risky, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "restart",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            risky,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
 
         events: list[dict] = []
         async for e in stream:
@@ -609,7 +1113,9 @@ class TestSSEStreamApprovalEventOrdering:
                 last_tool_result_idx = i
 
         assert last_tool_call_idx is not None, "Expected at least one tool_call event"
-        assert last_tool_result_idx is not None, "Expected at least one tool_result event"
+        assert last_tool_result_idx is not None, (
+            "Expected at least one tool_result event"
+        )
         assert done_idx is not None, "Expected a done event"
 
         assert last_tool_call_idx < done_idx, (
@@ -623,15 +1129,27 @@ class TestSSEStreamApprovalEventOrdering:
         )
 
     async def test_all_tools_resolved_before_stream_close(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Every tool_call event must have a corresponding tool_result with matching call_id."""
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return [
-                    {"name": "restart_service", "server_name": "tool-server",
-                     "mutable": False, "is_read_only": False},
+                    {
+                        "name": "restart_service",
+                        "server_name": "tool-server",
+                        "mutable": False,
+                        "is_read_only": False,
+                    },
                 ]
 
             async def classify(self, tool_name, params, server_name=""):
@@ -639,21 +1157,49 @@ class TestSSEStreamApprovalEventOrdering:
 
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                return [{"tool_call_id": c.get("call_id", ""), "result": {
-                    "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                }} for c in calls]
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                return [
+                    {
+                        "tool_call_id": c.get("call_id", ""),
+                        "result": {
+                            "execution_status": "SUCCEEDED",
+                            "output": f"result of {c['tool_name']}",
+                        },
+                    }
+                    for c in calls
+                ]
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Done.", "tool_calls": None},
         ]
 
-        stream = _build_stream("restart", None, session_manager, prompt_manager,
-                               llm, risky, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "restart",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            risky,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
 
         events: list[dict] = []
         async for e in stream:
@@ -683,23 +1229,44 @@ class TestSSEStreamApprovalEventOrdering:
 
         # No orphaned tool_results
         orphaned = tool_result_ids - tool_call_ids
-        assert not orphaned, (
-            f"Tool results without matching calls: {orphaned}"
-        )
+        assert not orphaned, f"Tool results without matching calls: {orphaned}"
 
 
 class TestSSEStreamStreamingBehavior:
     """Verify that reasoning events and thinking_done are properly forwarded."""
 
     async def test_reasoning_events_streamed(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """Reasoning content from LLM appears as 'reasoning' events."""
-        llm.responses = [{"reasoning": "The user wants CPU info.", "content": "CPU is 42%.", "tool_calls": None}]
+        llm.responses = [
+            {
+                "reasoning": "The user wants CPU info.",
+                "content": "CPU is 42%.",
+                "tool_calls": None,
+            }
+        ]
 
-        stream = _build_stream("check CPU", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "check CPU",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]
@@ -714,14 +1281,33 @@ class TestSSEStreamStreamingBehavior:
         assert "The user wants CPU info" in data["delta"]
 
     async def test_thinking_done_emitted(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """thinking_done should be emitted after reasoning, before assistant deltas."""
-        llm.responses = [{"reasoning": "I need to help.", "content": "OK.", "tool_calls": None}]
+        llm.responses = [
+            {"reasoning": "I need to help.", "content": "OK.", "tool_calls": None}
+        ]
 
-        stream = _build_stream("help", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "help",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]
@@ -730,14 +1316,31 @@ class TestSSEStreamStreamingBehavior:
         )
 
     async def test_assistant_done_emitted(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """assistant_done should be emitted after assistant deltas."""
         llm.responses = [{"content": "Hello.", "tool_calls": None}]
 
-        stream = _build_stream("hi", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "hi",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]
@@ -746,14 +1349,33 @@ class TestSSEStreamStreamingBehavior:
         )
 
     async def test_full_event_sequence_with_reasoning(
-        self, llm, executor, context_manager, audit, bridge, rule_engine,
-        session_manager, prompt_manager,
+        self,
+        llm,
+        executor,
+        context_manager,
+        audit,
+        bridge,
+        rule_engine,
+        session_manager,
+        prompt_manager,
     ):
         """End-to-end event sequence with reasoning."""
-        llm.responses = [{"reasoning": "Simple query.", "content": "Got it.", "tool_calls": None}]
+        llm.responses = [
+            {"reasoning": "Simple query.", "content": "Got it.", "tool_calls": None}
+        ]
 
-        stream = _build_stream("test", None, session_manager, prompt_manager,
-                               llm, executor, context_manager, audit, bridge, rule_engine)
+        stream = _build_stream(
+            "test",
+            None,
+            session_manager,
+            prompt_manager,
+            llm,
+            executor,
+            context_manager,
+            audit,
+            bridge,
+            rule_engine,
+        )
         events = await _collect_events(stream)
 
         event_types = [e["event"] for e in events]

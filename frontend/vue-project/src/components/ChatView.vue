@@ -74,10 +74,11 @@ async function handle_reject(requestId: string, message?: string) {
 </script>
 
 <template>
-  <div class="chat-view d-flex flex-column flex-grow-1 overflow-hidden">
+  <div class="chat-view d-flex flex-column flex-grow-1 overflow-hidden" data-testid="chat-view">
     <div
       ref="messages_container"
       class="chat-messages flex-grow-1 overflow-auto p-3"
+      data-testid="chat-messages"
       @scroll="on_scroll"
     >
       <template v-if="isLoadingHistory">
@@ -88,7 +89,7 @@ async function handle_reject(requestId: string, message?: string) {
         </div>
       </template>
       <template v-else-if="timeline.length === 0 && !approvalEvent">
-        <div class="text-center text-muted mt-5">
+        <div class="text-center text-muted mt-5" data-testid="empty-chat">
           <p class="fs-4">Alascup Agent</p>
           <p>Start a conversation — ask about system status, diagnostics, or operations.</p>
         </div>
@@ -117,7 +118,12 @@ async function handle_reject(requestId: string, message?: string) {
       ↓
     </div>
 
-    <div v-if="connectionError" class="connection-error px-3 py-2 border-top small" :class="errorBannerClass">
+    <div
+      v-if="connectionError"
+      class="connection-error px-3 py-2 border-top small"
+      data-testid="connection-error"
+      :class="errorBannerClass"
+    >
       <span class="fw-semibold">{{ errorBannerTitle }}</span>
       <span class="ms-1">{{ connectionError.message }}</span>
     </div>
@@ -127,6 +133,7 @@ async function handle_reject(requestId: string, message?: string) {
         <textarea
           v-model="draftInput"
           class="form-control"
+          data-testid="chat-input"
           rows="2"
           placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
           :disabled="isStreaming"
@@ -134,6 +141,7 @@ async function handle_reject(requestId: string, message?: string) {
         ></textarea>
         <button
           class="btn-send-btn"
+          data-testid="send-button"
           :class="{ 'btn-stop-btn': isStreaming }"
           :disabled="!isStreaming && !draftInput.trim()"
           @click="isStreaming ? abort() : sendMessage()"

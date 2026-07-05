@@ -33,19 +33,30 @@ watch(renderedHtml, highlightCodeBlocks)
 
 <template>
   <div v-if="message.type === 'user'" class="d-flex justify-content-end mb-3">
-    <div class="chat-bubble chat-bubble-user bg-primary text-white rounded-3 px-3 py-2" style="max-width: 75%">
+    <div
+      class="chat-bubble chat-bubble-user bg-primary text-white rounded-3 px-3 py-2"
+      data-testid="user-bubble"
+      style="max-width: 75%"
+    >
       {{ message.content }}
     </div>
   </div>
 
   <div v-else-if="message.type === 'assistant' && message.content" class="d-flex mb-3">
-    <div class="chat-bubble chat-bubble-assistant bg-light rounded-3 px-3 py-2" style="max-width: 85%">
+    <div
+      class="chat-bubble chat-bubble-assistant bg-light rounded-3 px-3 py-2"
+      data-testid="assistant-bubble"
+      style="max-width: 85%"
+    >
       <div ref="contentRef" v-html="renderedHtml"></div>
     </div>
   </div>
 
   <div v-else-if="message.type === 'system'" class="d-flex justify-content-center mb-2">
-    <div class="chat-bubble chat-bubble-system bg-secondary bg-opacity-10 text-muted rounded-3 px-3 py-1 small">
+    <div
+      class="chat-bubble chat-bubble-system bg-secondary bg-opacity-10 text-muted rounded-3 px-3 py-1 small"
+      data-testid="system-bubble"
+    >
       {{ message.content }}
     </div>
   </div>

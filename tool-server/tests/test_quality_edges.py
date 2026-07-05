@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+class TestConfigLoading:
+    def test_load_config_applies_file_and_env_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.config import load_config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            '{"cache_ttl": 10, "bash_timeout": 20}', encoding="utf-8"
+        )
+        monkeypatch.setenv("TOOLSERVER_CONFIG_PATH", str(config_file))
+        monkeypatch.setenv("TOOLSERVER_CACHE_TTL", "30")
+        monkeypatch.setenv("TOOLSERVER_HOST_EXEC", "chroot")
+        monkeypatch.setenv("TOOLSERVER_HOST", "127.0.0.2")
+
+        config = load_config()
+
+        assert config.cache_ttl == 30
+        assert config.bash_timeout == 20
+        assert config.host_exec == "chroot"
+        assert config.host == "127.0.0.2"
+
+    def test_load_config_uses_defaults_when_file_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.config import load_config
+
+        monkeypatch.setenv("TOOLSERVER_CONFIG_PATH", str(tmp_path / "missing.json"))
+
+        config = load_config()
+
+        assert config.port == 11451
+        assert config.postgres_dsn is None
+
+
+class TestPostgresEdges:
+    @pytest.mark.asyncio
+    async def test_schema_rejects_invalid_identifier_before_connect(
+        self, config
+    ) -> None:
+        from src.tools.data.postgres import get_postgres_schema
+
+        result = await get_postgres_schema(
+            config.model_copy(update={"postgres_dsn": "postgresql://db"}), "bad-name"
+        )
+
+        assert result == {"error": "invalid schema"}
+
+    @pytest.mark.asyncio
+    async def test_schema_groups_columns_by_table(
+        self, config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.data import postgres
+
+        async def fake_fetch(_config, _sql, *_args, timeout=None):
+            assert timeout is None
+            return [
+                {
+                    "table_schema": "public",
+                    "table_name": "sessions",
+                    "column_name": "id",
+                    "data_type": "uuid",
+                    "is_nullable": "NO",
+                    "column_default": None,
+                },
+                {
+                    "table_schema": "public",
+                    "table_name": "sessions",
+                    "column_name": "title",
+                    "data_type": "text",
+                    "is_nullable": "YES",
+                    "column_default": None,
+                },
+            ]
+
+        monkeypatch.setattr(postgres, "_fetch", fake_fetch)
+
+        result = await postgres.get_postgres_schema(
+            config.model_copy(update={"postgres_dsn": "postgresql://db"})
+        )
+
+        assert result["table_count"] == 1
+        assert result["tables"][0]["columns"] == [
+            {"name": "id", "data_type": "uuid", "nullable": False, "default": None},
+            {"name": "title", "data_type": "text", "nullable": True, "default": None},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_readonly_query_limits_rows_and_jsonifies_values(
+        self, config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.data import postgres
+
+        async def fake_fetch_limited(_config, sql, limit, timeout=None):
+            assert sql == "select now() as ts"
+            assert limit == 2
+            assert timeout == 5.0
+            return [
+                {
+                    "ts": datetime(2026, 7, 5, 8, 0),
+                    "items": [1, datetime(2026, 7, 5, 8, 1)],
+                },
+                {"ts": datetime(2026, 7, 5, 8, 2), "items": []},
+            ]
+
+        monkeypatch.setattr(postgres, "_fetch_limited", fake_fetch_limited)
+
+        result = await postgres.postgres_readonly_query(
+            config.model_copy(
+                update={"postgres_dsn": "postgresql://db", "postgres_max_rows": 5}
+            ),
+            "select now() as ts;",
+            max_rows=1,
+        )
+
+        assert result == {
+            "columns": ["ts", "items"],
+            "rows": [
+                {"ts": "2026-07-05T08:00:00", "items": [1, "2026-07-05T08:01:00"]}
+            ],
+            "row_count": 1,
+            "truncated": True,
+            "max_rows": 1,
+        }
+
+    def test_sql_scrubber_handles_comments_and_quoted_identifiers(self) -> None:
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        assert (
+            _validate_readonly_sql('select "drop" from audit -- update ignored\n')[0]
+            is True
+        )
+        assert _validate_readonly_sql("select 1 /* delete ignored */")[0] is True
+        assert _validate_readonly_sql("select 1; -- trailing comment")[0] is True
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "select pg_read_file('/etc/passwd')",
+            "select pg_read_binary_file('/etc/passwd')",
+            "select pg_ls_dir('/')",
+            "select pg_stat_file('/etc/passwd')",
+            "select lo_import('/etc/passwd')",
+            "select \"pg_read_file\"('/etc/passwd')",
+            "select pg_catalog.\"pg_read_file\"('/etc/passwd')",
+            "select \"lo_import\"('/etc/passwd')",
+            "select pg_ls_logicalmapdir()",
+            "select pg_ls_logicalsnapdir()",
+            "select pg_ls_replslotdir('slot')",
+            "select pg_ls_summariesdir()",
+            "select pg_ls_archive_statusdir()",
+        ],
+    )
+    def test_readonly_sql_rejects_privileged_file_functions(self, sql: str) -> None:
+        from src.tools.data.postgres import _validate_readonly_sql
+
+        ok, error = _validate_readonly_sql(sql)
+
+        assert ok is False
+        assert "file and program access" in error
+
+
+class TestBashClassifierAdversarial:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "awk '{ print > \"/tmp/out\" }' /tmp/in",
+            'awk \'{ printf "x" > "/tmp/out" }\' /tmp/in',
+            "awk '{ system(\"id\") }' /tmp/in",
+            "sed -n 's/a/b/w /tmp/out' /tmp/in",
+            "sed -n '1 w /tmp/out' /tmp/in",
+            "sed -n '1w/tmp/out' /tmp/in",
+            "sed -n '1W /tmp/out' /tmp/in",
+            "sed -f ~/.ssh/id_rsa /tmp/in",
+            "sed -n '1 r /etc/shadow' /tmp/in",
+            "sed -n 'e printf SED_E_CMD_OK' /tmp/in",
+            "sed -n 's/x/printf SED_EXEC_OK/ep' /tmp/in",
+            "sed -n '/x/e id' /tmp/in",
+            "sed -n '/x/w /tmp/out' /tmp/in",
+            "sed -n '/x/r /etc/shadow' /tmp/in",
+        ],
+    )
+    def test_write_capable_text_programs_require_approval(self, command: str) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash(command) == {"safe": False}
+
+    def test_path_qualified_allowlisted_binary_requires_approval(self) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash("/opt/ls") == {"safe": False}
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cat /etc/../etc/shadow",
+            "cat /home/user/../user/.ssh/id_rsa",
+            "cat ~root/.ssh/id_rsa",
+        ],
+    )
+    def test_sensitive_paths_cannot_be_bypassed_with_normalization(
+        self, command: str
+    ) -> None:
+        from src.security.bash_classify import classify_bash
+
+        assert classify_bash(command) == {"safe": False}
+
+
+class TestBashExecutionEdges:
+    def test_default_sandbox_creation_failure_returns_failed_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.config import ToolServerConfig
+        from src.tools.operation import bash
+
+        def deny_makedirs(_path, **_kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(bash._os, "makedirs", deny_makedirs)
+
+        result = bash.run_bash(ToolServerConfig(), command="echo hello")
+
+        assert result["execution_status"] == "FAILED"
+        assert result["stderr"] == "denied"
+
+
+class _FakeProcess:
+    def __init__(
+        self,
+        stdout: bytes = b"",
+        stderr: bytes = b"",
+        returncode: int = 0,
+        hang: bool = False,
+    ) -> None:
+        self._stdout = stdout
+        self._stderr = stderr
+        self.returncode = returncode
+        self.hang = hang
+        self.terminated = False
+        self.killed = False
+
+    async def communicate(self):
+        if self.hang:
+            await asyncio.sleep(1)
+        return self._stdout, self._stderr
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> int:
+        self.returncode = -15 if self.terminated else self.returncode
+        return self.returncode
+
+
+def _fake_subprocess_factory(proc: _FakeProcess):
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return proc
+
+    return fake_create_subprocess_exec
+
+
+class TestBpftraceRunnerEdges:
+    @pytest.mark.asyncio
+    async def test_run_on_demand_parses_json_and_skips_console_lines(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "syscount.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(
+            stdout=b'Attaching 1 probe...\n{"type":"map","data":{"open":2}}\nnot json\n',
+            returncode=0,
+        )
+        monkeypatch.setattr(
+            runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
+        )
+
+        result = await runner.run_on_demand(
+            "syscount.bt", timeout=1, resolve_fn=lambda _name: script
+        )
+
+        assert result == [{"type": "map", "data": {"open": 2}}]
+
+    @pytest.mark.asyncio
+    async def test_run_on_demand_reports_nonzero_exit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "bad.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(stderr=b"syntax error", returncode=2)
+        monkeypatch.setattr(
+            runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
+        )
+
+        result = await runner.run_on_demand(
+            "bad.bt", timeout=1, resolve_fn=lambda _name: script
+        )
+
+        assert result == [
+            {"error": "syntax error", "script": "bad.bt", "returncode": 2}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_run_on_demand_terminates_on_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "slow.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(hang=True)
+        monkeypatch.setattr(
+            runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
+        )
+
+        result = await runner.run_on_demand(
+            "slow.bt", timeout=0.001, resolve_fn=lambda _name: script
+        )
+
+        assert result == [{"error": "timeout", "script": "slow.bt", "timeout_s": 0.001}]
+        assert proc.terminated is True
+
+    @pytest.mark.asyncio
+    async def test_run_on_demand_reports_missing_probe(self) -> None:
+        from src.tools.perception.ebpf.runner import run_on_demand
+
+        result = await run_on_demand("missing.bt", resolve_fn=lambda _name: None)
+
+        assert result == [
+            {
+                "error": "probe script not found (no variant for this kernel): missing.bt",
+                "script": "missing.bt",
+            }
+        ]
+
+
+class _AsyncLines:
+    def __init__(self, lines: list[bytes]) -> None:
+        self._lines = iter(lines)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        try:
+            return next(self._lines)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
+class _ReadableBytes:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    async def read(self) -> bytes:
+        return self._data
+
+
+class TestBpftraceSubscriptionEdges:
+    def test_start_without_probe_variant_sets_permanent_failure(self) -> None:
+        from src.tools.perception.ebpf.subscription import BpftraceDaemon
+
+        daemon = BpftraceDaemon("missing.bt", resolve_fn=lambda _name: None)
+
+        asyncio.run(daemon.start())
+
+        assert daemon.permanent_failure is True
+        assert daemon.status == "permanent_failure"
+
+    @pytest.mark.asyncio
+    async def test_consume_keeps_ring_buffer_latest_events(self) -> None:
+        from src.tools.perception.ebpf.subscription import BpftraceDaemon
+
+        daemon = BpftraceDaemon(
+            "execsnoop.bt", buffer_size=1, resolve_fn=lambda _name: Path("execsnoop.bt")
+        )
+        daemon._proc = type(
+            "Proc",
+            (),
+            {
+                "stdout": _AsyncLines(
+                    [b'{"pid": 1}\n', b"not-json\n", b'{"pid": 2}\n']
+                ),
+                "stderr": _ReadableBytes(b""),
+                "returncode": None,
+            },
+        )()
+
+        await daemon._consume()
+
+        assert daemon.drain() == [{"pid": 2}]
+
+    @pytest.mark.asyncio
+    async def test_collect_stderr_marks_fatal_errors(self) -> None:
+        from src.tools.perception.ebpf.subscription import BpftraceDaemon
+
+        daemon = BpftraceDaemon(
+            "execsnoop.bt", resolve_fn=lambda _name: Path("execsnoop.bt")
+        )
+        daemon._proc = type(
+            "Proc",
+            (),
+            {
+                "stdout": _AsyncLines([]),
+                "stderr": _ReadableBytes(b"permission denied"),
+                "returncode": None,
+            },
+        )()
+
+        await daemon._collect_stderr()
+
+        assert daemon.permanent_failure is True

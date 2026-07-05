@@ -101,7 +101,9 @@ class TestFeatureTimeTrackerThreadSafety:
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=worker, args=(f"op-{i}",)) for i in range(20)]
+        threads = [
+            threading.Thread(target=worker, args=(f"op-{i}",)) for i in range(20)
+        ]
         for t in threads:
             t.start()
         for t in threads:

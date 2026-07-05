@@ -33,15 +33,34 @@ async def review_node(
     pending: list[AgentToolCall] = []
 
     for tc in tool_calls:
-        name, is_read_only, is_rollbackable, args = await _classify_tool_call(tc, executor)
+        name, is_read_only, is_rollbackable, args = await _classify_tool_call(
+            tc, executor
+        )
         decision = rule_engine.evaluate(name, is_read_only, is_rollbackable)
-        await _apply_decision(tc, name, is_read_only, decision, auditor, approved, rejected, pending,
-                              args=args, lifecycle=lifecycle, chat_id=chat_id)
+        await _apply_decision(
+            tc,
+            name,
+            is_read_only,
+            decision,
+            auditor,
+            approved,
+            rejected,
+            pending,
+            args=args,
+            lifecycle=lifecycle,
+            chat_id=chat_id,
+        )
 
     tool_names = [t.function.name for t in tool_calls]
-    debug_log("DEBUG", "Review done",
-              total=len(tool_calls), approved=len(approved), rejected=len(rejected), pending=len(pending),
-              tools=",".join(tool_names))
+    debug_log(
+        "DEBUG",
+        "Review done",
+        total=len(tool_calls),
+        approved=len(approved),
+        rejected=len(rejected),
+        pending=len(pending),
+        tools=",".join(tool_names),
+    )
 
     if pending:
         return await _build_pending_response(pending, approved, rejected, auditor)
@@ -58,10 +77,13 @@ async def _classify_tool_call(
     if tc.mutable:
         try:
             classify_args = {k: v for k, v in args.items() if k != "timeout"}
-            classification = await executor.classify_companion(name, classify_args, tc.server_name)
+            classification = await executor.classify_companion(
+                name, classify_args, tc.server_name
+            )
         except Exception:
             logger.opt(exception=True).warning(
-                "classify_companion failed for tool={tool}, treating as dangerous", tool=name,
+                "classify_companion failed for tool={tool}, treating as dangerous",
+                tool=name,
             )
             classification = {"safe": False}
         return name, bool(classification.get("safe", False)), False, args
@@ -86,9 +108,12 @@ async def _apply_decision(
     if decision == "REJECT":
         rejected.append(tc)
         await auditor.tool_event(
-            "TOOL_REJECTED", actor=AuditActor.POLICY, tool_name=name,
+            "TOOL_REJECTED",
+            actor=AuditActor.POLICY,
+            tool_name=name,
             request_id=_safe_uuid(tc.request_id or ""),
-            params=args, decision="REJECT",
+            params=args,
+            decision="REJECT",
         )
         if lifecycle is not None and chat_id_uuid is not None:
             await lifecycle.mark_rejected(chat_id_uuid, tc.call_id)
@@ -97,7 +122,9 @@ async def _apply_decision(
         tc.request_id = str(uuid4())
         approved.append(tc)
         await auditor.tool_event(
-            "TOOL_AUTO_APPROVED", actor=AuditActor.POLICY, tool_name=name,
+            "TOOL_AUTO_APPROVED",
+            actor=AuditActor.POLICY,
+            tool_name=name,
             request_id=_safe_uuid(tc.request_id),
             params=args,
         )
@@ -107,7 +134,9 @@ async def _apply_decision(
         tc.is_read_only = is_read_only
         pending.append(tc)
         await auditor.tool_event(
-            "TOOL_REQUEST_CREATED", actor=AuditActor.POLICY, tool_name=name,
+            "TOOL_REQUEST_CREATED",
+            actor=AuditActor.POLICY,
+            tool_name=name,
             params=args,
         )
 
@@ -123,7 +152,9 @@ async def _build_pending_response(
     names = ",".join(t.function.name for t in pending)
     debug_log("WARN", "Tools require approval — returning to orchestrator", tools=names)
     await auditor.tool_event(
-        "TOOL_REQUEST_CREATED", actor=AuditActor.POLICY, tool_name=names,
+        "TOOL_REQUEST_CREATED",
+        actor=AuditActor.POLICY,
+        tool_name=names,
         level=AuditLevel.WARN,
     )
     return ReviewOutput(
@@ -138,9 +169,10 @@ def _build_final_response(
     approved: list[AgentToolCall], rejected: list[AgentToolCall]
 ) -> ReviewOutput:
     transition = (
-        Transition.APPROVAL_GRANTED if approved
-        else Transition.APPROVAL_REJECTED
-    ) if (approved or rejected) else None
+        (Transition.APPROVAL_GRANTED if approved else Transition.APPROVAL_REJECTED)
+        if (approved or rejected)
+        else None
+    )
     return ReviewOutput(
         approved=approved,
         rejected=rejected,

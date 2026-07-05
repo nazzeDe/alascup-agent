@@ -1,4 +1,3 @@
-
 from src.agent.state import AgentState, Transition
 
 
@@ -9,10 +8,16 @@ class MockExecutorWithClassify:
         self._safe = is_read_only
         self.classify_calls: list[dict] = []
 
-    async def classify_companion(self, tool_name: str, params: dict, server_name: str) -> dict:
-        self.classify_calls.append({
-            "tool_name": tool_name, "params": params, "server_name": server_name,
-        })
+    async def classify_companion(
+        self, tool_name: str, params: dict, server_name: str
+    ) -> dict:
+        self.classify_calls.append(
+            {
+                "tool_name": tool_name,
+                "params": params,
+                "server_name": server_name,
+            }
+        )
         return {"safe": self._safe}
 
 
@@ -35,12 +40,14 @@ class MockAuditLogger:
         self.events: list[dict] = []
 
     async def log(self, event):
-        self.events.append({
-            "level": event.level,
-            "event": event.event,
-            "tool_name": event.tool_name,
-            "decision": event.decision,
-        })
+        self.events.append(
+            {
+                "level": event.level,
+                "event": event.event,
+                "tool_name": event.tool_name,
+                "decision": event.decision,
+            }
+        )
 
 
 def _state(tool_calls=None):
@@ -57,15 +64,26 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
-            {"function": {"name": "get_memory", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "get_cpu", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
+            {
+                "function": {"name": "get_memory", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(result.approved) == 2
@@ -77,15 +95,26 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "blacklist_cmd", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
+            {
+                "function": {"name": "get_cpu", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(result.approved) == 1
@@ -98,14 +127,21 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "whitelist_cleanup", "arguments": "{}"}, "mutable": False, "is_read_only": False},
+            {
+                "function": {"name": "whitelist_cleanup", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": False,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(result.approved) == 1
@@ -116,14 +152,21 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "delete_logs", "arguments": '{"path":"/var/log"}'}, "mutable": False, "is_read_only": False},
+            {
+                "function": {"name": "delete_logs", "arguments": '{"path":"/var/log"}'},
+                "mutable": False,
+                "is_read_only": False,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(result.pending) == 1
@@ -137,14 +180,21 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "delete_logs", "arguments": "{}"}, "mutable": False, "is_read_only": False},
+            {
+                "function": {"name": "delete_logs", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": False,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert result.approved == []
@@ -156,17 +206,36 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
-            {"function": {"name": "delete_logs", "arguments": "{}"}, "mutable": False, "is_read_only": False},
-            {"function": {"name": "get_memory", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "get_cpu", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
+            {
+                "function": {"name": "blacklist_cmd", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
+            {
+                "function": {"name": "delete_logs", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": False,
+            },
+            {
+                "function": {"name": "get_memory", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=True, is_rollbackable=True)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         approved_names = [tc.function.name for tc in result.approved]
@@ -183,14 +252,21 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "blacklist_cmd", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         executor = MockExecutorWithClassify()
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(audit.events) == 1
@@ -202,7 +278,11 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "get_cpu", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         result = await review_node(
             _state(tool_calls),
@@ -217,7 +297,11 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "blacklist_cmd", "arguments": "{}"}, "mutable": False, "is_read_only": True},
+            {
+                "function": {"name": "blacklist_cmd", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+            },
         ]
         result = await review_node(
             _state(tool_calls),
@@ -246,14 +330,21 @@ class TestReviewNode:
         from src.agent.nodes import review_node
 
         tool_calls = [
-            {"function": {"name": "bash", "arguments": '{"cmd":"ls"}'}, "mutable": True, "server_name": "tool-server"},
+            {
+                "function": {"name": "bash", "arguments": '{"cmd":"ls"}'},
+                "mutable": True,
+                "server_name": "tool-server",
+            },
         ]
         executor = MockExecutorWithClassify(is_read_only=False, is_rollbackable=False)
         rule_engine = MockRuleEngine()
         audit = MockAuditLogger()
 
         result = await review_node(
-            _state(tool_calls), executor=executor, rule_engine=rule_engine, audit_logger=audit,
+            _state(tool_calls),
+            executor=executor,
+            rule_engine=rule_engine,
+            audit_logger=audit,
         )
 
         assert len(executor.classify_calls) == 1

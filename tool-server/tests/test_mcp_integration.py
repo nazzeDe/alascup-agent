@@ -45,7 +45,9 @@ class TestMcpIntegration:
         assert "bash_classify" in names
         assert "execute_tool" in names
 
-    async def test_classification_companion_returns_structured_result(self, mcp_client: Client):
+    async def test_classification_companion_returns_structured_result(
+        self, mcp_client: Client
+    ):
         safe = await mcp_client.call_tool("bash_classify", {"command": "ls /tmp"})
         unsafe = await mcp_client.call_tool("bash_classify", {"command": "rm -rf /tmp"})
 
@@ -73,7 +75,9 @@ class TestMcpIntegration:
             },
         }
 
-    async def test_execute_tool_runs_approved_command_over_mcp(self, mcp_client: Client):
+    async def test_execute_tool_runs_approved_command_over_mcp(
+        self, mcp_client: Client
+    ):
         result = await mcp_client.call_tool(
             "execute_tool",
             {

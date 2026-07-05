@@ -43,9 +43,15 @@ class ApprovalBridge:
             await asyncio.wait_for(event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             return {"status": "EXPIRED", "reason": "timeout"}
-        return self._pending[request_id].pop(0) if self._pending.get(request_id) else {"status": "EXPIRED", "reason": "timeout"}
+        return (
+            self._pending[request_id].pop(0)
+            if self._pending.get(request_id)
+            else {"status": "EXPIRED", "reason": "timeout"}
+        )
 
-    async def gather_decisions(self, request_id: str, expected_count: int, timeout: float = 300) -> list[dict]:
+    async def gather_decisions(
+        self, request_id: str, expected_count: int, timeout: float = 300
+    ) -> list[dict]:
         """Collect N decisions from N complete() calls. Returns list of {status, reason} dicts."""
         decisions: list[dict] = []
         for _ in range(expected_count):

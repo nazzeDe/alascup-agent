@@ -25,9 +25,7 @@ DEFAULT_TIMEOUT_SECONDS = 120
 STREAM_TIMEOUT_SECONDS = 30
 CHAT_COMPLETIONS_PATH = "/chat/completions"
 SUMMARY_MAX_TOKENS = 1024
-SUMMARY_SYSTEM_PROMPT = (
-    "Summarize the following conversation concisely, preserving key facts and decisions."
-)
+SUMMARY_SYSTEM_PROMPT = "Summarize the following conversation concisely, preserving key facts and decisions."
 
 WireEvent = dict[str, str]
 Payload = dict
@@ -123,7 +121,10 @@ class PayloadBuilder:
             "model": model,
             "messages": [
                 {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                {"role": "user", "content": "\n".join(m.get("content", "") for m in messages)},
+                {
+                    "role": "user",
+                    "content": "\n".join(m.get("content", "") for m in messages),
+                },
             ],
             "stream": False,
             "max_tokens": SUMMARY_MAX_TOKENS,
@@ -294,7 +295,9 @@ class LLMAdapter:
         state = StreamState()
 
         async with self._streaming_client() as client:
-            async with client.stream("POST", CHAT_COMPLETIONS_PATH, json=payload) as resp:
+            async with client.stream(
+                "POST", CHAT_COMPLETIONS_PATH, json=payload
+            ) as resp:
                 if resp.status_code != 200:
                     text = await resp.aread()
                     yield _error_event(resp.status_code, text.decode())
@@ -323,7 +326,9 @@ class LLMAdapter:
         start: float,
     ) -> None:
         latency_ms = int((time.monotonic() - start) * 1000)
-        await self._trace_call(chat_id, messages, state.response(), latency_ms, state.usage)
+        await self._trace_call(
+            chat_id, messages, state.response(), latency_ms, state.usage
+        )
 
     async def _trace_call(
         self,

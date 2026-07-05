@@ -20,18 +20,28 @@ def _msg(role: str, content: str) -> AgentMessage:
 
 
 def _call(name: str, arguments: dict | None = None, **kwargs) -> AgentToolCall:
-    return AgentToolCall(function=ToolFunction(name=name, arguments=arguments or {}), **kwargs)
+    return AgentToolCall(
+        function=ToolFunction(name=name, arguments=arguments or {}), **kwargs
+    )
 
 
-def _result(tool_name: str, tool_call_id: str, result: dict, **kwargs) -> AgentToolResult:
-    return AgentToolResult(tool_name=tool_name, tool_call_id=tool_call_id, result=result, **kwargs)
+def _result(
+    tool_name: str, tool_call_id: str, result: dict, **kwargs
+) -> AgentToolResult:
+    return AgentToolResult(
+        tool_name=tool_name, tool_call_id=tool_call_id, result=result, **kwargs
+    )
 
 
 # ── collect_events helper ──────────────────────────────────────────────────
 
-async def collect_channel_events(channel: EventChannel, timeout: float = 0.5) -> list[DomainEvent]:
+
+async def collect_channel_events(
+    channel: EventChannel, timeout: float = 0.5
+) -> list[DomainEvent]:
     """Drain all events from a channel, returning when None sentinel is received or timeout."""
     import asyncio as _asyncio
+
     events: list[DomainEvent] = []
     while True:
         try:
@@ -71,14 +81,20 @@ class MockAuditLogger:
 class TestAuditTransition:
     async def test_logs_transition_event(self):
         audit = MockAuditLogger()
-        auditor = Auditor(audit_logger=audit, ctx=TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model=None))
+        auditor = Auditor(
+            audit_logger=audit,
+            ctx=TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model=None),
+        )
         await auditor.transition(Transition.USER_MESSAGE, actor=AuditActor.SYSTEM)
         assert len(audit.events) == 1
         assert audit.events[0].event == "LOOP_TRANSITION"
         assert audit.events[0].transition == "user_message"
 
     async def test_none_audit_logger_no_crash(self):
-        auditor = Auditor(audit_logger=None, ctx=TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model=None))
+        auditor = Auditor(
+            audit_logger=None,
+            ctx=TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model=None),
+        )
         await auditor.transition(Transition.DONE, actor=AuditActor.SYSTEM)
 
 
@@ -149,7 +165,9 @@ class TestOrchestratorTermination:
                 return ThinkOutput(
                     assistant_message=_msg("assistant", "checking"),
                     tool_calls=[_call("get_cpu_info", id="t1")],
-                    pre_executed=[_result("get_cpu_info", "t1", {"execution_status": "SUCCEEDED"})],
+                    pre_executed=[
+                        _result("get_cpu_info", "t1", {"execution_status": "SUCCEEDED"})
+                    ],
                     is_done=False,
                 )
             # Second call: done
@@ -160,6 +178,7 @@ class TestOrchestratorTermination:
 
         async def mock_review(state, ctx=None):
             from src.agent.results import ReviewOutput
+
             # Auto-approve all
             return ReviewOutput(
                 approved=state.tool_calls,
@@ -169,7 +188,9 @@ class TestOrchestratorTermination:
             tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
-                results.append(_result(tc.function.name, tc.id, {"execution_status": "SUCCEEDED"}))
+                results.append(
+                    _result(tc.function.name, tc.id, {"execution_status": "SUCCEEDED"})
+                )
             return ExecuteOutput(results=results)
 
         orch = LoopOrchestrator(
@@ -186,7 +207,9 @@ class TestOrchestratorTermination:
         state = AgentState(messages=[{"role": "user", "content": "check CPU"}])
 
         await orch.run(state, channel=channel)
-        assert call_count >= 2, f"orchestrator should loop at least once, got {call_count} iterations"
+        assert call_count >= 2, (
+            f"orchestrator should loop at least once, got {call_count} iterations"
+        )
         assert channel.is_closed()
 
 
@@ -267,6 +290,7 @@ class TestOrchestratorRecoveryEmission:
 
 class MockApprovalBridge:
     """Auto-approving bridge for tests."""
+
     def __init__(self):
         self.created: list[tuple] = []
 
@@ -279,7 +303,9 @@ class MockApprovalBridge:
     def complete(self, request_id: str, status: str, reason: str | None = None) -> None:
         pass
 
-    async def gather_decisions(self, request_id: str, expected_count: int, timeout: float = 300) -> list[dict]:
+    async def gather_decisions(
+        self, request_id: str, expected_count: int, timeout: float = 300
+    ) -> list[dict]:
         return [{"status": "APPROVED", "reason": None}] * expected_count
 
 
@@ -327,14 +353,16 @@ class TestApprovalFlowCallIdConsistency:
                 # First call: generate a mutable tool that needs approval
                 return ThinkOutput(
                     assistant_message=_msg("assistant", "Creating tmp file"),
-                    tool_calls=[_call(
-                        "bash",
-                        {"command": "mkdir -p ~/tmp"},
-                        id=approved_call_id,
-                        mutable=True,
-                        is_read_only=None,
-                        server_name="tool-server",
-                    )],
+                    tool_calls=[
+                        _call(
+                            "bash",
+                            {"command": "mkdir -p ~/tmp"},
+                            id=approved_call_id,
+                            mutable=True,
+                            is_read_only=None,
+                            server_name="tool-server",
+                        )
+                    ],
                     is_done=False,
                 )
             elif think_calls == 3:
@@ -343,13 +371,15 @@ class TestApprovalFlowCallIdConsistency:
                 # emitted_results overwrite in observe_node.
                 return ThinkOutput(
                     assistant_message=_msg("assistant", "Verifying"),
-                    tool_calls=[_call(
-                        "ls",
-                        {"path": "~/tmp"},
-                        id=second_call_id,
-                        is_read_only=True,
-                        server_name="tool-server",
-                    )],
+                    tool_calls=[
+                        _call(
+                            "ls",
+                            {"path": "~/tmp"},
+                            id=second_call_id,
+                            is_read_only=True,
+                            server_name="tool-server",
+                        )
+                    ],
                     is_done=False,
                 )
             else:
@@ -387,13 +417,15 @@ class TestApprovalFlowCallIdConsistency:
             tcs = state.approved_tool_calls
             results = []
             for tc in tcs:
-                results.append(_result(
-                    tc.function.name,
-                    tc.id,
-                    {"execution_status": "SUCCEEDED", "output": "ok"},
-                    is_read_only=bool(tc.is_read_only),
-                    is_rollbackable=tc.is_rollbackable,
-                ))
+                results.append(
+                    _result(
+                        tc.function.name,
+                        tc.id,
+                        {"execution_status": "SUCCEEDED", "output": "ok"},
+                        is_read_only=bool(tc.is_read_only),
+                        is_rollbackable=tc.is_rollbackable,
+                    )
+                )
             return ExecuteOutput(results=results)
 
         orch = LoopOrchestrator(
@@ -407,7 +439,9 @@ class TestApprovalFlowCallIdConsistency:
             review_fn=mock_review,
             act_fn=mock_act,
         )
-        state = AgentState(messages=[{"role": "user", "content": "create tmp file in home dir"}])
+        state = AgentState(
+            messages=[{"role": "user", "content": "create tmp file in home dir"}]
+        )
 
         await orch.run(state, channel=channel)
         events = await collect_channel_events(channel)
@@ -434,8 +468,12 @@ class TestApprovalFlowCallIdConsistency:
         )
 
         # Both tools should be accounted for
-        assert approved_call_id in started_ids, f"First tool {approved_call_id} should have ToolCallStarted"
-        assert approved_call_id in finished_ids, f"First tool {approved_call_id} should have ToolCallFinished"
+        assert approved_call_id in started_ids, (
+            f"First tool {approved_call_id} should have ToolCallStarted"
+        )
+        assert approved_call_id in finished_ids, (
+            f"First tool {approved_call_id} should have ToolCallFinished"
+        )
 
         assert channel.is_closed()
 
@@ -475,7 +513,9 @@ class TestCircuitBreaker:
         assert any(
             isinstance(e, TurnFailed) and e.code == "TURN_LIMIT_EXCEEDED"
             for e in events
-        ), f"Expected TURN_LIMIT_EXCEEDED error, got events: {[type(e).__name__ for e in events]}"
+        ), (
+            f"Expected TURN_LIMIT_EXCEEDED error, got events: {[type(e).__name__ for e in events]}"
+        )
         assert channel.is_closed()
 
     def test_inject_turn_hint_at_70_percent(self):
@@ -545,6 +585,7 @@ class TestCircuitBreaker:
 
             def count_tokens(self, messages):
                 return 200_000  # way over any reasonable ceiling
+
             needs_compression = _NoopCtx.needs_compression
             compress = _NoopCtx.compress
 

@@ -123,6 +123,75 @@ describe('ChatStreamInterpreter', () => {
     expect(chatStore.toolCalls.value.get('tc-1')!.execution_status).toBe('SUCCEEDED')
   })
 
+  it('accepts rejected tool results from approval rejection flow', () => {
+    const interpreter = makeInterpreter()
+    interpreter.apply({
+      type: 'tool_call',
+      data: { call_id: 'tc-1', tool_name: 'bash', params: { cmd: 'rm' }, is_read_only: false },
+    })
+    interpreter.apply({
+      type: 'tool_result',
+      data: {
+        call_id: 'tc-1',
+        execution_status: 'REJECTED',
+        error: { message: 'Tool was rejected by human. Do NOT retry.' },
+      },
+    })
+
+    expect(chatStore.toolCalls.value.get('tc-1')).toMatchObject({
+      execution_status: 'REJECTED',
+      error: { message: 'Tool was rejected by human. Do NOT retry.' },
+    })
+  })
+
+  it('creates a pending tool call when approval arrives before tool_call', () => {
+    const interpreter = makeInterpreter()
+
+    interpreter.apply({
+      type: 'tool_approval_required',
+      data: {
+        chat_id: 'chat-1',
+        request_id: 'req-1',
+        tool_name: 'bash',
+        params: { cmd: 'ls' },
+        reason: 'needs approval',
+        call_id: 'tc-1',
+      },
+    })
+
+    expect(chatStore.toolCalls.value.get('tc-1')).toMatchObject({
+      call_id: 'tc-1',
+      tool_name: 'bash',
+      execution_status: 'PENDING_APPROVAL',
+    })
+  })
+
+  it('does not downgrade a pending approval tool call on duplicate tool_call', () => {
+    const interpreter = makeInterpreter()
+
+    interpreter.apply({
+      type: 'tool_call',
+      data: { call_id: 'tc-1', tool_name: 'bash', params: { cmd: 'ls' }, is_read_only: false },
+    })
+    interpreter.apply({
+      type: 'tool_approval_required',
+      data: {
+        chat_id: 'chat-1',
+        request_id: 'req-1',
+        tool_name: 'bash',
+        params: { cmd: 'ls' },
+        reason: 'needs approval',
+        call_id: 'tc-1',
+      },
+    })
+    interpreter.apply({
+      type: 'tool_call',
+      data: { call_id: 'tc-1', tool_name: 'bash', params: { cmd: 'ls' }, is_read_only: false },
+    })
+
+    expect(chatStore.toolCalls.value.get('tc-1')!.execution_status).toBe('PENDING_APPROVAL')
+  })
+
   it('moves slow tool calls to waiting_for_tool', async () => {
     vi.useFakeTimers()
     const interpreter = makeInterpreter()

@@ -35,10 +35,16 @@ def _format_tools(tools: list) -> list[dict]:
         full_name = f"{server}__{name}" if server else name
         if not params or not isinstance(params, dict) or params.get("type") != "object":
             params = {"type": "object", "properties": {}}
-        result.append({
-            "type": "function",
-            "function": {"name": full_name, "description": desc, "parameters": params},
-        })
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": full_name,
+                    "description": desc,
+                    "parameters": params,
+                },
+            }
+        )
     return result
 
 
@@ -75,19 +81,31 @@ async def _dispatch_tool_calls(
             server_name = meta.get("server_name", "")
         tc.server_name = server_name
 
-        _classify_and_route(tc, tool_name, args, server_name, tc_id, meta, pending, dispatch, dispatch_call_ids)
+        _classify_and_route(
+            tc,
+            tool_name,
+            args,
+            server_name,
+            tc_id,
+            meta,
+            pending,
+            dispatch,
+            dispatch_call_ids,
+        )
 
     pre_executed: list[AgentToolResult] = []
     if dispatch:
         disp_results = await _execute_with_error_handling(executor, dispatch)
         for i, dr in enumerate(disp_results):
-            pre_executed.append(AgentToolResult(
-                tool_name=dispatch[i]["tool_name"],
-                result=dr,
-                tool_call_id=dispatch_call_ids[i],
-                is_read_only=True,
-                server_name=dispatch[i]["server_name"],
-            ))
+            pre_executed.append(
+                AgentToolResult(
+                    tool_name=dispatch[i]["tool_name"],
+                    result=dr,
+                    tool_call_id=dispatch_call_ids[i],
+                    is_read_only=True,
+                    server_name=dispatch[i]["server_name"],
+                )
+            )
 
     return pending, pre_executed
 
@@ -100,7 +118,9 @@ async def _execute_with_error_handling(
         return await executor.execute_parallel(dispatch_list)
     except Exception as exc:
         logger.opt(exception=True).warning("tool execution failed: {err}", err=exc)
-        return [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(dispatch_list)
+        return [{"execution_status": "FAILED", "error": {"message": str(exc)}}] * len(
+            dispatch_list
+        )
 
 
 def _build_tool_index(available_tools: list[dict]) -> dict[str, dict]:

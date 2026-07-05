@@ -45,9 +45,7 @@ class LoopOrchestrator:
         self._error_recovery = error_recovery
         self._llm = llm
         self._model: str = (
-            getattr(llm, "_config", None)
-            and getattr(llm._config, "model", "")
-            or ""
+            getattr(llm, "_config", None) and getattr(llm._config, "model", "") or ""
         )
         self._chat_id = chat_id
         self._lifecycle = lifecycle
@@ -75,7 +73,10 @@ class LoopOrchestrator:
 
         # Build AgentLoop with bound node functions (or use injectables from tests)
         thinker = self._think_fn or partial(
-            think_node, llm=self._llm, executor=self._tool_executor, lifecycle=self._lifecycle
+            think_node,
+            llm=self._llm,
+            executor=self._tool_executor,
+            lifecycle=self._lifecycle,
         )
         reviewer = self._review_fn or partial(
             review_node,
@@ -116,9 +117,7 @@ class LoopOrchestrator:
             logger.opt(exception=True).error(
                 "agent_run_failed chat_id={c}", c=str(self._chat_id)
             )
-            await channel.send(
-                TurnFailed(code="AGENT_CRASH", message=str(exc))
-            )
+            await channel.send(TurnFailed(code="AGENT_CRASH", message=str(exc)))
         finally:
             channel.close()
 

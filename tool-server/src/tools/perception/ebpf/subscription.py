@@ -4,6 +4,7 @@ subscription.py — bpftrace 持续订阅管理。
 维护后台常驻的 bpftrace 进程，事件写入环形缓冲区，
 通过 drain() 非阻塞读取累计事件。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -53,7 +54,8 @@ class BpftraceDaemon:
             return
         logger.info(
             "bpftrace_daemon starting script={} path={}",
-            self._script_name, self._script_path,
+            self._script_name,
+            self._script_path,
         )
         await self._spawn(start_watchdog=True)
 
@@ -65,8 +67,8 @@ class BpftraceDaemon:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        assert self._proc.stdout is not None
-        assert self._proc.stderr is not None
+        if self._proc.stdout is None or self._proc.stderr is None:
+            raise RuntimeError("bpftrace process pipes were not created")
         self._consume_task = asyncio.create_task(self._consume())
         self._stderr_task = asyncio.create_task(self._collect_stderr())
         if start_watchdog:
@@ -74,8 +76,8 @@ class BpftraceDaemon:
 
     async def _consume(self) -> None:
         """逐行消费 stdout，JSON 解析后入队。"""
-        assert self._proc is not None and self._proc.stdout is not None
-        async for raw in self._proc.stdout:
+        stdout = self._require_pipe("stdout")
+        async for raw in stdout:
             try:
                 event = json.loads(raw)
                 try:
@@ -88,17 +90,19 @@ class BpftraceDaemon:
 
     async def _collect_stderr(self) -> None:
         """收集 stderr 输出，进程退出时记录错误信息。"""
-        assert self._proc is not None and self._proc.stderr is not None
-        stderr_data = await self._proc.stderr.read()
+        stderr = self._require_pipe("stderr")
+        stderr_data = await stderr.read()
         text = stderr_data.decode(errors="replace").strip()
         if text:
-            logger.warning("bpftrace_daemon stderr script={} msg={}", self._script_name, text)
+            logger.warning(
+                "bpftrace_daemon stderr script={} msg={}", self._script_name, text
+            )
             self._permanent_failure = _is_fatal_error(text)
 
     async def _watchdog(self) -> None:
         """检测子进程退出，自动重启。"""
-        assert self._proc is not None
-        returncode = await self._proc.wait()
+        proc = self._require_process()
+        returncode = await proc.wait()
 
         # 取消消费者
         if self._consume_task:
@@ -113,7 +117,10 @@ class BpftraceDaemon:
         logger.warning(
             "bpftrace_daemon exited script={} returncode={} permanent_failure={} "
             "restart_in={}s",
-            self._script_name, returncode, self._permanent_failure, self._restart_delay,
+            self._script_name,
+            returncode,
+            self._permanent_failure,
+            self._restart_delay,
         )
 
         if self._permanent_failure:
@@ -125,6 +132,18 @@ class BpftraceDaemon:
 
         await asyncio.sleep(self._restart_delay)
         await self._spawn(start_watchdog=True)
+
+    def _require_process(self) -> asyncio.subprocess.Process:
+        if self._proc is None:
+            raise RuntimeError("bpftrace process has not been started")
+        return self._proc
+
+    def _require_pipe(self, stream: str):
+        proc = self._require_process()
+        pipe = getattr(proc, stream)
+        if pipe is None:
+            raise RuntimeError(f"bpftrace process {stream} pipe is unavailable")
+        return pipe
 
     def drain(self) -> list[dict]:
         """非阻塞清空缓冲区，返回所有等待事件。"""
@@ -216,7 +235,11 @@ class SubscriptionManager:
             await daemon.start()
             self._daemons[name] = daemon
         if self._daemons:
-            logger.info("bpftrace_subscription started count={} scripts={}", len(self._daemons), list(self._daemons))
+            logger.info(
+                "bpftrace_subscription started count={} scripts={}",
+                len(self._daemons),
+                list(self._daemons),
+            )
 
     def drain_all(self) -> dict[str, list[dict]]:
         """清空所有 daemon 缓冲区，返回 {脚本名: [事件]}。"""

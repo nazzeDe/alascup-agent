@@ -112,3 +112,125 @@ describe('ToastContainer', () => {
     expect(items).toHaveLength(2)
   })
 })
+
+describe('ToolCallInline', () => {
+  it('renders rejected tool results with the backend rejection message', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-1',
+          chat_id: 'chat-1',
+          tool_name: 'bash',
+          is_read_only: false,
+          execution_status: 'REJECTED',
+          error: { message: 'Tool was rejected by human. Do NOT retry.' },
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Rejected')
+    expect(wrapper.text()).toContain('Tool was rejected by human. Do NOT retry.')
+  })
+
+  it('updates elapsed time when the tool result prop changes', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const toolCall = {
+      call_id: 'tc-1',
+      chat_id: 'chat-1',
+      tool_name: 'bash',
+      is_read_only: true,
+      execution_status: 'RUNNING' as const,
+      timestamp: '2026-06-17T00:00:00.000Z',
+    }
+    const wrapper = mount(ToolCallInline, {
+      props: { tool_call: toolCall },
+    })
+
+    expect(wrapper.text()).not.toContain('1.5s')
+
+    await wrapper.setProps({
+      tool_call: {
+        ...toolCall,
+        execution_status: 'SUCCEEDED',
+        execution_time_ms: 1500,
+      },
+    })
+
+    expect(wrapper.text()).toContain('1.5s')
+  })
+
+  it('renders zero millisecond execution time', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-1',
+          chat_id: 'chat-1',
+          tool_name: 'cache_read',
+          is_read_only: true,
+          execution_status: 'SUCCEEDED',
+          execution_time_ms: 0,
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('0.0s')
+  })
+})
+
+describe('ApprovalInline', () => {
+  it('keeps pending controls enabled after emitting so failed requests can be retried', async () => {
+    const { default: ApprovalInline } = await import('@/components/ApprovalInline.vue')
+    const wrapper = mount(ApprovalInline, {
+      props: {
+        event: {
+          request_id: 'req-1',
+          tool_name: 'bash',
+          params: {},
+          reason: 'needs approval',
+          status: 'pending',
+          message: '',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="approval-approve-button"]').trigger('click')
+
+    expect(wrapper.emitted('approve')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="approval-approve-button"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="approval-reject-button"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('resets the reason input when a new approval event is rendered in the same component', async () => {
+    const { default: ApprovalInline } = await import('@/components/ApprovalInline.vue')
+    const wrapper = mount(ApprovalInline, {
+      props: {
+        event: {
+          request_id: 'req-1',
+          tool_name: 'bash',
+          params: {},
+          reason: 'needs approval',
+          status: 'pending',
+          message: 'old reason',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="approval-reason-input"]').setValue('typed reason')
+    await wrapper.setProps({
+      event: {
+        request_id: 'req-2',
+        tool_name: 'restart',
+        params: {},
+        reason: 'needs approval',
+        status: 'pending',
+        message: '',
+      },
+    })
+
+    expect((wrapper.get('[data-testid="approval-reason-input"]').element as HTMLInputElement).value).toBe('')
+  })
+})

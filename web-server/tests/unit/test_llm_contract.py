@@ -19,13 +19,16 @@ _OPENAI_ROLES = {"system", "user", "assistant", "tool"}
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
+
 def _make_adapter(max_tokens=393216):
     from src.services.llm_adapter import LLMAdapter
     from src.config.models import LLMConfig
 
     config = LLMConfig(
-        api_key="sk-test", api_url="https://api.deepseek.com",
-        model="deepseek-v4-flash", max_tokens=max_tokens,
+        api_key="sk-test",
+        api_url="https://api.deepseek.com",
+        model="deepseek-v4-flash",
+        max_tokens=max_tokens,
     )
     return LLMAdapter(config)
 
@@ -60,43 +63,63 @@ def _capture_stream_payload(adapter, messages, tools=None, system=None):
             pass
 
     import asyncio
+
     asyncio.get_event_loop().run_until_complete(_run())
     return captured.get("payload", {})
 
 
 # ── Payload structure ──────────────────────────────────────────────────────
 
+
 class TestPayloadContract:
     """The JSON body sent to POST /chat/completions must be valid."""
 
     def test_required_fields_present(self):
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], None, None, False,
+            [{"role": "user", "content": "hi"}],
+            None,
+            None,
+            False,
         )
         for field in ("model", "messages", "stream", "max_tokens"):
             assert field in payload, f"missing required field: {field}"
 
     def test_max_tokens_in_valid_range(self):
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], None, None, False,
+            [{"role": "user", "content": "hi"}],
+            None,
+            None,
+            False,
         )
         assert 1 <= payload["max_tokens"] <= 393216
 
     def test_tools_absent_when_none(self):
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], None, None, False,
+            [{"role": "user", "content": "hi"}],
+            None,
+            None,
+            False,
         )
         assert "tools" not in payload
 
     def test_tools_present_when_provided(self):
-        tools = [{"type": "function", "function": {"name": "foo", "parameters": {"type": "object"}}}]
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "foo", "parameters": {"type": "object"}},
+            }
+        ]
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], tools, None, False,
+            [{"role": "user", "content": "hi"}],
+            tools,
+            None,
+            False,
         )
         assert payload["tools"] == tools
 
 
 # ── Message format in outgoing payload ─────────────────────────────────────
+
 
 class TestOutgoingMessageFormat:
     """Messages in the payload must comply with DeepSeek/OpenAI format."""
@@ -117,11 +140,23 @@ class TestOutgoingMessageFormat:
         messages = [
             {"role": "user", "content": "查看负载"},
             {
-                "role": "assistant", "content": "好的",
+                "role": "assistant",
+                "content": "好的",
                 "reasoning_content": "用户要看负载",
-                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "get_cpu", "arguments": "{}"}}],
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "get_cpu", "arguments": "{}"},
+                    }
+                ],
             },
-            {"role": "tool", "content": '{"cpu": 50}', "tool_call_id": "c1", "name": "get_cpu"},
+            {
+                "role": "tool",
+                "content": '{"cpu": 50}',
+                "tool_call_id": "c1",
+                "name": "get_cpu",
+            },
         ]
         payload = _make_adapter()._build_payload(messages, None, None, False)
 
@@ -136,8 +171,15 @@ class TestOutgoingMessageFormat:
         messages = [
             {"role": "user", "content": "test"},
             {
-                "role": "assistant", "content": "",
-                "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "foo", "arguments": '{"cmd":"ls"}'}}],
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "foo", "arguments": '{"cmd":"ls"}'},
+                    }
+                ],
             },
         ]
         payload = _make_adapter()._build_payload(messages, None, None, False)
@@ -149,7 +191,17 @@ class TestOutgoingMessageFormat:
     def test_tool_message_has_tool_call_id(self):
         messages = [
             {"role": "user", "content": "test"},
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "foo", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "foo", "arguments": "{}"},
+                    }
+                ],
+            },
             {"role": "tool", "content": "result", "tool_call_id": "c1", "name": "foo"},
         ]
         payload = _make_adapter()._build_payload(messages, None, None, False)
@@ -160,19 +212,26 @@ class TestOutgoingMessageFormat:
 
     def test_system_message_first(self):
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], None, "system prompt", False,
+            [{"role": "user", "content": "hi"}],
+            None,
+            "system prompt",
+            False,
         )
         assert payload["messages"][0] == {"role": "system", "content": "system prompt"}
 
 
 # ── Streaming payload ──────────────────────────────────────────────────────
 
+
 class TestStreamingPayload:
     """generate_stream must send valid payloads."""
 
     def test_stream_flag_true(self):
         payload = _make_adapter()._build_payload(
-            [{"role": "user", "content": "hi"}], None, None, True,
+            [{"role": "user", "content": "hi"}],
+            None,
+            None,
+            True,
         )
         assert payload["stream"] is True
 
@@ -180,8 +239,18 @@ class TestStreamingPayload:
         """Streaming request with tool results must include reasoning_content."""
         messages = [
             {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "ok", "reasoning_content": "thinking",
-             "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "foo", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": "ok",
+                "reasoning_content": "thinking",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "foo", "arguments": "{}"},
+                    }
+                ],
+            },
             {"role": "tool", "content": "data", "tool_call_id": "c1", "name": "foo"},
         ]
         payload = _make_adapter()._build_payload(messages, None, None, True)
@@ -191,6 +260,7 @@ class TestStreamingPayload:
 
 # ── Tool schema format ─────────────────────────────────────────────────────
 
+
 class TestToolSchemaFormat:
     """Tools definition must comply with OpenAI function calling format."""
 
@@ -198,7 +268,11 @@ class TestToolSchemaFormat:
         from src.agent.nodes import _format_tools
 
         tools = [
-            {"name": "get_cpu_info", "server_name": "tool-server", "description": "desc"},
+            {
+                "name": "get_cpu_info",
+                "server_name": "tool-server",
+                "description": "desc",
+            },
             {"name": "run_bash", "server_name": "tool-server", "description": "desc"},
         ]
         result = _format_tools(tools)

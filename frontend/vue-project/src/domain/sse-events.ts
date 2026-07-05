@@ -24,9 +24,9 @@ export interface ToolCallEvent {
 
 export interface ToolResultEvent {
   call_id: string;
-  execution_status: "SUCCEEDED" | "FAILED";
+  execution_status: "SUCCEEDED" | "FAILED" | "REJECTED";
   output?: Record<string, unknown>;
-  error?: { code: number; message: string };
+  error?: { code?: number; message: string; data?: string };
   execution_time_ms?: number;
 }
 

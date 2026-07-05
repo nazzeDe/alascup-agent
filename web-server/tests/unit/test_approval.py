@@ -22,7 +22,9 @@ def app_with_bridge():
         async def generate(self, messages, tools=None, system=None, chat_id=None):
             return {"content": "approved and done", "tool_calls": None}
 
-        async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+        async def generate_stream(
+            self, messages, tools=None, system=None, chat_id=None
+        ):
             yield {"event": "assistant", "data": '{"delta":"resumed reply"}'}
             yield {"event": "done", "data": "{}"}
 
@@ -33,7 +35,15 @@ def app_with_bridge():
         async def list_tools(self):
             return []
 
-        async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None):
+        async def execute(
+            self,
+            tool_name,
+            arguments,
+            *,
+            server_name=None,
+            approval_status=None,
+            request_id=None,
+        ):
             return {"execution_status": "SUCCEEDED", "output": {}}
 
         async def execute_parallel(self, calls):
@@ -79,6 +89,23 @@ class TestApprovalEndpoint:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
                 json={"approval_status": "INVALID_STATUS"},
+            )
+            assert r.status_code == 400
+            assert "invalid approval_status" in r.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_non_decision_status_returns_400(self, app_with_bridge):
+        """Only explicit APPROVED/REJECTED decisions may come from the client."""
+        services, bridge = app_with_bridge
+
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        bridge.create(req_id, chat_id)
+
+        async with _make_client(services) as c:
+            r = await c.post(
+                f"/api/tool-requests/{req_id}/approval",
+                json={"approval_status": "EXPIRED"},
             )
             assert r.status_code == 400
             assert "invalid approval_status" in r.json()["detail"]

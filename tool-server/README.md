@@ -89,7 +89,9 @@ tool-server 启动时自动扫描已注册工具，对带有 `__classify__` 属�
 3. 对命令文本做危险模式检测：反引号、`$()`、`${...}`、`$[...]`、进程替换、`$IFS`、重定向符、危险换行等均为 `safe=false`。
 4. 将 pipeline / `&&` / `||` / `;` 分段，每段必须命中运维只读命令 allowlist。
 5. 对每个命令做 flag 级校验；可写、执行、网络、远程、in-place、output 等 flag 均为 `safe=false`。
-6. 对路径做敏感读取校验；密钥、凭据、`/proc/*/environ` 等路径均为 `safe=false`。
+6. 拒绝路径形式的命令名（如 `/bin/cat`）、`~user` 展开、以及归一化后命中敏感位置的路径；密钥、凭据、`/proc/*/environ` 等路径均为 `safe=false`。
+
+`sed` 和 `awk` 只允许读取/格式化输出子集。`sed -i`、`sed -f`、`e/r/w/W/R` 命令、带地址表达式的写入/读取/执行绕过，以及 `s///e`、`s///w` 均拒绝；`awk` 中的 `system()`、重定向写入、管道输出等执行或写入形式均拒绝。
 
 注册流程见 `main.py` 的 `_register_classify_companions()`。
 
@@ -116,12 +118,23 @@ tool-server 收到 tool_call 时执行防御性校验（不查询 web-server 状
 
 未通过 → 返回 `SECURITY_VIOLATION`（CRITICAL），拒绝执行。
 
+PostgreSQL 只读查询工具额外做 SQL 白名单校验：仅允许单条 `SELECT`/`WITH` 查询，拒绝多语句、事务控制、DDL/DML、`COPY`、`DO`、`CALL`、`NOTIFY`、大对象导入导出、服务端程序执行、`pg_read_file` / `pg_read_binary_file` / `pg_stat_file`、`pg_ls_dir` 和 `pg_ls_*dir` 系列文件系统访问函数。
+
 ## 依赖注入
 
 ```
 class ToolServerConfig:
-    proc_path: str       # 注入；生产 /proc，测试 /tmp/test-proc
-    sys_path: str        # 注入；生产 /sys，测试 /tmp/test-sys
-    log_path: str        # 注入；生产 /var/log，测试 /tmp/test-log
-    sandbox_root: str    # 注入；生产独立路径，测试临时目录
+    proc_path: str                       # 默认 /proc
+    log_dir: str                         # 默认 /app/logs
+    sandbox_root: str                    # 默认 /app/sandbox，测试临时目录
+    cache_ttl: int                       # 指标缓存 TTL 秒数
+    bash_timeout: int                    # bash 执行超时秒数
+    host_exec: str                       # direct / chroot / nsenter
+    host: str                            # 默认 127.0.0.1；Compose 内用 TOOLSERVER_HOST=0.0.0.0
+    port: int                            # 默认 11451
+    postgres_dsn: str | None             # 未配置时 PostgreSQL 工具返回 FAILED
+    postgres_statement_timeout_ms: int
+    postgres_max_rows: int
 ```
+
+生产 Compose 会把 `/app/sandbox` 挂载为 64 MiB tmpfs，避免 bash 工具默认工作目录落到镜像层或持久化卷。

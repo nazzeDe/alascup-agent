@@ -92,7 +92,9 @@ class ToolCallLifecycle:
 
             call = ToolCall(
                 name=name,
-                server=ServerName(server_name) if server_name == "tool-server" else ServerName.TOOL_SERVER,
+                server=ServerName(server_name)
+                if server_name == "tool-server"
+                else ServerName.TOOL_SERVER,
                 description="",
                 is_read_only=bool(tc.is_read_only),
                 is_rollbackable=tc.is_rollbackable,
@@ -128,7 +130,10 @@ class ToolCallLifecycle:
                 params={},
                 request_id=None,
                 approval_status=ApprovalStatus.APPROVED,
-                execution_status=ExecutionStatus(exec_status_str) if exec_status_str in {"SUCCEEDED", "FAILED", "RUNNING", "PENDING_APPROVAL"} else ExecutionStatus.SUCCEEDED,
+                execution_status=ExecutionStatus(exec_status_str)
+                if exec_status_str
+                in {"SUCCEEDED", "FAILED", "RUNNING", "PENDING_APPROVAL"}
+                else ExecutionStatus.SUCCEEDED,
                 error=result.get("error"),
                 result=result,
                 llm_trace_id=llm_trace_id,
@@ -138,7 +143,8 @@ class ToolCallLifecycle:
             pe.call_id = pe_call_id
             # Pre-executed tools are already done; mark executed_at and store result.
             await self._sm.update_tool_call(
-                pe_call_id, chat_id,
+                pe_call_id,
+                chat_id,
                 execution_status=call.execution_status,
                 error=call.error,
                 result=result,
@@ -160,10 +166,11 @@ class ToolCallLifecycle:
 
         No-op if call_id is None or chat_id is None (matches current behavior).
         """
-        if call_id is None or chat_id is None:
+        if self._sm is None or call_id is None or chat_id is None:
             return
         await self._sm.update_tool_call(
-            call_id, chat_id,
+            call_id,
+            chat_id,
             approval_status=approval_status,
             execution_status=execution_status,
             error=error,

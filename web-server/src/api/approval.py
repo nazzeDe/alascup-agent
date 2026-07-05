@@ -27,16 +27,27 @@ async def approve_tool_request(
         raise HTTPException(
             status_code=400, detail=f"invalid approval_status: {body.approval_status}"
         )
+    if status not in (ApprovalStatus.APPROVED, ApprovalStatus.REJECTED):
+        raise HTTPException(
+            status_code=400, detail=f"invalid approval_status: {body.approval_status}"
+        )
 
-    debug_log("INFO", "Tool approval decision",
-              request_id=str(request_id), status=status.value, reason=body.reason)
+    debug_log(
+        "INFO",
+        "Tool approval decision",
+        request_id=str(request_id),
+        status=status.value,
+        reason=body.reason,
+    )
 
     if not bridge:
         raise HTTPException(status_code=500, detail="approval bridge not configured")
 
     chat_id = bridge.get_chat_id(str(request_id))
     if not chat_id:
-        raise HTTPException(status_code=404, detail="request not found or already handled")
+        raise HTTPException(
+            status_code=404, detail="request not found or already handled"
+        )
 
     bridge.complete(str(request_id), status.value, body.reason)
 

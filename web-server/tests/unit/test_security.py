@@ -60,21 +60,27 @@ class TestRuleEngine:
         from src.security.rule_engine import RuleEngine
 
         engine = RuleEngine(rules_config)
-        decision = engine.evaluate("get_cpu_info", is_read_only=True, is_rollbackable=False)
+        decision = engine.evaluate(
+            "get_cpu_info", is_read_only=True, is_rollbackable=False
+        )
         assert decision == "AUTO_APPROVE"
 
     def test_blacklist_rejected(self, rules_config):
         from src.security.rule_engine import RuleEngine
 
         engine = RuleEngine(rules_config)
-        decision = engine.evaluate("reboot_system", is_read_only=False, is_rollbackable=False)
+        decision = engine.evaluate(
+            "reboot_system", is_read_only=False, is_rollbackable=False
+        )
         assert decision == "REJECT"
 
     def test_whitelist_override(self, rules_config):
         from src.security.rule_engine import RuleEngine
 
         engine = RuleEngine(rules_config)
-        decision = engine.evaluate("delete_temp_files", is_read_only=False, is_rollbackable=True)
+        decision = engine.evaluate(
+            "delete_temp_files", is_read_only=False, is_rollbackable=True
+        )
         assert decision == "AUTO_APPROVE"
 
     def test_high_risk_requires_approval(self, rules_config):

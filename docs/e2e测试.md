@@ -39,6 +39,12 @@ cd frontend/vue-project
 E2E_BASE_URL=http://localhost bun run test:e2e:live
 ```
 
+或直接执行：
+
+```bash
+make test-e2e-live
+```
+
 结束后清理：
 
 ```bash

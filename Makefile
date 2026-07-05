@@ -1,7 +1,8 @@
-.PHONY: build build-test up down up-test down-test logs logs-web logs-tool clean \
+.PHONY: build build-test up down up-test down-test wait-test-stack logs logs-web logs-tool clean \
         test test-unit test-integration test-e2e test-coverage \
         test-unit-web test-unit-tool test-unit-fe \
         test-integration-web test-integration-tool \
+        test-e2e test-e2e-live
 
 COMPOSE_PROD := docker compose
 COMPOSE_TEST := docker compose -f docker-compose.test.yml
@@ -25,6 +26,18 @@ up-test:
 
 down-test:
 	$(COMPOSE_TEST) down
+
+wait-test-stack:
+	@echo "Waiting for test stack health endpoint..."
+	@for i in $$(seq 1 60); do \
+		if curl -fsS http://localhost/api/health >/dev/null; then \
+			echo "Test stack is ready"; \
+			exit 0; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo "Timed out waiting for http://localhost/api/health"; \
+	exit 1
 
 # === 日志 ===
 logs:
@@ -69,10 +82,10 @@ test-integration-tool:
 test-e2e:
 	cd frontend/vue-project && bun run test:e2e
 
-# E2E Live 测试：需先手动启动 web-server + tool-server（见 plan Phase 1 步骤）。
+# E2E Live 测试：启动 Docker 测试栈，通过 nginx 入口验证真实链路。
 #   E2E_LIVE_HEADED=1 make test-e2e-live  显示浏览器窗口
-test-e2e-live:
-	cd frontend/vue-project && bun run test:e2e:live
+test-e2e-live: up-test wait-test-stack
+	cd frontend/vue-project && E2E_BASE_URL=http://localhost E2E_API_BASE=http://localhost bun run test:e2e:live
 
 # === 覆盖率 ===
 test-coverage:

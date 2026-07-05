@@ -6,7 +6,9 @@ class RuleEngine:
         self._blacklist = {r.tool_name for r in rules.blacklist}
         self._whitelist = {r.tool_name for r in rules.whitelist}
 
-    def evaluate(self, tool_name: str, is_read_only: bool, is_rollbackable: bool) -> str:
+    def evaluate(
+        self, tool_name: str, is_read_only: bool, is_rollbackable: bool
+    ) -> str:
         if tool_name in self._blacklist:
             return "REJECT"
         if tool_name in self._whitelist:

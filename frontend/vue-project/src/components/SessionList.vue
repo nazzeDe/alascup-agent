@@ -81,6 +81,7 @@ const groups = computed<Group[]>(() => {
     <div class="p-2 border-bottom">
       <button
         class="btn btn-primary btn-sm w-100 btn-new-session"
+        data-testid="new-session-button"
         @click="emit('create')"
       >
         + New Session
@@ -100,6 +101,7 @@ const groups = computed<Group[]>(() => {
             v-for="session in group.sessions"
             :key="session.chat_id"
             :class="['session-item p-2 border-bottom', { active: session.chat_id === activeChatId }]"
+            data-testid="session-item"
             @click="emit('select', session.chat_id)"
             @contextmenu="onContextMenu($event, session.chat_id)"
           >

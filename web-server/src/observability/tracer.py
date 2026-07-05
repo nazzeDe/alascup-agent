@@ -45,10 +45,16 @@ class PostgresTracer(Tracer):
         completion_tokens = usage.get("completion_tokens") if usage else None
 
         trace_id = uuid4()
-        logger.debug("PostgresTracer: inserting trace id={id} chat={chat} model={m} latency={l}ms "
-                      "prompt_tokens={pt} completion_tokens={ct}",
-                      id=trace_id, chat=chat_id, m=model, l=latency_ms,
-                      pt=prompt_tokens, ct=completion_tokens)
+        logger.debug(
+            "PostgresTracer: inserting trace id={id} chat={chat} model={m} latency={l}ms "
+            "prompt_tokens={pt} completion_tokens={ct}",
+            id=trace_id,
+            chat=chat_id,
+            m=model,
+            l=latency_ms,
+            pt=prompt_tokens,
+            ct=completion_tokens,
+        )
         try:
             await self._db.execute(
                 """INSERT INTO llm_traces (id, chat_id, model, prompt_text, completion_text,
@@ -60,13 +66,16 @@ class PostgresTracer(Tracer):
                 json.dumps(messages),
                 json.dumps(completion_data) if (completion or tool_calls) else None,
                 prompt_tokens if prompt_tokens else _estimate_tokens(messages),
-                completion_tokens if completion_tokens else _estimate_tokens([{"content": completion}]),
+                completion_tokens
+                if completion_tokens
+                else _estimate_tokens([{"content": completion}]),
                 latency_ms,
             )
             logger.debug("PostgresTracer: insert succeeded trace_id={id}", id=trace_id)
         except Exception:
-            logger.opt(exception=True).error("PostgresTracer: insert failed trace_id={id}", id=trace_id)
-
+            logger.opt(exception=True).error(
+                "PostgresTracer: insert failed trace_id={id}", id=trace_id
+            )
 
 
 def _estimate_tokens(messages: list[dict]) -> int:

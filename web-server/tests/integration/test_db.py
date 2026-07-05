@@ -139,6 +139,8 @@ class TestPostgresAuditLogger:
 
         # Verify stored by reading back directly
         async with test_db.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM audit_events WHERE event = 'TEST_EVENT'")
+            row = await conn.fetchrow(
+                "SELECT * FROM audit_events WHERE event = 'TEST_EVENT'"
+            )
             assert row is not None
             assert row["actor"] == "system"

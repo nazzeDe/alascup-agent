@@ -32,9 +32,13 @@ async def act_node(
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
     feature = f"tool_exec:{chat_id}"
     start_feature(feature)
-    debug_log("DEBUG", tp.ACT_ENTER,
-              count=len(calls), names=[c["tool_name"] for c in calls],
-              input_ids=[tool_calls[i].id for i in range(len(tool_calls))])
+    debug_log(
+        "DEBUG",
+        tp.ACT_ENTER,
+        count=len(calls),
+        names=[c["tool_name"] for c in calls],
+        input_ids=[tool_calls[i].id for i in range(len(tool_calls))],
+    )
     results = await _execute_with_error_handling(executor, calls)
     complete_feature(feature)
     formatted = []
@@ -54,9 +58,7 @@ def _call_from_tool_call(tc: AgentToolCall) -> dict:
     return tool_call_to_dispatch(tc)
 
 
-def _formatted_result(
-    tc: AgentToolCall, call: dict, result: dict
-) -> AgentToolResult:
+def _formatted_result(tc: AgentToolCall, call: dict, result: dict) -> AgentToolResult:
     return AgentToolResult(
         tool_name=call["tool_name"],
         result=result,
@@ -68,9 +70,7 @@ def _formatted_result(
     )
 
 
-async def _audit_execution(
-    auditor: Auditor, call: dict, result: dict
-) -> None:
+async def _audit_execution(auditor: Auditor, call: dict, result: dict) -> None:
     await auditor.tool_event(
         "TOOL_EXECUTED",
         actor=AuditActor.TOOL,
@@ -95,4 +95,6 @@ def _log_failed_execution(call: dict, result: dict) -> None:
         return
     err = result.get("error", {})
     err_msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-    logger.warning("tool_failed tool={name} error={err}", name=call["tool_name"], err=err_msg)
+    logger.warning(
+        "tool_failed tool={name} error={err}", name=call["tool_name"], err=err_msg
+    )

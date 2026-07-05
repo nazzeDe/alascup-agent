@@ -63,7 +63,6 @@ class TestSessionManager:
         retrieved = await mgr.get_session(session.id)
         assert len(retrieved.messages) == 1
 
-
     @pytest.mark.asyncio
     async def test_add_message_to_nonexistent_session(self):
         from src.models.message import Message, MessageType
@@ -82,8 +81,12 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_tool_call(self):
-        from src.models.tool import (ApprovalStatus, ExecutionStatus,
-                                      ServerName, ToolCall)
+        from src.models.tool import (
+            ApprovalStatus,
+            ExecutionStatus,
+            ServerName,
+            ToolCall,
+        )
         from src.services.session_manager import InMemorySessionManager
 
         mgr = InMemorySessionManager()
@@ -109,8 +112,12 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_tool_call_to_nonexistent_session(self):
-        from src.models.tool import (ApprovalStatus, ExecutionStatus,
-                                      ServerName, ToolCall)
+        from src.models.tool import (
+            ApprovalStatus,
+            ExecutionStatus,
+            ServerName,
+            ToolCall,
+        )
         from src.services.session_manager import InMemorySessionManager
 
         mgr = InMemorySessionManager()

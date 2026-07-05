@@ -14,7 +14,9 @@ from src.config import ToolServerConfig
 _STARTED_AT = time.time()
 
 
-def get_tool_server_status(config: ToolServerConfig, tool_count: int | None = None) -> dict[str, Any]:
+def get_tool_server_status(
+    config: ToolServerConfig, tool_count: int | None = None
+) -> dict[str, Any]:
     proc = psutil.Process()
     started_at = proc.create_time()
     return {
@@ -85,7 +87,9 @@ def get_tool_server_logs(
     }
 
 
-def _resolve_log_file(log_dir: Path, filename: str | None, available_files: list[Path]) -> Path | None:
+def _resolve_log_file(
+    log_dir: Path, filename: str | None, available_files: list[Path]
+) -> Path | None:
     if filename:
         candidate = Path(filename)
         if candidate.is_absolute() or ".." in candidate.parts:
@@ -94,7 +98,9 @@ def _resolve_log_file(log_dir: Path, filename: str | None, available_files: list
     return available_files[0] if available_files else None
 
 
-def _log_error(log_dir: Path, filename: str | None, available_files: list[Path], error: str) -> dict[str, Any]:
+def _log_error(
+    log_dir: Path, filename: str | None, available_files: list[Path], error: str
+) -> dict[str, Any]:
     return {
         "log_dir": str(log_dir),
         "filename": filename,
@@ -105,7 +111,9 @@ def _log_error(log_dir: Path, filename: str | None, available_files: list[Path],
 
 
 def _list_log_files(log_dir: Path) -> list[Path]:
-    files = [path for path in log_dir.iterdir() if path.is_file() and not path.is_symlink()]
+    files = [
+        path for path in log_dir.iterdir() if path.is_file() and not path.is_symlink()
+    ]
     return sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
 
 

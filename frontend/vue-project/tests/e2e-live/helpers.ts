@@ -1,6 +1,10 @@
 import type { Page } from '@playwright/test'
 
-const API_BASE = 'http://localhost:11450'
+const API_BASE = (
+  process.env.E2E_API_BASE ??
+  process.env.E2E_BASE_URL ??
+  'http://localhost:11450'
+).replace(/\/$/, '')
 
 export async function approveToolRequest(
   page: Page,

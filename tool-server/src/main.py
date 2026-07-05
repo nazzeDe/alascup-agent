@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from contextlib import asynccontextmanager
 import sys
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 from loguru import logger
@@ -39,8 +39,12 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
             _startup_task.cancel()
             try:
                 await _startup_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except asyncio.CancelledError:
+                logger.debug("eBPF subscription startup task cancelled during shutdown")
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "eBPF subscription startup task failed during shutdown"
+                )
             await ebpf_runtime.shutdown()
             logger.info("eBPF subscriptions stopped")
 
@@ -58,18 +62,24 @@ async def _start_ebpf_subscriptions(sub_mgr) -> None:
     try:
         await sub_mgr.start_all()
     except Exception:
-        logger.opt(exception=True).warning("eBPF subscription startup failed (non-fatal)")
+        logger.opt(exception=True).warning(
+            "eBPF subscription startup failed (non-fatal)"
+        )
 
 
 def main() -> int:
     log_level = os.getenv("TOOL_SERVER_LOG_LEVEL", "WARNING").upper()
     logger.remove()
-    logger.add(sys.stderr, level=log_level, format="{time:HH:mm:ss.SSS} | {level: <8} | {message}")
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format="{time:HH:mm:ss.SSS} | {level: <8} | {message}",
+    )
 
     try:
         config = load_config()
         server = asyncio.run(create_server(config))
-        server.run(transport="streamable-http", host="0.0.0.0", port=config.port)
+        server.run(transport="streamable-http", host=config.host, port=config.port)
         return 0
     except KeyboardInterrupt:
         return 0

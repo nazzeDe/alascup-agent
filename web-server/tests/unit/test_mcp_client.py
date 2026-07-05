@@ -87,7 +87,8 @@ class TestToolExecutorExecute:
 
             executor = ToolExecutor(registry)
             result = await executor.execute(
-                "get_cpu_info", {},
+                "get_cpu_info",
+                {},
                 server_name="my-server",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -104,7 +105,8 @@ class TestToolExecutorExecute:
         registry = FakeRegistry()
         executor = ToolExecutor(registry)
         result = await executor.execute(
-            "restart_service", {},
+            "restart_service",
+            {},
             server_name="tool-server",
             approval_status="PENDING",
             request_id="req-1",
@@ -130,7 +132,8 @@ class TestToolExecutorExecute:
 
             executor = ToolExecutor(registry)
             result = await executor.execute(
-                "restart_service", {},
+                "restart_service",
+                {},
                 server_name="tool-server",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -167,7 +170,8 @@ class TestToolExecutorExecute:
 
             executor = ToolExecutor(registry)
             result = await executor.execute(
-                "get_cpu_info", {},
+                "get_cpu_info",
+                {},
                 server_name="tool-server",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -194,7 +198,8 @@ class TestToolExecutorExecute:
 
             executor = ToolExecutor(registry)
             result = await executor.execute(
-                "get_cpu_info", {},
+                "get_cpu_info",
+                {},
                 server_name="tool-server",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -223,7 +228,8 @@ class TestToolExecutorExecute:
 
             executor = ToolExecutor(registry)
             result = await executor.execute(
-                "get_cpu_info", {},
+                "get_cpu_info",
+                {},
                 server_name="tool-server",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -238,7 +244,8 @@ class TestToolExecutorExecute:
         executor = ToolExecutor(FakeRegistry())
         with pytest.raises(KeyError):
             await executor.execute(
-                "get_cpu_info", {},
+                "get_cpu_info",
+                {},
                 server_name="nonexistent",
                 approval_status="APPROVED",
                 request_id="req-1",
@@ -262,15 +269,17 @@ class TestToolExecutorExecuteParallel:
             MockClient.return_value = mock_client
 
             executor = ToolExecutor(registry)
-            results = await executor.execute_parallel([
-                {
-                    "tool_name": "get_cpu_info",
-                    "arguments": {},
-                    "server_name": "tool-server",
-                    "approval_status": "APPROVED",
-                    "request_id": "req-1",
-                },
-            ])
+            results = await executor.execute_parallel(
+                [
+                    {
+                        "tool_name": "get_cpu_info",
+                        "arguments": {},
+                        "server_name": "tool-server",
+                        "approval_status": "APPROVED",
+                        "request_id": "req-1",
+                    },
+                ]
+            )
 
         assert len(results) == 1
         assert all(r["execution_status"] == "SUCCEEDED" for r in results)
@@ -296,12 +305,12 @@ class TestToolExecutorClassifyCompanion:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify_companion("bash", {"cmd": "ls"}, server_name="tool-server")
+            result = await executor.classify_companion(
+                "bash", {"cmd": "ls"}, server_name="tool-server"
+            )
 
         MockClient.assert_called_once_with("http://tool:8001")
-        mock_client.call_tool.assert_called_once_with(
-            "bash_classify", {"cmd": "ls"}
-        )
+        mock_client.call_tool.assert_called_once_with("bash_classify", {"cmd": "ls"})
         assert result == {"safe": False}
 
     @pytest.mark.asyncio
@@ -325,7 +334,9 @@ class TestToolExecutorClassifyCompanion:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify_companion("get_cpu", {}, server_name="tool-server")
+            result = await executor.classify_companion(
+                "get_cpu", {}, server_name="tool-server"
+            )
 
         assert result == {"safe": True}
 
@@ -346,7 +357,9 @@ class TestToolExecutorClassifyCompanion:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify_companion("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion(
+                "bash", {}, server_name="tool-server"
+            )
 
         assert result == {"safe": False}
 
@@ -367,7 +380,9 @@ class TestToolExecutorClassifyCompanion:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify_companion("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion(
+                "bash", {}, server_name="tool-server"
+            )
 
         assert result == {"safe": False}
 
@@ -388,6 +403,8 @@ class TestToolExecutorClassifyCompanion:
         with patch("src.mcp_client.executor.Client") as MockClient:
             MockClient.return_value = mock_client
             executor = ToolExecutor(registry)
-            result = await executor.classify_companion("bash", {}, server_name="tool-server")
+            result = await executor.classify_companion(
+                "bash", {}, server_name="tool-server"
+            )
 
         assert result == {"safe": False}

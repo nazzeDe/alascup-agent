@@ -10,10 +10,12 @@ class TestEstimateTokens:
     def test_aggregates_multiple_messages(self):
         from src.observability.tracer import _estimate_tokens
 
-        tokens = _estimate_tokens([
-            {"content": "aaaa"},
-            {"content": "bbbb"},
-        ])
+        tokens = _estimate_tokens(
+            [
+                {"content": "aaaa"},
+                {"content": "bbbb"},
+            ]
+        )
         assert tokens == 2  # 8 chars / 4
 
 
@@ -56,6 +58,7 @@ class TestPostgresTracer:
 
         args = db.execute.call_args[0]
         import json
+
         completion_text = args[5]  # index 5: completion_text ($5 in SQL)
         parsed = json.loads(completion_text)
         assert "tool_calls" in parsed
@@ -101,6 +104,7 @@ class TestPostgresTracer:
 
         args = db.execute.call_args[0]
         import json
+
         completion_text = args[5]
         parsed = json.loads(completion_text)
         assert parsed["content"] == ""

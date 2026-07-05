@@ -9,6 +9,7 @@ pytestmark = pytest.mark.unit
 
 class _FakeRecord:
     """Minimal asyncpg.Record stand-in: supports __getitem__ and .get()."""
+
     def __init__(self, data: dict):
         self._data = data
 
@@ -19,23 +20,33 @@ class _FakeRecord:
         return self._data.get(key, default)
 
 
-def _make_msg_row(msg_id=None, chat_id=None, ts=None, msg_type="user",
-                  content="hello"):
-    return _FakeRecord({
-        "id": msg_id or uuid.uuid4(),
-        "chat_id": chat_id or uuid.uuid4(),
-        "timestamp": ts or datetime.now(timezone.utc),
-        "type": msg_type,
-        "content": content,
-    })
+def _make_msg_row(msg_id=None, chat_id=None, ts=None, msg_type="user", content="hello"):
+    return _FakeRecord(
+        {
+            "id": msg_id or uuid.uuid4(),
+            "chat_id": chat_id or uuid.uuid4(),
+            "timestamp": ts or datetime.now(timezone.utc),
+            "type": msg_type,
+            "content": content,
+        }
+    )
 
 
-def _make_call_row(tool_name="get_cpu", server_name="tool-server",
-                   is_read_only=True, is_rollbackable=False,
-                   chat_id=None, message_id=None, params=None,
-                   request_id=None, approval_status="APPROVED",
-                   execution_status="SUCCEEDED", error=None, result=None,
-                   created_at=None):
+def _make_call_row(
+    tool_name="get_cpu",
+    server_name="tool-server",
+    is_read_only=True,
+    is_rollbackable=False,
+    chat_id=None,
+    message_id=None,
+    params=None,
+    request_id=None,
+    approval_status="APPROVED",
+    execution_status="SUCCEEDED",
+    error=None,
+    result=None,
+    created_at=None,
+):
     data = {
         "id": uuid.uuid4(),
         "tool_name": tool_name,
@@ -65,8 +76,9 @@ class TestMessageFromRow:
         chat_id = uuid.uuid4()
         ts = datetime.now(timezone.utc)
 
-        row = _make_msg_row(msg_id=msg_id, chat_id=chat_id, ts=ts,
-                            msg_type="user", content="hello")
+        row = _make_msg_row(
+            msg_id=msg_id, chat_id=chat_id, ts=ts, msg_type="user", content="hello"
+        )
         msg = _message_from_row(row)
         assert msg.message_id == msg_id
         assert msg.chat_id == chat_id
@@ -81,15 +93,17 @@ class TestMessageFromRow:
         chat_id = uuid.uuid4()
         ts = datetime.now(timezone.utc)
 
-        row = _FakeRecord({
-            "id": msg_id,
-            "chat_id": chat_id,
-            "timestamp": ts,
-            "type": "assistant",
-            "content": "Let me check.",
-            "tool_calls": None,
-            "reasoning_content": "Let me think about which tool to use...",
-        })
+        row = _FakeRecord(
+            {
+                "id": msg_id,
+                "chat_id": chat_id,
+                "timestamp": ts,
+                "type": "assistant",
+                "content": "Let me check.",
+                "tool_calls": None,
+                "reasoning_content": "Let me think about which tool to use...",
+            }
+        )
         msg = _message_from_row(row)
         assert msg.reasoning_content == "Let me think about which tool to use..."
 
@@ -101,14 +115,16 @@ class TestMessageFromRow:
         chat_id = uuid.uuid4()
         ts = datetime.now(timezone.utc)
 
-        row = _FakeRecord({
-            "id": msg_id,
-            "chat_id": chat_id,
-            "timestamp": ts,
-            "type": "assistant",
-            "content": "hello",
-            "tool_calls": None,
-        })
+        row = _FakeRecord(
+            {
+                "id": msg_id,
+                "chat_id": chat_id,
+                "timestamp": ts,
+                "type": "assistant",
+                "content": "hello",
+                "tool_calls": None,
+            }
+        )
         msg = _message_from_row(row)
         assert msg.reasoning_content is None
 
@@ -120,20 +136,23 @@ class TestMessageFromRow:
         chat_id = uuid.uuid4()
         ts = datetime.now(timezone.utc)
 
-        row = _FakeRecord({
-            "id": msg_id,
-            "chat_id": chat_id,
-            "timestamp": ts,
-            "type": "tool_result",
-            "content": "[get_cpu] execution_status=SUCCEEDED",
-            "tool_calls": None,
-            "tool_call_id": "call_abc",
-            "tool_name": "get_cpu",
-            "reasoning_content": None,
-        })
+        row = _FakeRecord(
+            {
+                "id": msg_id,
+                "chat_id": chat_id,
+                "timestamp": ts,
+                "type": "tool_result",
+                "content": "[get_cpu] execution_status=SUCCEEDED",
+                "tool_calls": None,
+                "tool_call_id": "call_abc",
+                "tool_name": "get_cpu",
+                "reasoning_content": None,
+            }
+        )
         msg = _message_from_row(row)
         assert msg.tool_call_id == "call_abc"
         assert msg.tool_name == "get_cpu"
+
 
 class TestToolCallFromRow:
     def test_converts_row_to_tool_call(self):
@@ -144,9 +163,11 @@ class TestToolCallFromRow:
         chat_id = uuid.uuid4()
 
         row = _make_call_row(
-            chat_id=chat_id, message_id=msg_id,
+            chat_id=chat_id,
+            message_id=msg_id,
             params='{"filter": "cpu"}',
-            approval_status="APPROVED", execution_status="SUCCEEDED",
+            approval_status="APPROVED",
+            execution_status="SUCCEEDED",
         )
         tc = _tool_call_from_row(row)
         assert tc.name == "get_cpu"
@@ -198,11 +219,16 @@ class TestToolCallFromRow:
 
         data = {
             "id": uuid.uuid4(),
-            "tool_name": "get_cpu", "server_name": "tool-server",
-            "is_read_only": True, "is_rollbackable": False,
-            "chat_id": uuid.uuid4(), "message_id": uuid.uuid4(),
-            "params": "{}", "request_id": None,
-            "approval_status": "APPROVED", "execution_status": "SUCCEEDED",
+            "tool_name": "get_cpu",
+            "server_name": "tool-server",
+            "is_read_only": True,
+            "is_rollbackable": False,
+            "chat_id": uuid.uuid4(),
+            "message_id": uuid.uuid4(),
+            "params": "{}",
+            "request_id": None,
+            "approval_status": "APPROVED",
+            "execution_status": "SUCCEEDED",
             "created_at": datetime.now(timezone.utc),
         }
         row = _FakeRecord(data)
@@ -243,11 +269,16 @@ class TestToolCallFromRow:
 
         data = {
             "id": uuid.uuid4(),
-            "tool_name": "get_cpu", "server_name": "tool-server",
-            "is_read_only": True, "is_rollbackable": False,
-            "chat_id": uuid.uuid4(), "message_id": uuid.uuid4(),
-            "params": "{}", "request_id": None,
-            "approval_status": "APPROVED", "execution_status": "SUCCEEDED",
+            "tool_name": "get_cpu",
+            "server_name": "tool-server",
+            "is_read_only": True,
+            "is_rollbackable": False,
+            "chat_id": uuid.uuid4(),
+            "message_id": uuid.uuid4(),
+            "params": "{}",
+            "request_id": None,
+            "approval_status": "APPROVED",
+            "execution_status": "SUCCEEDED",
             "created_at": datetime.now(timezone.utc),
         }
         row = _FakeRecord(data)
@@ -289,10 +320,14 @@ class TestPostgresSessionManagerGet:
 
         chat_id = uuid.uuid4()
         db = MagicMock()
-        db.fetchrow = AsyncMock(return_value=_FakeRecord({
-            "id": chat_id,
-            "updated_at": datetime.now(timezone.utc),
-        }))
+        db.fetchrow = AsyncMock(
+            return_value=_FakeRecord(
+                {
+                    "id": chat_id,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            )
+        )
         db.fetch = AsyncMock(side_effect=[[], []])
 
         mgr = PostgresSessionManager(db)
@@ -322,9 +357,11 @@ class TestPostgresSessionManagerList:
         ts = datetime.now(timezone.utc)
 
         db = MagicMock()
-        db.fetch = AsyncMock(return_value=[
-            _FakeRecord({"id": chat_id, "updated_at": ts}),
-        ])
+        db.fetch = AsyncMock(
+            return_value=[
+                _FakeRecord({"id": chat_id, "updated_at": ts}),
+            ]
+        )
         mgr = PostgresSessionManager(db)
 
         sessions = await mgr.list_sessions()
@@ -380,12 +417,17 @@ class TestPostgresSessionManagerAddMessage:
         assert "call_abc" in insert_args
         assert "get_cpu" in insert_args
 
+
 class TestPostgresSessionManagerAddToolCall:
     @pytest.mark.asyncio
     async def test_add_tool_call_inserts_and_updates(self):
         from src.services.session_manager import PostgresSessionManager
-        from src.models.tool import (ApprovalStatus, ExecutionStatus,
-                                      ServerName, ToolCall)
+        from src.models.tool import (
+            ApprovalStatus,
+            ExecutionStatus,
+            ServerName,
+            ToolCall,
+        )
 
         db = MagicMock()
         db.execute = AsyncMock()
@@ -447,7 +489,8 @@ class TestPostgresSessionManagerUpdateToolCall:
         call_id = uuid.uuid4()
         chat_id = uuid.uuid4()
         await mgr.update_tool_call(
-            call_id, chat_id,
+            call_id,
+            chat_id,
             execution_status=ExecutionStatus.SUCCEEDED,
             result={"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
         )
@@ -470,7 +513,8 @@ class TestPostgresSessionManagerUpdateToolCall:
         call_id = uuid.uuid4()
         chat_id = uuid.uuid4()
         await mgr.update_tool_call(
-            call_id, chat_id,
+            call_id,
+            chat_id,
             execution_status=ExecutionStatus.SUCCEEDED,
             result=None,
         )
@@ -497,8 +541,11 @@ class TestPersistAssistantMessage:
             "content": "Let me check.",
             "reasoning_content": "Let me think about which tool to use...",
             "tool_calls": [
-                {"id": "call_001", "type": "function",
-                 "function": {"name": "get_cpu", "arguments": "{}"}},
+                {
+                    "id": "call_001",
+                    "type": "function",
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                },
             ],
         }
 
@@ -546,14 +593,17 @@ class TestPersistToolResultMessage:
         lifecycle = ToolCallLifecycle(sm)
         chat_id = uuid.uuid4()
 
-        await lifecycle.persist_tool_result(chat_id, [
-            AgentMessage(
-                role="tool",
-                content="[get_cpu] execution_status=SUCCEEDED",
-                tool_call_id="call_abc",
-                name="get_cpu",
-            )
-        ])
+        await lifecycle.persist_tool_result(
+            chat_id,
+            [
+                AgentMessage(
+                    role="tool",
+                    content="[get_cpu] execution_status=SUCCEEDED",
+                    tool_call_id="call_abc",
+                    name="get_cpu",
+                )
+            ],
+        )
 
         sm.add_message.assert_called_once()
         msg_arg = sm.add_message.call_args[0][1]
@@ -561,3 +611,98 @@ class TestPersistToolResultMessage:
         assert msg_arg.type == MessageType.TOOL_RESULT
         assert msg_arg.tool_call_id == "call_abc"
         assert msg_arg.tool_name == "get_cpu"
+
+
+class TestToolCallLifecycleRegister:
+    @pytest.mark.asyncio
+    async def test_register_persists_pending_tool_and_sets_call_id(self):
+        from src.agent.domain import AgentToolCall, ToolFunction
+        from src.models.tool import ApprovalStatus, ExecutionStatus
+        from src.services.tool_lifecycle import ToolCallLifecycle
+
+        sm = MagicMock()
+        call_id = uuid.uuid4()
+        sm.add_tool_call = AsyncMock(return_value=call_id)
+        sm.update_tool_call = AsyncMock()
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+        pending = [
+            AgentToolCall(
+                id="llm-call-1",
+                function=ToolFunction(
+                    name="restart_service", arguments={"service": "nginx"}
+                ),
+                server_name="tool-server",
+                is_read_only=False,
+                is_rollbackable=True,
+            )
+        ]
+
+        await lifecycle.register(chat_id, pending, [], llm_trace_id=None)
+
+        assert pending[0].call_id == call_id
+        persisted = sm.add_tool_call.call_args.args[1]
+        assert persisted.name == "restart_service"
+        assert persisted.params == {"service": "nginx"}
+        assert persisted.llm_tool_call_id == "llm-call-1"
+        assert persisted.approval_status == ApprovalStatus.PENDING
+        assert persisted.execution_status == ExecutionStatus.PENDING_APPROVAL
+        sm.update_tool_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_register_persists_pre_executed_result_and_marks_executed(self):
+        from src.agent.domain import AgentToolResult
+        from src.models.tool import ApprovalStatus, ExecutionStatus
+        from src.services.tool_lifecycle import ToolCallLifecycle
+
+        sm = MagicMock()
+        call_id = uuid.uuid4()
+        sm.add_tool_call = AsyncMock(return_value=call_id)
+        sm.update_tool_call = AsyncMock()
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+        result = {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}
+        pre_executed = [
+            AgentToolResult(
+                tool_name="get_cpu",
+                tool_call_id="llm-call-1",
+                result=result,
+                is_read_only=True,
+            )
+        ]
+
+        await lifecycle.register(chat_id, [], pre_executed, llm_trace_id=None)
+
+        assert pre_executed[0].call_id == call_id
+        persisted = sm.add_tool_call.call_args.args[1]
+        assert persisted.name == "get_cpu"
+        assert persisted.approval_status == ApprovalStatus.APPROVED
+        assert persisted.execution_status == ExecutionStatus.SUCCEEDED
+        sm.update_tool_call.assert_awaited_once_with(
+            call_id,
+            chat_id,
+            execution_status=ExecutionStatus.SUCCEEDED,
+            error=None,
+            result=result,
+        )
+
+
+class TestToolCallLifecycleNoop:
+    """ToolCallLifecycle must stay optional when persistence is disabled."""
+
+    @pytest.mark.asyncio
+    async def test_update_methods_noop_without_session_manager(self):
+        from src.services.tool_lifecycle import ToolCallLifecycle
+
+        lifecycle = ToolCallLifecycle(None)
+        chat_id = uuid.uuid4()
+        call_id = uuid.uuid4()
+
+        await lifecycle.mark_approved(chat_id, call_id)
+        await lifecycle.mark_rejected(chat_id, call_id)
+        await lifecycle.mark_expired(chat_id, call_id)
+        await lifecycle.mark_executed(
+            chat_id,
+            call_id,
+            {"execution_status": "SUCCEEDED", "output": "ok"},
+        )

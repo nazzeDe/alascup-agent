@@ -5,6 +5,7 @@ ebpf/__init__.py — eBPF 系统监控工具导出。
 - 持续订阅工具（进程启动/退出、TCP 连接）— 同步，读环形缓冲区
 - 按需快照工具（syscall、I/O、OOM）— 异步，启动 bpftrace 子进程
 """
+
 from __future__ import annotations
 
 from .runtime import EbpfRuntime
@@ -33,7 +34,11 @@ def watch_process_exec() -> dict:
     """返回最近的新进程启动事件。"""
     runtime = get_ebpf_runtime()
     if runtime is None:
-        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+        return {
+            "error": "subscription manager not initialized",
+            "events": [],
+            "probe_status": "not_initialized",
+        }
     return runtime.watch("execsnoop.bt")
 
 
@@ -41,7 +46,11 @@ def watch_process_exit() -> dict:
     """返回最近的进程退出事件。"""
     runtime = get_ebpf_runtime()
     if runtime is None:
-        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+        return {
+            "error": "subscription manager not initialized",
+            "events": [],
+            "probe_status": "not_initialized",
+        }
     return runtime.watch("proc_exit.bt")
 
 
@@ -49,7 +58,11 @@ def watch_tcp_connections() -> dict:
     """返回最近的 TCP 连接事件。"""
     runtime = get_ebpf_runtime()
     if runtime is None:
-        return {"error": "subscription manager not initialized", "events": [], "probe_status": "not_initialized"}
+        return {
+            "error": "subscription manager not initialized",
+            "events": [],
+            "probe_status": "not_initialized",
+        }
     return runtime.watch("tcpconn.bt")
 
 

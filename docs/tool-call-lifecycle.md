@@ -15,4 +15,13 @@ The Tool Call Lifecycle module owns persistence state transitions:
 
 Agent nodes report facts or intent. They should not encode persistence state transitions directly.
 
-The lifecycle module does not emit SSE wire JSON. It may produce typed domain events or event data; `SSEStream` remains the wire seam.
+Rejected and expired approvals have two representations:
+
+- database lifecycle: `approval_status=REJECTED|EXPIRED`, `execution_status=FAILED`
+- SSE / LLM / UI: a matching `tool_result` with `execution_status=REJECTED`
+
+That rejected `tool_result` is still a real tool message for LLM history. It tells the model not to retry the rejected operation and lets the frontend close the visible `tool_call`.
+
+The lifecycle module is persistence-only and may no-op when no session manager is configured, which keeps unit tests and non-persistent runners from fabricating database state.
+
+The lifecycle module does not emit SSE wire JSON. It may produce typed domain events or event data; `SSEStream` remains the wire boundary.

@@ -16,7 +16,7 @@ bun run test:e2e
 bun run test:e2e:live
 ```
 
-`frontend/Dockerfile` 使用 nginx 托管 `vue-project/dist/`。构建镜像前需要先执行 `bun run build` 生成静态产物。
+仓库提交 `bun.lock`，推荐使用 Bun；脚本本身也可用 `npm run <script>` 执行。`frontend/Dockerfile` 使用 nginx 托管 `vue-project/dist/`。构建镜像前需要先执行 `bun run build` 或 `npm run build` 生成静态产物。
 
 ## 目录结构
 
@@ -54,8 +54,8 @@ frontend/
 
 - `ChatStore`：单个活动会话的状态容器，包含消息、工具调用、思考过程、审批事件、流式状态、错误和输入草稿。
 - `SessionListStore`：会话列表状态，包含当前选中会话、加载状态和加载错误。
-- `SessionService`：会话加载/删除与审批提交的应用服务。删除会话是 best-effort，后端失败时仍会清理本地列表。
-- `ActiveSessionWorkspace`：管理当前活动 `ChatStore`，负责加载会话列表、选择历史会话、新建草稿会话、删除会话、接收服务端 `session_init`。
+- `SessionService`：会话加载/删除与审批提交的应用服务。删除会话是 best-effort，后端失败时仍会清理本地列表；同一 `request_id` 的审批提交会做 in-flight 去重，避免双击重复请求。
+- `ActiveSessionWorkspace`：管理当前活动 `ChatStore`，负责加载会话列表、选择历史会话、新建草稿会话、删除会话、接收服务端 `session_init`。`session_init` 会采用发起请求时的目标 store，避免用户切换会话后污染当前活动会话。
 - `ChatStreamInterpreter`：解释单轮 `/api/chat` SSE 流，将事件转换为前端状态变化。
 - `projectTimeline`：把 `messages`、`toolCalls`、`reasonings`、`approvalEvent` 合并成按时间排序的 UI 时间线。
 
@@ -73,7 +73,7 @@ frontend/
 | `responding` | 正在接收 assistant 文本 |
 | `done` | 收到 `done`，本轮流结束 |
 
-`useChat.send(text)` 会立即追加用户消息、清空上一轮 reasoning、进入 `thinking`，并创建 `AbortController`。如果当前 `chat_id` 为空，本轮被视为新会话；收到 `session_init` 后，`ActiveSessionWorkspace` 会把服务端会话 ID 写入当前 store，并用首条用户消息生成侧边栏标题。标题规则为前 30 个字符，超长追加 `...`。
+`useChat.send(text)` 会立即追加用户消息、清空上一轮 reasoning、进入 `thinking`，并创建 `AbortController`。如果当前 `chat_id` 为空，本轮被视为新会话；收到 `session_init` 后，`ActiveSessionWorkspace` 会把服务端会话 ID 写入本轮请求对应的 store，并用首条用户消息生成侧边栏标题。标题规则为前 30 个字符，超长追加 `...`。
 
 ### 时间线投影
 
@@ -86,7 +86,7 @@ messages + toolCalls + reasonings + approvalEvent
   -> ChatView 分派给 ReasoningBubble / MessageItem / ToolCallInline / ApprovalInline
 ```
 
-历史会话加载时，`ChatStore.loadFromSession()` 会从 `executed_tool_list` 恢复工具调用，并把 assistant 消息上的 `reasoning_content` 转换为已完成的 `ReasoningEntry`。
+历史会话加载时，`ChatStore.loadFromSession()` 会从 `executed_tool_list` 恢复工具调用，并把 assistant 消息上的 `reasoning_content` 转换为已完成的 `ReasoningEntry`。历史记录中 `approval_status=REJECTED|EXPIRED` 且 `execution_status=FAILED` 的工具会投影为前端 `REJECTED` 状态，与实时 SSE 表示保持一致。
 
 ## 前后端接口
 
@@ -133,15 +133,15 @@ messages + toolCalls + reasonings + approvalEvent
 | `session_init` | `{ "chat_id": string }` | 新会话采用服务端 ID |
 | `reasoning` | `{ "delta": string }` | 追加到当前 reasoning buffer |
 | `thinking_done` | `{}` | 标记 reasoning 完成，进入 `responding` |
-| `assistant` | `{ "delta": string }` | 追加 assistant buffer |
-| `assistant_done` | `{}` | 把 assistant buffer flush 为一条 assistant 消息 |
+| `assistant` | `{ "delta": string }` | 创建或更新当前流式 assistant 消息 |
+| `assistant_done` | `{}` | 标记当前 assistant 消息边界结束 |
 | `tool_call` | `{ "call_id": string, "tool_name": string, "params": object, "is_read_only": boolean, "server"?: string }` | 创建 `RUNNING` 工具调用 |
-| `tool_result` | `{ "call_id": string, "execution_status": "SUCCEEDED" \| "FAILED", "output"?: object, "error"?: object, "execution_time_ms"?: number }` | 更新对应工具调用 |
+| `tool_result` | `{ "call_id": string, "execution_status": "SUCCEEDED" \| "FAILED" \| "REJECTED", "output"?: unknown, "error"?: object, "execution_time_ms"?: number }` | 更新对应工具调用 |
 | `tool_approval_required` | `{ "chat_id": string, "request_id": string, "tool_name": string, "params": object, "reason": string, "call_id": string }` | 显示内联审批，并把对应工具设为 `PENDING_APPROVAL` |
 | `error` | `{ "code": string, "message": string }` | 停止流，显示连接/业务错误 |
 | `done` | `{}` | 本轮结束，停止 streaming |
 
-`tool_result` 如果找不到对应 `call_id`，前端只输出 console warning，不创建孤立工具条目。
+`tool_result` 如果找不到对应 `call_id`，前端只输出 console warning，不创建孤立工具条目。审批拒绝或过期由后端实时推送 `execution_status="REJECTED"`；`ToolCallInline` 会显示拒绝状态和后端返回的错误消息。
 
 ## UI 行为
 
@@ -185,7 +185,7 @@ bun run type-check
 
 mock 后端 E2E 位于 `frontend/vue-project/tests/e2e/`，配置文件为 `playwright.e2e.config.ts`。
 
-- 默认 `baseURL` 为 `http://localhost:5173`
+- 默认 `baseURL` 为 `http://localhost:5174`
 - 未设置 `E2E_SKIP_WEB_SERVER` 时，Playwright 会启动 `bun run dev --port 5174`
 - 通过路由拦截 mock `/api/chat`、`/api/sessions`、`/api/tool-requests/*/approval`
 
@@ -200,13 +200,15 @@ bun run test:e2e
 真实后端 E2E 位于 `frontend/vue-project/tests/e2e-live/`，配置文件为 `playwright.e2e-live.config.ts`。
 
 - 默认 `baseURL` 为 `http://localhost:5173`
-- 不自动启动前端或后端服务，需要外部先启动完整环境
+- `make test-e2e-live` 会启动 Docker 测试栈并等待 `/api/health`
+- 直接运行 `bun run test:e2e:live` 时，需要外部先启动完整环境
+- 可用 `E2E_BASE_URL` 指定前端入口，用 `E2E_API_BASE` 指定 API 入口；未设置 `E2E_API_BASE` 时复用 `E2E_BASE_URL`
 - 设置 `E2E_LIVE_HEADED=1` 可使用有头浏览器
 
 运行：
 
 ```bash
-bun run test:e2e:live
+make test-e2e-live
 ```
 
 ## 构建与部署

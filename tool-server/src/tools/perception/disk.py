@@ -20,5 +20,3 @@ def get_disk_usage(config: ToolServerConfig, path: str = "/") -> dict:
         "disk_free_gb": free_gb,
         "disk_usage_percent": percent,
     }
-
-

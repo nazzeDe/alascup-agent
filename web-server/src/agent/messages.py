@@ -58,7 +58,8 @@ def _from_object(m) -> dict:
     name = getattr(m, "name", None)
     if name:
         result["name"] = name
-    rc = getattr(m, "additional_kwargs", {}).get("reasoning_content", "")
+    additional_kwargs = getattr(m, "additional_kwargs", None) or {}
+    rc = additional_kwargs.get("reasoning_content", "")
     if rc:
         result["reasoning_content"] = rc
     return result

@@ -49,7 +49,11 @@ class MockClassifier:
         self._threshold_risky = threshold_risky
 
     async def classify(self, tool_name, params):
-        if self._threshold_risky and tool_name in ("restart_service", "delete_logs", "reboot_system"):
+        if self._threshold_risky and tool_name in (
+            "restart_service",
+            "delete_logs",
+            "reboot_system",
+        ):
             return {"is_read_only": False, "is_rollbackable": False}
         return {"is_read_only": self._readonly, "is_rollbackable": True}
 
@@ -68,17 +72,34 @@ class MockExecutor:
     def __init__(self):
         self.calls: list[dict] = []
 
-    async def execute(self, tool_name, arguments, *, server_name=None, approval_status=None, request_id=None, **kwargs):
+    async def execute(
+        self,
+        tool_name,
+        arguments,
+        *,
+        server_name=None,
+        approval_status=None,
+        request_id=None,
+        **kwargs,
+    ):
         self.calls.append({"tool_name": tool_name, "arguments": arguments})
         return {"execution_status": "SUCCEEDED", "output": f"result of {tool_name}"}
 
     async def execute_parallel(self, calls: list[dict]) -> list[dict]:
         results = []
         for c in calls:
-            self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-            results.append({"tool_call_id": c.get("call_id", ""), "result": {
-                "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-            }})
+            self.calls.append(
+                {"tool_name": c["tool_name"], "arguments": c.get("arguments", {})}
+            )
+            results.append(
+                {
+                    "tool_call_id": c.get("call_id", ""),
+                    "result": {
+                        "execution_status": "SUCCEEDED",
+                        "output": f"result of {c['tool_name']}",
+                    },
+                }
+            )
         return results
 
     async def classify(self, tool_name, params, server_name=""):
@@ -117,6 +138,7 @@ class MockSessionManager:
     async def create_session(self):
         sid = uuid4()
         from src.models.session import ChatSession
+
         session = ChatSession(
             id=sid,
             title=None,
@@ -164,7 +186,12 @@ pytestmark = pytest.mark.asyncio
 def _tools(*names, is_read_only=True, mutable=False, server="tool-server"):
     """Build available_tools list from bare names."""
     return [
-        {"name": n, "server_name": server, "mutable": mutable, "is_read_only": is_read_only}
+        {
+            "name": n,
+            "server_name": server,
+            "mutable": mutable,
+            "is_read_only": is_read_only,
+        }
         for n in names
     ]
 
@@ -178,9 +205,16 @@ async def _collect_events(gen) -> list[tuple]:
 
 
 async def _run_turn_and_collect(
-    llm, executor, context_manager, audit,
-    bridge, rule_engine, session_mgr=None, prompt_mgr=None,
-    user_message="test", chat_id=None,
+    llm,
+    executor,
+    context_manager,
+    audit,
+    bridge,
+    rule_engine,
+    session_mgr=None,
+    prompt_mgr=None,
+    user_message="test",
+    chat_id=None,
     agent_max_iterations=30,
 ) -> list[tuple]:
     """Helper: build ChatTurn + SSEStream, collect wire events, return [(event, data), ...].
@@ -215,6 +249,7 @@ async def _run_turn_and_collect(
     )
 
     from src.sse_stream import SSEStream
+
     stream = SSEStream(turn=turn)
 
     return await _collect_events(stream)
@@ -248,17 +283,24 @@ def audit():
 @pytest.fixture
 def bridge():
     from src.security.pending import ApprovalBridge
+
     return ApprovalBridge()
 
 
 class TestChatTurnBasic:
     """AG-001: ReAct basic cycle."""
 
-    async def test_text_only_response(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_text_only_response(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         llm.responses = [{"content": "CPU is normal.", "tool_calls": None}]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         event_types = [e[0] for e in events]
         # session_init first, done last
@@ -266,18 +308,27 @@ class TestChatTurnBasic:
         assert event_types[-1] == "done"
         assert "assistant" in event_types
 
-    async def test_tool_call_auto_approve_then_done(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_tool_call_auto_approve_then_done(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """Readonly tool -> AUTO_APPROVE -> execute -> result -> LLM concludes -> done."""
         executor.list_tools = lambda: _tools("get_cpu")
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                ],
+            },
             {"content": "CPU is 85%.", "tool_calls": None},
         ]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         event_types = [e[0] for e in events]
         assert event_types[0] == "session_init"
@@ -290,8 +341,11 @@ class TestChatTurnBasic:
 class TestChatTurnHighRisk:
     """AG-004: High-risk tool approval."""
 
-    async def test_high_risk_yields_approval_required_and_resumes(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_high_risk_yields_approval_required_and_resumes(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """High-risk tool_call -> pending_approval -> approval_required -> resolve -> continue."""
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return _tools("restart_service", is_read_only=False)
@@ -302,17 +356,34 @@ class TestChatTurnHighRisk:
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 results = []
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
-                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                    }})
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                    results.append(
+                        {
+                            "tool_call_id": c.get("call_id", ""),
+                            "result": {
+                                "execution_status": "SUCCEEDED",
+                                "output": f"result of {c['tool_name']}",
+                            },
+                        }
+                    )
                 return results
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Service restarted.", "tool_calls": None},
         ]
 
@@ -320,13 +391,18 @@ class TestChatTurnHighRisk:
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=llm, chat_id="",
-                tool_executor=risky, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=llm,
+                chat_id="",
+                tool_executor=risky,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="restart", chat_id=None,
+            user_message="restart",
+            chat_id=None,
             session_manager=MockSessionManager(),
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
@@ -334,6 +410,7 @@ class TestChatTurnHighRisk:
         )
 
         from src.sse_stream import SSEStream
+
         stream = SSEStream(turn=turn)
         events: list[tuple] = []
         async for e in stream:
@@ -353,11 +430,17 @@ class TestChatTurnHighRisk:
 class TestChatTurnTransitionTracking:
     """AG-006: transition tracking writes to audit log."""
 
-    async def test_transitions_logged_to_audit(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_transitions_logged_to_audit(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         llm.responses = [{"content": "done.", "tool_calls": None}]
         await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         transition_events = [e for e in audit.events if e.event == "LOOP_TRANSITION"]
         transitions = [e.transition for e in transition_events]
@@ -368,26 +451,41 @@ class TestChatTurnTransitionTracking:
 class TestChatTurnExit:
     """Exit conditions: LLM produces text without tool_calls -> transition=done -> exit."""
 
-    async def test_exits_when_llm_produces_text_without_tool_calls(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_exits_when_llm_produces_text_without_tool_calls(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         llm.responses = [{"content": "All good.", "tool_calls": None}]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         assert events[-1][0] == "done"
 
-    async def test_continues_when_tool_calls_present(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_continues_when_tool_calls_present(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """Tool calls should keep loop alive — LLM reasons on tool_result."""
         executor.list_tools = lambda: _tools("get_cpu")
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                ],
+            },
             {"content": "Result analyzed.", "tool_calls": None},
         ]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         assert events[-1][0] == "done"
         assert executor.calls
@@ -396,19 +494,31 @@ class TestChatTurnExit:
 class TestChatTurnConcurrent:
     """AG-003, AG-004: concurrent tool_call."""
 
-    async def test_concurrent_readonly_tools_executed(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_concurrent_readonly_tools_executed(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """AG-003: LLM returns 2 readonly tool_calls -> parallel execution -> 2 results."""
         executor.list_tools = lambda: _tools("get_cpu", "get_memory")
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-                {"id": "tc-2", "function": {"name": "get_memory", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                    {
+                        "id": "tc-2",
+                        "function": {"name": "get_memory", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Both checked.", "tool_calls": None},
         ]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         event_types = [e[0] for e in events]
         assert event_types.count("tool_call") == 2
@@ -416,8 +526,11 @@ class TestChatTurnConcurrent:
         assert len(executor.calls) == 2
         assert events[-1][0] == "done"
 
-    async def test_mixed_readonly_highrisk(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_mixed_readonly_highrisk(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """AG-004: readonly + high-risk -> readonly pre-executed, high-risk needs approval."""
+
         class MixedExecutor(MockExecutor):
             def __init__(self):
                 super().__init__()
@@ -433,31 +546,53 @@ class TestChatTurnConcurrent:
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 results = []
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
-                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                    }})
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                    results.append(
+                        {
+                            "tool_call_id": c.get("call_id", ""),
+                            "result": {
+                                "execution_status": "SUCCEEDED",
+                                "output": f"result of {c['tool_name']}",
+                            },
+                        }
+                    )
                 return results
 
         risky = MixedExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-                {"id": "tc-2", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                    {
+                        "id": "tc-2",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Handled.", "tool_calls": None},
         ]
 
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=llm, chat_id="",
-                tool_executor=risky, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=llm,
+                chat_id="",
+                tool_executor=risky,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="check and restart", chat_id=None,
+            user_message="check and restart",
+            chat_id=None,
             session_manager=MockSessionManager(),
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
@@ -465,6 +600,7 @@ class TestChatTurnConcurrent:
         )
 
         from src.sse_stream import SSEStream
+
         stream = SSEStream(turn=turn)
         events: list[tuple] = []
         async for e in stream:
@@ -483,19 +619,31 @@ class TestChatTurnConcurrent:
 class TestChatTurnStreamingExecution:
     """AG-007: Streaming tool execution — readonly tools dispatched in think phase."""
 
-    async def test_readonly_tools_pre_executed_skip_review_act(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_readonly_tools_pre_executed_skip_review_act(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """Readonly tool_calls pre-executed by think_node, skip review/act."""
         executor.list_tools = lambda: _tools("get_cpu", "get_memory")
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
-                {"id": "tc-2", "function": {"name": "get_memory", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "tc-1", "function": {"name": "get_cpu", "arguments": "{}"}},
+                    {
+                        "id": "tc-2",
+                        "function": {"name": "get_memory", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Both checked.", "tool_calls": None},
         ]
         events = await _run_turn_and_collect(
-            llm=llm, executor=executor, context_manager=context_manager,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=context_manager,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         event_types = [e[0] for e in events]
         assert event_types.count("tool_call") == 2
@@ -506,6 +654,7 @@ class TestChatTurnStreamingExecution:
 
 class _FakeCompressingContextManager:
     """Compression always triggers, for error recovery tests."""
+
     window_size = 128000
     threshold = 0.7
 
@@ -526,7 +675,9 @@ class TestChatTurnErrorRecovery:
     def recovery_ctx(self):
         return _FakeCompressingContextManager()
 
-    async def _run_recovery_turn(self, llm, executor, context_manager, audit, bridge, rule_engine, **kw):
+    async def _run_recovery_turn(
+        self, llm, executor, context_manager, audit, bridge, rule_engine, **kw
+    ):
         from src.services.error_recovery import ErrorRecovery
 
         session_mgr = MockSessionManager()
@@ -536,36 +687,54 @@ class TestChatTurnErrorRecovery:
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=recovery,
-                llm=llm, chat_id="",
-                tool_executor=executor, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=recovery,
+                llm=llm,
+                chat_id="",
+                tool_executor=executor,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message=kw.get("user_message", "test"), chat_id=None,
-            session_manager=session_mgr, prompt_manager=prompt_mgr,
-            orchestrator_builder=orch_builder, tool_executor=executor,
+            user_message=kw.get("user_message", "test"),
+            chat_id=None,
+            session_manager=session_mgr,
+            prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder,
+            tool_executor=executor,
         )
 
         from src.sse_stream import SSEStream
+
         stream = SSEStream(turn=turn)
         return await _collect_events(stream)
 
-    async def test_prompt_too_long_compress_then_retry(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+    async def test_prompt_too_long_compress_then_retry(
+        self, llm, executor, recovery_ctx, audit, bridge, rule_engine
+    ):
         """EH-003: LLM returns prompt_too_long -> compress -> retry -> success."""
         llm.responses = [
             {"error": {"code": 413, "message": "prompt too long"}},
             {"content": "recovered response", "tool_calls": None},
         ]
         events = await self._run_recovery_turn(
-            llm=llm, executor=executor, context_manager=recovery_ctx,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=recovery_ctx,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         assert events[-1][0] == "done"
-        transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+        transitions = [
+            e.transition for e in audit.events if e.event == "LOOP_TRANSITION"
+        ]
         assert "context_compacted" in transitions
 
-    async def test_prompt_too_long_exhausted_yields_error(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+    async def test_prompt_too_long_exhausted_yields_error(
+        self, llm, executor, recovery_ctx, audit, bridge, rule_engine
+    ):
         """EH-003 recovery chain exhausted -> error event -> error_exit."""
         llm.responses = [
             {"error": {"code": 413, "message": "prompt too long"}},
@@ -573,27 +742,41 @@ class TestChatTurnErrorRecovery:
             {"error": {"code": 413, "message": "prompt too long"}},
         ]
         events = await self._run_recovery_turn(
-            llm=llm, executor=executor, context_manager=recovery_ctx,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=recovery_ctx,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         event_types = [e[0] for e in events]
         assert "error" in event_types
-        transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+        transitions = [
+            e.transition for e in audit.events if e.event == "LOOP_TRANSITION"
+        ]
         assert "error_exit" in transitions
 
-    async def test_non_recoverable_error_surfaces_immediately(self, llm, executor, recovery_ctx, audit, bridge, rule_engine):
+    async def test_non_recoverable_error_surfaces_immediately(
+        self, llm, executor, recovery_ctx, audit, bridge, rule_engine
+    ):
         """Non-recoverable error (rate_limit) -> direct error, no retry."""
         llm.responses = [
             {"error": {"code": 429, "message": "rate limited"}},
         ]
         events = await self._run_recovery_turn(
-            llm=llm, executor=executor, context_manager=recovery_ctx,
-            audit=audit, bridge=bridge, rule_engine=rule_engine,
+            llm=llm,
+            executor=executor,
+            context_manager=recovery_ctx,
+            audit=audit,
+            bridge=bridge,
+            rule_engine=rule_engine,
         )
         assert events[-1][0] == "done"
         event_types_before_done = [e[0] for e in events[:-1]]
         assert "error" in event_types_before_done
-        transitions = [e.transition for e in audit.events if e.event == "LOOP_TRANSITION"]
+        transitions = [
+            e.transition for e in audit.events if e.event == "LOOP_TRANSITION"
+        ]
         assert "error_exit" in transitions
 
 
@@ -601,13 +784,20 @@ class TestAgentCrashSendsDone:
     """AGENT_CRASH path must send SSE done event."""
 
     async def test_chat_agent_crash_yields_error_then_done(
-        self, executor, rule_engine, audit, context_manager, bridge,
+        self,
+        executor,
+        rule_engine,
+        audit,
+        context_manager,
+        bridge,
     ):
         """When LLM raises exception, SSE stream must end with done."""
         from src.sse_stream import SSEStream
 
         class RaisingLLM:
-            async def generate_stream(self, messages, tools=None, system=None, chat_id=None):
+            async def generate_stream(
+                self, messages, tools=None, system=None, chat_id=None
+            ):
                 if messages is None:
                     yield {}
                 raise RuntimeError("simulated LLM crash")
@@ -620,18 +810,26 @@ class TestAgentCrashSendsDone:
 
         session_mgr = MockSessionManager()
         prompt_mgr = MockPromptManager()
+
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=RaisingLLM(), chat_id="",
-                tool_executor=executor, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=RaisingLLM(),
+                chat_id="",
+                tool_executor=executor,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="test message", chat_id=None,
-            session_manager=session_mgr, prompt_manager=prompt_mgr,
-            orchestrator_builder=orch_builder, tool_executor=executor,
+            user_message="test message",
+            chat_id=None,
+            session_manager=session_mgr,
+            prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder,
+            tool_executor=executor,
         )
 
         stream = SSEStream(turn=turn)
@@ -639,10 +837,18 @@ class TestAgentCrashSendsDone:
 
         event_types = [e[0] for e in events]
         assert "error" in event_types, f"Expected error event, got: {event_types}"
-        assert event_types[-1] == "done", f"Expected final done event, got: {event_types}"
+        assert event_types[-1] == "done", (
+            f"Expected final done event, got: {event_types}"
+        )
 
     async def test_chat_normal_path_ends_with_done(
-        self, llm, executor, rule_engine, audit, context_manager, bridge,
+        self,
+        llm,
+        executor,
+        rule_engine,
+        audit,
+        context_manager,
+        bridge,
     ):
         """Normal path must also end with done (regression test)."""
         from src.sse_stream import SSEStream
@@ -651,18 +857,26 @@ class TestAgentCrashSendsDone:
 
         session_mgr = MockSessionManager()
         prompt_mgr = MockPromptManager()
+
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=llm, chat_id="",
-                tool_executor=executor, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=llm,
+                chat_id="",
+                tool_executor=executor,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="hi", chat_id=None,
-            session_manager=session_mgr, prompt_manager=prompt_mgr,
-            orchestrator_builder=orch_builder, tool_executor=executor,
+            user_message="hi",
+            chat_id=None,
+            session_manager=session_mgr,
+            prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder,
+            tool_executor=executor,
         )
 
         stream = SSEStream(turn=turn)
@@ -670,14 +884,19 @@ class TestAgentCrashSendsDone:
 
         event_types = [e[0] for e in events]
         assert "assistant" in event_types
-        assert event_types[-1] == "done", f"Expected final done event, got: {event_types}"
+        assert event_types[-1] == "done", (
+            f"Expected final done event, got: {event_types}"
+        )
 
 
 class TestChatTurnFullChainAudit:
     """AL-001: Full chain audit event chain integrity."""
 
-    async def test_full_audit_chain_high_risk(self, llm, executor, context_manager, audit, bridge, rule_engine):
+    async def test_full_audit_chain_high_risk(
+        self, llm, executor, context_manager, audit, bridge, rule_engine
+    ):
         """High-risk operation audit chain: TOOL_REQUEST_CREATED -> TOOL_APPROVED -> TOOL_EXECUTED."""
+
         class RiskyExecutor(MockExecutor):
             def list_tools(self):
                 return _tools("restart_service", is_read_only=False)
@@ -688,30 +907,52 @@ class TestChatTurnFullChainAudit:
             async def execute_parallel(self, calls: list[dict]) -> list[dict]:
                 results = []
                 for c in calls:
-                    self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-                    results.append({"tool_call_id": c.get("call_id", ""), "result": {
-                        "execution_status": "SUCCEEDED", "output": f"result of {c['tool_name']}",
-                    }})
+                    self.calls.append(
+                        {
+                            "tool_name": c["tool_name"],
+                            "arguments": c.get("arguments", {}),
+                        }
+                    )
+                    results.append(
+                        {
+                            "tool_call_id": c.get("call_id", ""),
+                            "result": {
+                                "execution_status": "SUCCEEDED",
+                                "output": f"result of {c['tool_name']}",
+                            },
+                        }
+                    )
                 return results
 
         risky = RiskyExecutor()
         llm.responses = [
-            {"content": "", "tool_calls": [
-                {"id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}},
-            ]},
+            {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    },
+                ],
+            },
             {"content": "Service restarted.", "tool_calls": None},
         ]
 
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=llm, chat_id="",
-                tool_executor=risky, rule_engine=rule_engine,
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=llm,
+                chat_id="",
+                tool_executor=risky,
+                rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="restart", chat_id=None,
+            user_message="restart",
+            chat_id=None,
             session_manager=MockSessionManager(),
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
@@ -719,6 +960,7 @@ class TestChatTurnFullChainAudit:
         )
 
         from src.sse_stream import SSEStream
+
         stream = SSEStream(turn=turn)
         async for e in stream:
             if e["event"] == "tool_approval_required":
@@ -756,23 +998,31 @@ class TestHistoryReconstruction:
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts1.isoformat(),
+                    type=MessageType.USER,
                     content="check CPU",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="",
-                    tool_calls=[{
-                        "id": llm_tool_call_id,
-                        "type": "function",
-                        "function": {"name": "get_cpu", "arguments": "{}"},
-                    }],
+                    tool_calls=[
+                        {
+                            "id": llm_tool_call_id,
+                            "type": "function",
+                            "function": {"name": "get_cpu", "arguments": "{}"},
+                        }
+                    ],
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(),
+                    type=MessageType.TOOL_RESULT,
                     content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
                     tool_call_id=llm_tool_call_id,
                     tool_name="get_cpu",
@@ -804,14 +1054,18 @@ class TestHistoryReconstruction:
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
                     timestamp=datetime.now(timezone.utc).isoformat(),
-                    type=MessageType.USER, content="hello",
+                    type=MessageType.USER,
+                    content="hello",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
                     timestamp=datetime.now(timezone.utc).isoformat(),
-                    type=MessageType.ASSISTANT, content="hi there",
+                    type=MessageType.ASSISTANT,
+                    content="hi there",
                 ),
             ],
             executed_tool_list=[],
@@ -839,34 +1093,45 @@ class TestHistoryReconstruction:
 
         tool_use_id = str(uuid4())
         tool_calls_data = [
-            {"id": tool_use_id, "type": "function",
-             "function": {"name": "get_cpu", "arguments": "{}"}},
+            {
+                "id": tool_use_id,
+                "type": "function",
+                "function": {"name": "get_cpu", "arguments": "{}"},
+            },
         ]
 
         session = ChatSession(
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts1.isoformat(),
+                    type=MessageType.USER,
                     content="check CPU",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="Let me check.",
                     tool_calls=tool_calls_data,
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(),
+                    type=MessageType.TOOL_RESULT,
                     content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
                     tool_call_id=tool_use_id,
                     tool_name="get_cpu",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts3.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="CPU is fine.",
                 ),
             ],
@@ -877,14 +1142,18 @@ class TestHistoryReconstruction:
         history = build_llm_history(session)
 
         # Expected order: user → assistant(with tool_calls) → tool → assistant(final)
-        assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        assert len(history) == 4, (
+            f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        )
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant", "tool", "assistant"], f"got {roles}"
 
         # Assistant message with tool_calls
         assist_with_tc = history[1]
         assert assist_with_tc["role"] == "assistant"
-        assert "tool_calls" in assist_with_tc, "assistant message must include tool_calls field"
+        assert "tool_calls" in assist_with_tc, (
+            "assistant message must include tool_calls field"
+        )
         assert len(assist_with_tc["tool_calls"]) == 1
         assert assist_with_tc["tool_calls"][0]["id"] == tool_use_id
 
@@ -912,34 +1181,45 @@ class TestHistoryReconstruction:
         ts3 = datetime(2026, 6, 13, 12, 0, 2, tzinfo=timezone.utc)
 
         tool_calls_data = [
-            {"id": llm_tool_call_id, "type": "function",
-             "function": {"name": "get_cpu", "arguments": "{}"}},
+            {
+                "id": llm_tool_call_id,
+                "type": "function",
+                "function": {"name": "get_cpu", "arguments": "{}"},
+            },
         ]
 
         session = ChatSession(
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts1.isoformat(), type=MessageType.USER,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts1.isoformat(),
+                    type=MessageType.USER,
                     content="check CPU",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_assist.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_assist.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="Let me check.",
                     tool_calls=tool_calls_data,
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts_tool.isoformat(), type=MessageType.TOOL_RESULT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts_tool.isoformat(),
+                    type=MessageType.TOOL_RESULT,
                     content="[get_cpu] execution_status=SUCCEEDED\noutput=CPU: 45%",
                     tool_call_id=llm_tool_call_id,
                     tool_name="get_cpu",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts3.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts3.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="CPU is fine.",
                 ),
             ],
@@ -949,7 +1229,9 @@ class TestHistoryReconstruction:
 
         history = build_llm_history(session)
 
-        assert len(history) == 4, f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        assert len(history) == 4, (
+            f"expected 4 messages, got {len(history)}: {[m['role'] for m in history]}"
+        )
         roles = [m["role"] for m in history]
         assert roles == ["user", "assistant", "tool", "assistant"], f"got {roles}"
 
@@ -977,13 +1259,17 @@ class TestHistoryReconstruction:
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts.isoformat(), type=MessageType.USER,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts.isoformat(),
+                    type=MessageType.USER,
                     content="check CPU",
                 ),
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="Let me check.",
                     reasoning_content=reasoning,
                 ),
@@ -1013,8 +1299,10 @@ class TestHistoryReconstruction:
             id=chat_id,
             messages=[
                 Message(
-                    message_id=uuid4(), chat_id=chat_id,
-                    timestamp=ts.isoformat(), type=MessageType.ASSISTANT,
+                    message_id=uuid4(),
+                    chat_id=chat_id,
+                    timestamp=ts.isoformat(),
+                    type=MessageType.ASSISTANT,
                     content="Hello.",
                     reasoning_content=None,
                 ),

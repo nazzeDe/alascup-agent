@@ -76,7 +76,11 @@ class Settings(BaseSettings):
         This is the production entry-point.  JSON files supply defaults;
         environment variables (ALASCUP_*) override them.
         """
-        from src.config.loader import load_llm_config, load_rules_config, load_servers_config
+        from src.config.loader import (
+            load_llm_config,
+            load_rules_config,
+            load_servers_config,
+        )
 
         llm = load_llm_config(config_dir / "llm.json")
         load_servers_config(config_dir / "servers.json")

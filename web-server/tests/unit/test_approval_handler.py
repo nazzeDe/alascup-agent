@@ -23,7 +23,9 @@ from src.models.tool import ApprovalStatus, ExecutionStatus
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _call(name: str = "", *, id: str = "", arguments: dict | None = None, **kwargs) -> AgentToolCall:
+def _call(
+    name: str = "", *, id: str = "", arguments: dict | None = None, **kwargs
+) -> AgentToolCall:
     return AgentToolCall(
         id=id,
         function=ToolFunction(name=name, arguments=arguments or {}),
@@ -35,25 +37,37 @@ def _calls(raw: list[dict]) -> list[AgentToolCall]:
     result = []
     for item in raw:
         fn = item.get("function", {})
-        result.append(_call(
-            fn.get("name", ""),
-            id=item.get("id", ""),
-            arguments=fn.get("arguments", {}),
-            **{k: v for k, v in item.items() if k not in {"function", "id"}},
-        ))
+        result.append(
+            _call(
+                fn.get("name", ""),
+                id=item.get("id", ""),
+                arguments=fn.get("arguments", {}),
+                **{k: v for k, v in item.items() if k not in {"function", "id"}},
+            )
+        )
     return result
 
 
-def _make_turn_ctx(chat_id: UUID | None = None, turn_id: UUID = None, iteration: int = 1, model: str = "test-model") -> TurnContext:
+def _make_turn_ctx(
+    chat_id: UUID | None = None,
+    turn_id: UUID = None,
+    iteration: int = 1,
+    model: str = "test-model",
+) -> TurnContext:
     if turn_id is None:
         turn_id = uuid4()
     if chat_id is None:
         chat_id = uuid4()
-    return TurnContext(chat_id=chat_id, turn_id=turn_id, iteration=iteration, model=model)
+    return TurnContext(
+        chat_id=chat_id, turn_id=turn_id, iteration=iteration, model=model
+    )
 
 
-async def _collect_approval_events(channel: EventChannel, timeout: float = 0.5) -> list[ApprovalRequired]:
+async def _collect_approval_events(
+    channel: EventChannel, timeout: float = 0.5
+) -> list[ApprovalRequired]:
     import asyncio as _asyncio
+
     events: list[ApprovalRequired] = []
     while True:
         try:
@@ -81,7 +95,12 @@ def _make_scratch(**overrides) -> TurnScratch:
         "transition": None,
     }
     defaults.update(overrides)
-    for key in ("pending_approval", "approved_tool_calls", "rejected_tool_calls", "tool_calls"):
+    for key in (
+        "pending_approval",
+        "approved_tool_calls",
+        "rejected_tool_calls",
+        "tool_calls",
+    ):
         defaults[key] = _calls(defaults[key])
     return TurnScratch(**defaults)
 
@@ -92,8 +111,10 @@ def _make_scratch(**overrides) -> TurnScratch:
 class TestApplyDecisions:
     def test_splits_approved_and_rejected(self):
         pending = [_call("get_cpu", id="1"), _call("rm_file", id="2")]
-        decisions = [{"status": "APPROVED", "reason": None},
-                     {"status": "REJECTED", "reason": "not needed"}]
+        decisions = [
+            {"status": "APPROVED", "reason": None},
+            {"status": "REJECTED", "reason": "not needed"},
+        ]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
         assert approved[0].id == "1"
@@ -104,7 +125,9 @@ class TestApplyDecisions:
 
     def test_missing_decisions_default_to_expired(self):
         pending = [_call("get_cpu", id="1"), _call("rm_file", id="2")]
-        decisions = [{"status": "APPROVED", "reason": None}]  # Only one decision for two tools
+        decisions = [
+            {"status": "APPROVED", "reason": None}
+        ]  # Only one decision for two tools
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 1
         assert approved[0].id == "1"
@@ -114,20 +137,33 @@ class TestApplyDecisions:
 
     def test_all_approved(self):
         pending = [_call("a", id="1"), _call("b", id="2")]
-        approved, rejected = _apply_decisions(pending, [
-            {"status": "APPROVED", "reason": None},
-            {"status": "APPROVED", "reason": None},
-        ])
+        approved, rejected = _apply_decisions(
+            pending,
+            [
+                {"status": "APPROVED", "reason": None},
+                {"status": "APPROVED", "reason": None},
+            ],
+        )
         assert len(approved) == 2
         assert len(rejected) == 0
 
     def test_all_expired_default(self):
         pending = [_call("a", id="1"), _call("b", id="2")]
-        decisions = [{"status": "EXPIRED", "reason": None},
-                     {"status": "EXPIRED", "reason": None}]
+        decisions = [
+            {"status": "EXPIRED", "reason": None},
+            {"status": "EXPIRED", "reason": None},
+        ]
         approved, rejected = _apply_decisions(pending, decisions)
         assert len(approved) == 0
         assert len(rejected) == 2
+
+    def test_malformed_decision_defaults_to_expired(self):
+        pending = [_call("a", id="1")]
+        approved, rejected = _apply_decisions(pending, [{"reason": "missing status"}])
+        assert approved == []
+        assert len(rejected) == 1
+        assert rejected[0].approval_status == "EXPIRED"
+        assert rejected[0].rejection_reason == "missing status"
 
 
 # ── _inject_rejection_messages ─────────────────────────────────────────────
@@ -219,7 +255,9 @@ class _MockAuditLogger:
 class _MockBridge:
     def __init__(self, decisions: list[str] | None = None):
         self.created: list[tuple] = []
-        self._decisions = [{"status": d, "reason": None} for d in (decisions or ["APPROVED"])]
+        self._decisions = [
+            {"status": d, "reason": None} for d in (decisions or ["APPROVED"])
+        ]
 
     def create(self, request_id: str, chat_id: str) -> None:
         self.created.append((request_id, chat_id))
@@ -236,28 +274,34 @@ class _MockLifecycle:
         self.updates.append({"chat_id": chat_id, "call_id": call_id, **kwargs})
 
     async def mark_approved(self, chat_id, call_id):
-        self.updates.append({
-            "chat_id": chat_id,
-            "call_id": call_id,
-            "approval_status": ApprovalStatus.APPROVED,
-            "execution_status": ExecutionStatus.RUNNING,
-        })
+        self.updates.append(
+            {
+                "chat_id": chat_id,
+                "call_id": call_id,
+                "approval_status": ApprovalStatus.APPROVED,
+                "execution_status": ExecutionStatus.RUNNING,
+            }
+        )
 
     async def mark_rejected(self, chat_id, call_id):
-        self.updates.append({
-            "chat_id": chat_id,
-            "call_id": call_id,
-            "approval_status": ApprovalStatus.REJECTED,
-            "execution_status": ExecutionStatus.FAILED,
-        })
+        self.updates.append(
+            {
+                "chat_id": chat_id,
+                "call_id": call_id,
+                "approval_status": ApprovalStatus.REJECTED,
+                "execution_status": ExecutionStatus.FAILED,
+            }
+        )
 
     async def mark_expired(self, chat_id, call_id):
-        self.updates.append({
-            "chat_id": chat_id,
-            "call_id": call_id,
-            "approval_status": ApprovalStatus.EXPIRED,
-            "execution_status": ExecutionStatus.FAILED,
-        })
+        self.updates.append(
+            {
+                "chat_id": chat_id,
+                "call_id": call_id,
+                "approval_status": ApprovalStatus.EXPIRED,
+                "execution_status": ExecutionStatus.FAILED,
+            }
+        )
 
 
 _MOCK_PROFILER = MagicMock()
@@ -298,7 +342,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -320,7 +367,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -345,7 +395,11 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "id": "tc-x", "request_id": "req-1"},
+                {
+                    "function": {"name": "rm_file", "arguments": "{}"},
+                    "id": "tc-x",
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -356,6 +410,55 @@ class TestApprovalHandlerResolve:
         assert len(scratch.rejected_tool_calls) == 1
         assert scratch.pending_approval == []
         assert scratch.transition == Transition.APPROVAL_REJECTED
+
+    @pytest.mark.asyncio
+    async def test_missing_bridge_expires_pending_tool(self):
+        handler = ApprovalHandler(
+            bridge=None,
+            audit_logger=_MockAuditLogger(),
+        )
+        scratch = _make_scratch(
+            pending_approval=[
+                {
+                    "function": {"name": "restart", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
+            ],
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=emitter)
+
+        assert scratch.approved_tool_calls == []
+        assert len(scratch.rejected_tool_calls) == 1
+        assert scratch.rejected_tool_calls[0].approval_status == "EXPIRED"
+        assert scratch.transition == Transition.APPROVAL_REJECTED
+
+    @pytest.mark.asyncio
+    async def test_rejected_approval_logs_rejected_transition(self):
+        audit = _MockAuditLogger()
+        handler = ApprovalHandler(
+            bridge=_MockBridge(decisions=["REJECTED"]),
+            audit_logger=audit,
+        )
+        scratch = _make_scratch(
+            pending_approval=[
+                {
+                    "function": {"name": "restart", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
+            ],
+        )
+
+        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=None)
+
+        transitions = [
+            event.transition
+            for event in audit.events
+            if event.event == "LOOP_TRANSITION"
+        ]
+        assert Transition.APPROVAL_REJECTED.value in transitions
 
     @pytest.mark.asyncio
     async def test_single_pass_approval_does_not_loop(self):
@@ -372,7 +475,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "tool_a", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "tool_a", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -398,7 +504,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -423,7 +532,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "rm_file", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -451,12 +563,18 @@ class TestApprovalHandlerResolve:
         call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                    "call_id": call_id,
+                },
             ],
         )
         channel = EventChannel()
         emitter = EventEmitter(channel)
-        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        await handler.resolve(
+            scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter
+        )
         channel.close()
 
         assert len(lifecycle.updates) == 1
@@ -479,12 +597,18 @@ class TestApprovalHandlerResolve:
         call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
+                {
+                    "function": {"name": "rm_file", "arguments": "{}"},
+                    "request_id": "req-1",
+                    "call_id": call_id,
+                },
             ],
         )
         channel = EventChannel()
         emitter = EventEmitter(channel)
-        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        await handler.resolve(
+            scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter
+        )
         channel.close()
 
         assert len(lifecycle.updates) == 1
@@ -507,12 +631,18 @@ class TestApprovalHandlerResolve:
         call_id = uuid4()
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "rm_file", "arguments": "{}"}, "request_id": "req-1", "call_id": call_id},
+                {
+                    "function": {"name": "rm_file", "arguments": "{}"},
+                    "request_id": "req-1",
+                    "call_id": call_id,
+                },
             ],
         )
         channel = EventChannel()
         emitter = EventEmitter(channel)
-        await handler.resolve(scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter)
+        await handler.resolve(
+            scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter
+        )
         channel.close()
 
         assert len(lifecycle.updates) == 1
@@ -532,7 +662,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -552,7 +685,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         channel = EventChannel()
@@ -571,7 +707,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         # TurnContext with None chat_id (not a real UUID)
@@ -592,7 +731,10 @@ class TestApprovalHandlerResolve:
         )
         scratch = _make_scratch(
             pending_approval=[
-                {"function": {"name": "get_cpu", "arguments": "{}"}, "request_id": "req-1"},
+                {
+                    "function": {"name": "get_cpu", "arguments": "{}"},
+                    "request_id": "req-1",
+                },
             ],
         )
         await handler.resolve(scratch, turn_ctx=_make_turn_ctx(), emitter=None)

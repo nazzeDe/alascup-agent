@@ -12,6 +12,7 @@ _ENV_TO_FIELD: dict[str, str] = {
     "TOOLSERVER_CACHE_TTL": "cache_ttl",
     "TOOLSERVER_BASH_TIMEOUT": "bash_timeout",
     "TOOLSERVER_HOST_EXEC": "host_exec",
+    "TOOLSERVER_HOST": "host",
     "TOOLSERVER_PORT": "port",
     "POSTGRES_DSN": "postgres_dsn",
     "TOOLSERVER_POSTGRES_STATEMENT_TIMEOUT_MS": "postgres_statement_timeout_ms",
@@ -22,10 +23,11 @@ _ENV_TO_FIELD: dict[str, str] = {
 class ToolServerConfig(BaseModel):
     proc_path: str = "/proc"
     log_dir: str = "/app/logs"
-    sandbox_root: str = "/tmp/tool-server-sandbox"
+    sandbox_root: str = "/app/sandbox"
     cache_ttl: int = 600
     bash_timeout: int = 30
     host_exec: str = "direct"
+    host: str = "127.0.0.1"
     port: int = 11451
     postgres_dsn: str | None = None
     postgres_statement_timeout_ms: int = 5000

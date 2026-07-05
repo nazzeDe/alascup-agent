@@ -33,7 +33,9 @@ from src.tools.runtime import get_tool_server_logs, get_tool_server_status
 _ANY_OBJECT: dict[str, Any] = {"type": "object"}
 
 
-def register_tool_catalog(server: FastMCP, config: ToolServerConfig, cache: ToolCache) -> None:
+def register_tool_catalog(
+    server: FastMCP, config: ToolServerConfig, cache: ToolCache
+) -> None:
     """Register tool-server tools on FastMCP without owning server lifecycle."""
     classify_fns: dict[str, Callable] = {}
 
@@ -271,14 +273,21 @@ def _register_health_tool(server: FastMCP) -> None:
                 "tool_count": {"type": "integer"},
             },
         },
-        meta={"is_read_only": True, "is_rollbackable": False, "mutable": False, "hidden": True},
+        meta={
+            "is_read_only": True,
+            "is_rollbackable": False,
+            "mutable": False,
+            "hidden": True,
+        },
     )
     async def health() -> dict:
         tools = await server.list_tools()
         return {"status": "healthy", "tool_count": len(tools)}
 
 
-def _register_classify_companions(server: FastMCP, classify_fns: dict[str, Callable]) -> None:
+def _register_classify_companions(
+    server: FastMCP, classify_fns: dict[str, Callable]
+) -> None:
     """Register hidden classification tools for mutable tools."""
     companion_factory: dict[str, Any] = {
         "bash": lambda fn: lambda command="": fn(command),

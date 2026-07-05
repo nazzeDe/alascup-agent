@@ -76,6 +76,24 @@ describe('ActiveSessionWorkspace', () => {
     expect(sessionListStore.sessions.value).toHaveLength(1)
   })
 
+  it('adopts a new chat into the originating store without polluting the active store', async () => {
+    sessionApi.sessions.set('chat-existing', {
+      chat_id: 'chat-existing',
+      messages: [{ message_id: 'm1', chat_id: 'chat-existing', timestamp: 't', type: 'user', content: 'old' }],
+      executed_tool_list: [],
+      timestamp: 't',
+    })
+    const originatingStore = workspace.activeChatStore.value
+
+    await workspace.select('chat-existing')
+    workspace.adoptServerSession('chat-new', 'first prompt', originatingStore)
+
+    expect(originatingStore.chatId.value).toBe('chat-new')
+    expect(workspace.activeChatStore.value.chatId.value).toBe('chat-existing')
+    expect(sessionListStore.activeChatId.value).toBe('chat-existing')
+    expect(sessionListStore.sessions.value.some(s => s.chat_id === 'chat-new')).toBe(true)
+  })
+
   it('deleting the active session leaves a fresh empty store', async () => {
     sessionListStore.setSessions([{ chat_id: 'chat-1', messages: [], executed_tool_list: [], timestamp: 't' }])
     sessionListStore.setActive('chat-1')

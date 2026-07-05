@@ -17,11 +17,12 @@ class AuditActor(StrEnum):
 
     Stored in audit_events.actor VARCHAR(32).
     """
-    USER = "user"         # User sent a message → USER_MESSAGE transition
-    AGENT = "agent"       # LLM/agent loop routing decisions (DONE, TOOL_RESULTS)
-    TOOL = "tool"         # Tool execution events (TOOL_EXECUTED)
-    POLICY = "policy"     # Rule engine / review decisions (approvals, rejections)
-    SYSTEM = "system"     # Infrastructure: context compaction, token limits, errors
+
+    USER = "user"  # User sent a message → USER_MESSAGE transition
+    AGENT = "agent"  # LLM/agent loop routing decisions (DONE, TOOL_RESULTS)
+    TOOL = "tool"  # Tool execution events (TOOL_EXECUTED)
+    POLICY = "policy"  # Rule engine / review decisions (approvals, rejections)
+    SYSTEM = "system"  # Infrastructure: context compaction, token limits, errors
 
 
 class AuditEvent(BaseModel):
@@ -36,6 +37,7 @@ class AuditEvent(BaseModel):
     Relationship:
       request_id — links to tool_calls.request_id (populated for tool events)
     """
+
     timestamp: str
     chat_id: UUID | None = None
     request_id: UUID | None = None

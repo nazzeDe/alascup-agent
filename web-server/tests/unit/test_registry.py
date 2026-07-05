@@ -5,11 +5,23 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _make_tool(name, description="", mutable=False, is_read_only=False, is_rollbackable=False, hidden=False):
+def _make_tool(
+    name,
+    description="",
+    mutable=False,
+    is_read_only=False,
+    is_rollbackable=False,
+    hidden=False,
+):
     t = MagicMock()
     t.name = name
     t.description = description
-    t.meta = {"mutable": mutable, "is_read_only": is_read_only, "is_rollbackable": is_rollbackable, "hidden": hidden}
+    t.meta = {
+        "mutable": mutable,
+        "is_read_only": is_read_only,
+        "is_rollbackable": is_rollbackable,
+        "hidden": hidden,
+    }
     return t
 
 
@@ -26,18 +38,22 @@ class TestServerRegistryUrlFor:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
         assert registry.url_for("tool-server") == "http://tool:8001"
 
     def test_raises_keyerror_for_unknown_server(self):
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
         with pytest.raises(KeyError):
             registry.url_for("unknown")
 
@@ -48,14 +64,20 @@ class TestServerRegistryDiscover:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        tool_client = _make_client([
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-            _make_tool("bash_classify", mutable=False, is_read_only=True, hidden=True),
-        ])
+        tool_client = _make_client(
+            [
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+                _make_tool(
+                    "bash_classify", mutable=False, is_read_only=True, hidden=True
+                ),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with patch("src.mcp_client.registry.Client") as MockClient:
             MockClient.side_effect = [tool_client]
@@ -71,13 +93,22 @@ class TestServerRegistryDiscover:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        client = _make_client([
-            _make_tool("get_cpu_info", description="Read CPU info", mutable=False, is_read_only=True),
-        ])
+        client = _make_client(
+            [
+                _make_tool(
+                    "get_cpu_info",
+                    description="Read CPU info",
+                    mutable=False,
+                    is_read_only=True,
+                ),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with patch("src.mcp_client.registry.Client") as MockClient:
             MockClient.return_value = client
@@ -94,14 +125,18 @@ class TestServerRegistryDiscover:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        good_client = _make_client([
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-        ])
+        good_client = _make_client(
+            [
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-            ServerEntry(name="offline-server", url="http://offline:9999"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+                ServerEntry(name="offline-server", url="http://offline:9999"),
+            ]
+        )
 
         def _factory(url):
             if "offline" in url:
@@ -120,15 +155,21 @@ class TestServerRegistryDiscover:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        client = _make_client([
-            _make_tool("bash_classify", mutable=False, is_read_only=True, hidden=True),
-            _make_tool("bash", mutable=True),
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-        ])
+        client = _make_client(
+            [
+                _make_tool(
+                    "bash_classify", mutable=False, is_read_only=True, hidden=True
+                ),
+                _make_tool("bash", mutable=True),
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with patch("src.mcp_client.registry.Client") as MockClient:
             MockClient.return_value = client
@@ -146,17 +187,23 @@ class TestServerRegistryRefresh:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        initial = _make_client([
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-        ])
-        updated = _make_client([
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-            _make_tool("get_memory_info", mutable=False, is_read_only=True),
-        ])
+        initial = _make_client(
+            [
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+            ]
+        )
+        updated = _make_client(
+            [
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+                _make_tool("get_memory_info", mutable=False, is_read_only=True),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with patch("src.mcp_client.registry.Client") as MockClient:
             MockClient.side_effect = [initial]
@@ -172,9 +219,11 @@ class TestServerRegistryRefresh:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with pytest.raises(KeyError):
             await registry.refresh("unknown")
@@ -186,13 +235,17 @@ class TestServerRegistryListTools:
         from src.config.models import ServerEntry
         from src.mcp_client.registry import ServerRegistry
 
-        client = _make_client([
-            _make_tool("get_cpu_info", mutable=False, is_read_only=True),
-        ])
+        client = _make_client(
+            [
+                _make_tool("get_cpu_info", mutable=False, is_read_only=True),
+            ]
+        )
 
-        registry = ServerRegistry([
-            ServerEntry(name="tool-server", url="http://tool:8001"),
-        ])
+        registry = ServerRegistry(
+            [
+                ServerEntry(name="tool-server", url="http://tool:8001"),
+            ]
+        )
 
         with patch("src.mcp_client.registry.Client") as MockClient:
             MockClient.return_value = client

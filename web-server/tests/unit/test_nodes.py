@@ -7,7 +7,6 @@ from src.agent.nodes import (
     observe_node,
     think_node,
     _messages,
-    _merge_tool_block,
 )
 from src.agent.domain import AgentToolCall, AgentToolResult, ToolFunction
 from src.agent.state import AgentState, Transition
@@ -15,10 +14,14 @@ from src.agent.turn_context import TurnContext
 
 
 def _call(name: str, arguments: dict | None = None, **kwargs) -> AgentToolCall:
-    return AgentToolCall(function=ToolFunction(name=name, arguments=arguments or {}), **kwargs)
+    return AgentToolCall(
+        function=ToolFunction(name=name, arguments=arguments or {}), **kwargs
+    )
 
 
-def _result(tool_name: str, result: dict, tool_call_id: str = "", **kwargs) -> AgentToolResult:
+def _result(
+    tool_name: str, result: dict, tool_call_id: str = "", **kwargs
+) -> AgentToolResult:
     return AgentToolResult(
         tool_name=tool_name,
         tool_call_id=tool_call_id,
@@ -45,10 +48,15 @@ def _state():
 class TestThinkNode:
     async def test_text_only_returns_done(self):
         """LLM 只产出文本，无 tool_call → transition=DONE。"""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "CPU 45%, normal."})},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "assistant",
+                    "data": json.dumps({"delta": "CPU 45%, normal."}),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert result.is_done is True
@@ -58,11 +66,13 @@ class TestThinkNode:
 
     async def test_text_accumulates_multiple_deltas(self):
         """多个 text delta 拼接成完整 assistant 消息。"""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
-            {"event": "assistant", "data": json.dumps({"delta": "World"})},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
+                {"event": "assistant", "data": json.dumps({"delta": "World"})},
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert result.assistant_message.content == "Hello World"
@@ -70,12 +80,22 @@ class TestThinkNode:
 
     async def test_tool_call_only_no_text(self):
         """LLM 只产出 tool_call，无文本 → 返回 tool_calls 列表。"""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_cpu", "arguments": '{"unit":"percent"}'}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "get_cpu",
+                                "arguments": '{"unit":"percent"}',
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert result.is_done is False  # 不设 transition——由后续节点决定
@@ -84,13 +104,18 @@ class TestThinkNode:
 
     async def test_text_and_tool_calls_combined(self):
         """LLM 先输出文本，再调工具 → 文本和 tool_calls 同时返回。"""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "Let me check."})},
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_disk", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {"event": "assistant", "data": json.dumps({"delta": "Let me check."})},
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {"function": {"name": "get_disk", "arguments": "{}"}}
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert result.assistant_message.role == "assistant"
@@ -100,15 +125,23 @@ class TestThinkNode:
 
     async def test_multiple_tool_calls_accumulated(self):
         """多个 tool_call 都被收集，顺序保留。"""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_cpu", "arguments": "{}"}
-            })},
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "get_memory", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {"function": {"name": "get_cpu", "arguments": "{}"}}
+                    ),
+                },
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {"function": {"name": "get_memory", "arguments": "{}"}}
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert len(result.tool_calls) == 2
@@ -117,15 +150,21 @@ class TestThinkNode:
 
     async def test_streaming_tool_use_chunks_are_merged(self):
         """tool_call 可能分多个 chunk 到达（name 先到，arguments 后到）。"""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "bash", "arguments": ""}
-            })},
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "", "arguments": '{"cmd":"ls"}'}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps({"function": {"name": "bash", "arguments": ""}}),
+                },
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {"function": {"name": "", "arguments": '{"cmd":"ls"}'}}
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
 
         assert len(result.tool_calls) == 1
@@ -145,6 +184,7 @@ class MockExecutor:
 
     async def execute_parallel(self, calls: list[dict]) -> list[dict]:
         import asyncio
+
         tasks = [self.execute(c["tool_name"], c.get("arguments", {})) for c in calls]
         return await asyncio.gather(*tasks)
 
@@ -172,10 +212,12 @@ class TestActNode:
 
     async def test_executes_approved_tool_calls(self):
         executor = MockExecutor()
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": '{"unit":"percent"}'}},
-            {"function": {"name": "get_memory", "arguments": "{}"}},
-        ])
+        state = _state_with_tools(
+            [
+                {"function": {"name": "get_cpu", "arguments": '{"unit":"percent"}'}},
+                {"function": {"name": "get_memory", "arguments": "{}"}},
+            ]
+        )
         result = await act_node(state, executor=executor)
 
         assert len(executor.calls) == 2
@@ -196,10 +238,12 @@ class TestActNode:
                 call_args.extend(calls)
                 return [{"execution_status": "SUCCEEDED"} for _ in calls]
 
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
-            {"function": {"name": "get_memory", "arguments": "{}"}},
-        ])
+        state = _state_with_tools(
+            [
+                {"function": {"name": "get_cpu", "arguments": "{}"}},
+                {"function": {"name": "get_memory", "arguments": "{}"}},
+            ]
+        )
         result = await act_node(state, executor=_SpyExecutor())
 
         assert parallel_called
@@ -217,12 +261,19 @@ class TestActNode:
 
     async def test_execution_failure_recorded(self):
         """工具执行失败 → 结果中包含失败信息，不抛异常。"""
-        executor = MockExecutor({
-            "bad_tool": {"execution_status": "FAILED", "error": {"message": "permission denied"}},
-        })
-        state = _state_with_tools([
-            {"function": {"name": "bad_tool", "arguments": "{}"}},
-        ])
+        executor = MockExecutor(
+            {
+                "bad_tool": {
+                    "execution_status": "FAILED",
+                    "error": {"message": "permission denied"},
+                },
+            }
+        )
+        state = _state_with_tools(
+            [
+                {"function": {"name": "bad_tool", "arguments": "{}"}},
+            ]
+        )
         result = await act_node(state, executor=executor)
 
         assert result.results[0].result["execution_status"] == "FAILED"
@@ -230,9 +281,11 @@ class TestActNode:
 
     async def test_tool_results_include_tool_name(self):
         executor = MockExecutor()
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
-        ])
+        state = _state_with_tools(
+            [
+                {"function": {"name": "get_cpu", "arguments": "{}"}},
+            ]
+        )
         result = await act_node(state, executor=executor)
 
         assert result.results[0].tool_name == "get_cpu"
@@ -240,9 +293,11 @@ class TestActNode:
     async def test_no_fake_execution_time_per_tool(self):
         """act_node does not fabricate per-tool execution_time_ms for parallel batch."""
         executor = MockExecutor()
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": "{}"}},
-        ])
+        state = _state_with_tools(
+            [
+                {"function": {"name": "get_cpu", "arguments": "{}"}},
+            ]
+        )
         result = await act_node(state, executor=executor)
 
         et = result.results[0].result.get("execution_time_ms")
@@ -252,18 +307,23 @@ class TestActNode:
         """act_node passes result output to lifecycle execution transition."""
         from unittest.mock import AsyncMock, MagicMock
 
-        executor = MockExecutor({
-            "get_cpu": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
-        })
+        executor = MockExecutor(
+            {
+                "get_cpu": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+            }
+        )
         lifecycle = MagicMock()
         lifecycle.mark_executed = AsyncMock()
 
-        state = _state_with_tools([
-            {"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": uuid4()},
-        ])
+        tool_call = {
+            "function": {"name": "get_cpu", "arguments": "{}"},
+            "call_id": uuid4(),
+        }
+        state = _state_with_tools([tool_call])
         await act_node(state, executor=executor, lifecycle=lifecycle)
 
         lifecycle.mark_executed.assert_called_once()
+        assert lifecycle.mark_executed.call_args.args[1] == tool_call["call_id"]
         assert lifecycle.mark_executed.call_args.args[2]["output"] == "CPU: 45%"
 
 
@@ -275,16 +335,33 @@ class TestStreamingThink:
 
     async def test_dispatches_readonly_tools_inline(self):
         """Safe-pool (non-mutable, readonly) → pre-executed, streaming_tool_results."""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__get_cpu", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__get_cpu",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         executor = MockExecutor()
-        state = self._state_with_tools([
-            {"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True},
-        ])
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "get_cpu",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": True,
+                },
+            ]
+        )
 
         result = await think_node(state, llm=llm, executor=executor)
 
@@ -294,16 +371,33 @@ class TestStreamingThink:
 
     async def test_non_readonly_stays_in_tool_calls(self):
         """Approval-pool (non-mutable, not readonly) → stays in tool_calls."""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__restart_service", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__restart_service",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         executor = MockExecutor()
-        state = self._state_with_tools([
-            {"name": "restart_service", "server_name": "tool-server", "mutable": False, "is_read_only": False},
-        ])
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "restart_service",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": False,
+                },
+            ]
+        )
 
         result = await think_node(state, llm=llm, executor=executor)
 
@@ -313,20 +407,50 @@ class TestStreamingThink:
 
     async def test_mixed_readonly_and_highrisk(self):
         """Mixed: readonly pre-executed, write stays in tool_calls."""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__get_cpu", "arguments": "{}"}
-            })},
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__restart_service", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__get_cpu",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__restart_service",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         executor = MockExecutor()
-        state = self._state_with_tools([
-            {"name": "get_cpu", "server_name": "tool-server", "mutable": False, "is_read_only": True},
-            {"name": "restart_service", "server_name": "tool-server", "mutable": False, "is_read_only": False},
-        ])
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "get_cpu",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": True,
+                },
+                {
+                    "name": "restart_service",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": False,
+                },
+            ]
+        )
 
         result = await think_node(state, llm=llm, executor=executor)
 
@@ -337,16 +461,33 @@ class TestStreamingThink:
 
     async def test_mutable_tool_stays_pending(self):
         """Mutable pool — not pre-executed, stays in tool_calls for review_node classification."""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__bash", "arguments": '{"cmd":"ls"}'}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__bash",
+                                "arguments": '{"cmd":"ls"}',
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         executor = MockExecutor()
-        state = self._state_with_tools([
-            {"name": "bash", "server_name": "tool-server", "mutable": True, "is_read_only": False},
-        ])
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "bash",
+                    "server_name": "tool-server",
+                    "mutable": True,
+                    "is_read_only": False,
+                },
+            ]
+        )
 
         result = await think_node(state, llm=llm, executor=executor)
 
@@ -359,16 +500,33 @@ class TestStreamingThink:
 
     async def test_prefix_parsing_attaches_server_name(self):
         """Server prefix is parsed once and attached to the tool_call dict (Q24)."""
-        llm = MockLLM([
-            {"event": "tool_call", "data": json.dumps({
-                "function": {"name": "tool-server__get_cpu_info", "arguments": "{}"}
-            })},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__get_cpu_info",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         executor = MockExecutor()
-        state = self._state_with_tools([
-            {"name": "get_cpu_info", "server_name": "tool-server", "mutable": False, "is_read_only": True},
-        ])
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "get_cpu_info",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": True,
+                },
+            ]
+        )
 
         result = await think_node(state, llm=llm, executor=executor)
 
@@ -382,10 +540,19 @@ class TestObserveNode:
 
     def test_appends_tool_results_as_messages(self):
         state = _state_with_tools()
-        result = observe_node(state, tool_results=[
-            {"tool_name": "get_cpu", "result": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"}},
-            {"tool_name": "get_memory", "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"}},
-        ])
+        result = observe_node(
+            state,
+            tool_results=[
+                {
+                    "tool_name": "get_cpu",
+                    "result": {"execution_status": "SUCCEEDED", "output": "CPU: 45%"},
+                },
+                {
+                    "tool_name": "get_memory",
+                    "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"},
+                },
+            ],
+        )
 
         assert len(result.tool_messages) == 2
         assert result.tool_messages[0].role == "tool"
@@ -406,9 +573,15 @@ class TestObserveNode:
             _result("get_cpu", {"execution_status": "SUCCEEDED", "output": "CPU: 45%"})
         ]
 
-        result = observe_node(state, tool_results=[
-            {"tool_name": "get_memory", "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"}},
-        ])
+        result = observe_node(
+            state,
+            tool_results=[
+                {
+                    "tool_name": "get_memory",
+                    "result": {"execution_status": "SUCCEEDED", "output": "Mem: 8G"},
+                },
+            ],
+        )
 
         assert len(result.tool_messages) == 2
         assert result.transition == Transition.TOOL_RESULTS
@@ -420,9 +593,16 @@ class TestObserveNode:
             _result("get_cpu", {"execution_status": "SUCCEEDED"}, tool_call_id="t1")
         ]
 
-        result = observe_node(state, tool_results=[
-            {"tool_name": "get_mem", "tool_call_id": "t2", "result": {"execution_status": "SUCCEEDED"}},
-        ])
+        result = observe_node(
+            state,
+            tool_results=[
+                {
+                    "tool_name": "get_mem",
+                    "tool_call_id": "t2",
+                    "result": {"execution_status": "SUCCEEDED"},
+                },
+            ],
+        )
 
         assert len(result.emitted_results) == 2
 
@@ -434,8 +614,16 @@ class TestMessagesConversion:
         """Assistant messages must carry tool_calls for the LLM to accept tool responses."""
         state = AgentState(
             messages=[
-                {"role": "assistant", "content": "Let me check.",
-                 "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
+                {
+                    "role": "assistant",
+                    "content": "Let me check.",
+                    "tool_calls": [
+                        {
+                            "id": "tc1",
+                            "function": {"name": "get_cpu", "arguments": "{}"},
+                        }
+                    ],
+                },
             ]
         )
         result = _messages(state)
@@ -448,23 +636,38 @@ class TestMessagesConversion:
         """Tool calls without type=function get normalized (DeepSeek/OpenAI API requirement)."""
         state = AgentState(
             messages=[
-                {"role": "assistant", "content": "Let me check.",
-                 "tool_calls": [
-                     {"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}},
-                     {"id": "tc2", "function": {"name": "get_mem", "arguments": "{}"}},
-                 ]},
+                {
+                    "role": "assistant",
+                    "content": "Let me check.",
+                    "tool_calls": [
+                        {
+                            "id": "tc1",
+                            "function": {"name": "get_cpu", "arguments": "{}"},
+                        },
+                        {
+                            "id": "tc2",
+                            "function": {"name": "get_mem", "arguments": "{}"},
+                        },
+                    ],
+                },
             ]
         )
         result = _messages(state)
         tcs = result[0]["tool_calls"]
         for tc in tcs:
-            assert tc["type"] == "function", f"tool_call {tc['id']} missing type=function"
+            assert tc["type"] == "function", (
+                f"tool_call {tc['id']} missing type=function"
+            )
 
     def test_preserves_tool_call_id_on_tool(self):
         """Tool messages must carry tool_call_id for the LLM to associate with tool_calls."""
         state = AgentState(
             messages=[
-                {"role": "tool", "content": "[get_cpu] SUCCEEDED", "tool_call_id": "tc1"},
+                {
+                    "role": "tool",
+                    "content": "[get_cpu] SUCCEEDED",
+                    "tool_call_id": "tc1",
+                },
             ]
         )
         result = _messages(state)
@@ -476,8 +679,12 @@ class TestMessagesConversion:
         """Tool messages must carry name — DeepSeek requires this field."""
         state = AgentState(
             messages=[
-                {"role": "tool", "content": "[get_cpu] SUCCEEDED",
-                 "tool_call_id": "tc1", "name": "get_cpu"},
+                {
+                    "role": "tool",
+                    "content": "[get_cpu] SUCCEEDED",
+                    "tool_call_id": "tc1",
+                    "name": "get_cpu",
+                },
             ]
         )
         result = _messages(state)
@@ -499,10 +706,16 @@ class TestMessagesConversion:
 
     def test_maps_tool_result_to_tool(self):
         """tool_result role (from DB history) → tool for LLM API."""
-        state = AgentState(messages=[
-            {"role": "tool_result", "content": "[get_cpu] SUCCEEDED",
-             "tool_call_id": "tc1", "name": "get_cpu"},
-        ])
+        state = AgentState(
+            messages=[
+                {
+                    "role": "tool_result",
+                    "content": "[get_cpu] SUCCEEDED",
+                    "tool_call_id": "tc1",
+                    "name": "get_cpu",
+                },
+            ]
+        )
         result = _messages(state)
         assert result[0]["role"] == "tool"
         assert result[0]["tool_call_id"] == "tc1"
@@ -510,56 +723,23 @@ class TestMessagesConversion:
 
     def test_maps_tool_call_to_assistant(self):
         """tool_call role → assistant for LLM API."""
-        state = AgentState(messages=[
-            {"role": "tool_call", "content": "",
-             "tool_calls": [{"id": "tc1", "function": {"name": "get_cpu", "arguments": "{}"}}]},
-        ])
+        state = AgentState(
+            messages=[
+                {
+                    "role": "tool_call",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "tc1",
+                            "function": {"name": "get_cpu", "arguments": "{}"},
+                        }
+                    ],
+                },
+            ]
+        )
         result = _messages(state)
         assert result[0]["role"] == "assistant"
         assert "tool_calls" in result[0]
-
-
-class TestMergeToolBlock:
-    """Verify _merge_tool_block sets required fields."""
-
-    def test_new_block_has_id(self):
-        """First chunk (with name) must create a block with a valid id."""
-        blocks = []
-        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert blocks[0].id != ""
-
-    def test_chunk_with_id_preserves_it(self):
-        """If the chunk carries an id, it should be used."""
-        blocks = []
-        chunk = {"id": "explicit-id", "function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert blocks[0].id == "explicit-id"
-
-    def test_arguments_only_chunk_appends(self):
-        """Arguments-only chunk appends to the last block without creating a new one."""
-        blocks = [_call("get_cpu", {"_raw": '{"unit":'}, id="t1")]
-        chunk = {"function": {"arguments": '"percent"}'}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert blocks[0].function.arguments == {"unit": "percent"}
-
-    def test_new_block_has_type_function(self):
-        """Every tool_call block must have type=function (DeepSeek/OpenAI API requirement)."""
-        blocks = []
-        chunk = {"function": {"name": "get_cpu", "arguments": "{}"}}
-        _merge_tool_block(blocks, chunk)
-        assert blocks[0].function.name == "get_cpu"
-
-    def test_arguments_only_block_has_type_function(self):
-        """Arguments-only chunk that creates a new block must also have type=function."""
-        blocks = []
-        chunk = {"function": {"name": "", "arguments": '{"cmd":"ls"}'}}
-        _merge_tool_block(blocks, chunk)
-        assert len(blocks) == 1
-        assert blocks[0].function.name == ""
-        assert blocks[0].function.arguments == {"cmd": "ls"}
 
 
 class TestReasoningStreaming:
@@ -567,12 +747,26 @@ class TestReasoningStreaming:
 
     async def test_streams_reasoning_to_queue(self):
         """reasoning_content in assistant events → captured in ThinkOutput.stream_chunks."""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "Let me", "reasoning_content": "Let me"})},
-            {"event": "assistant", "data": json.dumps({"delta": " check", "reasoning_content": " check"})},
-            {"event": "done", "data": "{}"},
-        ])
-        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
+        llm = MockLLM(
+            [
+                {
+                    "event": "assistant",
+                    "data": json.dumps(
+                        {"delta": "Let me", "reasoning_content": "Let me"}
+                    ),
+                },
+                {
+                    "event": "assistant",
+                    "data": json.dumps(
+                        {"delta": " check", "reasoning_content": " check"}
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
+        ctx = TurnContext(
+            chat_id=None, turn_id=uuid4(), iteration=1, model="test-model"
+        )
 
         result = await think_node(_state(), ctx, llm=llm)
 
@@ -584,22 +778,31 @@ class TestReasoningStreaming:
 
     async def test_no_queue_no_crash(self):
         """When ctx is None, reasoning still works."""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "OK", "reasoning_content": "think"})},
-            {"event": "done", "data": "{}"},
-        ])
+        llm = MockLLM(
+            [
+                {
+                    "event": "assistant",
+                    "data": json.dumps({"delta": "OK", "reasoning_content": "think"}),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
         result = await think_node(_state(), llm=llm)
         assert result.assistant_message.reasoning_content == "think"
         assert result.is_done is True
 
     async def test_content_streamed_to_queue_without_message_id(self):
         """Content chunks are captured in ThinkOutput.stream_chunks as AssistantDelta-type tuples."""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
-            {"event": "assistant", "data": json.dumps({"delta": "world"})},
-            {"event": "done", "data": "{}"},
-        ])
-        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
+        llm = MockLLM(
+            [
+                {"event": "assistant", "data": json.dumps({"delta": "Hello "})},
+                {"event": "assistant", "data": json.dumps({"delta": "world"})},
+                {"event": "done", "data": "{}"},
+            ]
+        )
+        ctx = TurnContext(
+            chat_id=None, turn_id=uuid4(), iteration=1, model="test-model"
+        )
 
         result = await think_node(_state(), ctx, llm=llm)
 
@@ -610,11 +813,15 @@ class TestReasoningStreaming:
 
     async def test_no_reasoning_no_queue_events(self):
         """When there's no reasoning_content, only content chunk captured in stream_chunks."""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "CPU normal."})},
-            {"event": "done", "data": "{}"},
-        ])
-        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
+        llm = MockLLM(
+            [
+                {"event": "assistant", "data": json.dumps({"delta": "CPU normal."})},
+                {"event": "done", "data": "{}"},
+            ]
+        )
+        ctx = TurnContext(
+            chat_id=None, turn_id=uuid4(), iteration=1, model="test-model"
+        )
 
         result = await think_node(_state(), ctx, llm=llm)
 
@@ -624,11 +831,20 @@ class TestReasoningStreaming:
 
     async def test_reasoning_streamed_directly(self):
         """think_node captures streaming content in ThinkOutput."""
-        llm = MockLLM([
-            {"event": "assistant", "data": json.dumps({"delta": "Hello", "reasoning_content": "thinking"})},
-            {"event": "done", "data": "{}"},
-        ])
-        ctx = TurnContext(chat_id=None, turn_id=uuid4(), iteration=1, model="test-model")
+        llm = MockLLM(
+            [
+                {
+                    "event": "assistant",
+                    "data": json.dumps(
+                        {"delta": "Hello", "reasoning_content": "thinking"}
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
+        ctx = TurnContext(
+            chat_id=None, turn_id=uuid4(), iteration=1, model="test-model"
+        )
 
         result = await think_node(_state(), ctx, llm=llm)
 

@@ -134,9 +134,7 @@ class TestChatTurnSSE:
     @pytest.mark.asyncio
     async def test_chat_turn_returns_sse(self, client):
         url = "/api/chat"
-        async with client.stream(
-            "POST", url, json={"message": "hello"}
-        ) as response:
+        async with client.stream("POST", url, json={"message": "hello"}) as response:
             assert response.status_code == 200
             assert "text/event-stream" in response.headers.get("content-type", "")
 
@@ -202,7 +200,9 @@ class TestChatTurnSSEIntegration:
                 if line.startswith("event: "):
                     last_event = line.split(": ", 1)[1]
 
-        assert last_event == "done", f"Last SSE event must be 'done', got '{last_event}'"
+        assert last_event == "done", (
+            f"Last SSE event must be 'done', got '{last_event}'"
+        )
 
     @pytest.mark.asyncio
     async def test_no_x_session_id_header(self, client):
@@ -254,7 +254,11 @@ class TestSessionLifecycle:
                     event_type = line.split(": ", 1)[1]
                     if event_type == "session_init" and first_event is None:
                         first_event = event_type
-                if line.startswith("data: ") and first_event == "session_init" and data_line is None:
+                if (
+                    line.startswith("data: ")
+                    and first_event == "session_init"
+                    and data_line is None
+                ):
                     data_line = line[6:]
                 if line == "event: done":
                     break

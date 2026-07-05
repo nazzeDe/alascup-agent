@@ -170,16 +170,18 @@ describe('useChat', () => {
     expect(chatStore.agentPhase.value).toBe('responding')
   })
 
-  it('assistant appends to buffer without creating message', () => {
+  it('assistant streams into an active assistant message', () => {
     const { getChat } = mountUseChat(fakeSse, chatStore, sessionListStore)
     chatStore.chatId.value = 'c1'
     getChat().send('tell me')
     fakeSse.emit({ type: 'assistant', data: { delta: 'He' } })
     fakeSse.emit({ type: 'assistant', data: { delta: 'llo' } })
-    expect(chatStore.messages.value.filter(m => m.type === 'assistant')).toHaveLength(0)
+    const msgs = chatStore.messages.value.filter(m => m.type === 'assistant')
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]!.content).toBe('Hello')
   })
 
-  it('assistant_done creates assistant message from buffer', () => {
+  it('assistant_done closes the active assistant message', () => {
     const { getChat } = mountUseChat(fakeSse, chatStore, sessionListStore)
     chatStore.chatId.value = 'c1'
     getChat().send('hey')

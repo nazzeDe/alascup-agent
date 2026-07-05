@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["execution_status"],
   "properties": {
-    "execution_status": {"type": "string", "enum": ["PENDING_APPROVAL", "RUNNING", "SUCCEEDED", "FAILED", "SECURITY_VIOLATION"]},
+    "execution_status": {"type": "string", "enum": ["SUCCEEDED", "FAILED", "REJECTED"]},
     "backup_ref": {"type": ["string", "null"]},
     "output": {"type": ["object", "array", "string", "number", "boolean", "null"]},
     "error": {"type": ["object", "null"]},

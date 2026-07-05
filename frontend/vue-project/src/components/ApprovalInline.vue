@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import type { ApprovalEvent } from '@/domain/models'
 
 const props = defineProps<{
@@ -12,21 +12,29 @@ const emit = defineEmits<{
 }>()
 
 const message = ref(props.event.message)
-const is_processing = ref(false)
 
-async function approve() {
-  is_processing.value = true
+watch(
+  () => props.event.request_id,
+  () => {
+    message.value = props.event.message
+  },
+)
+
+function approve() {
   emit('approve', props.event.request_id, message.value)
 }
 
-async function reject() {
-  is_processing.value = true
+function reject() {
   emit('reject', props.event.request_id, message.value)
 }
 </script>
 
 <template>
-  <div class="approval-inline my-2 p-2 border rounded bg-warning-subtle" :class="{ 'opacity-50': event.status !== 'pending' }">
+  <div
+    class="approval-inline my-2 p-2 border rounded bg-warning-subtle"
+    data-testid="approval-inline"
+    :class="{ 'opacity-50': event.status !== 'pending' }"
+  >
     <div class="d-flex align-items-center gap-2 mb-2">
       <span v-if="event.status === 'pending'" class="badge bg-warning text-dark">Awaiting Approval</span>
       <span v-else-if="event.status === 'approved'" class="badge bg-success">Approved</span>
@@ -46,19 +54,19 @@ async function reject() {
         v-model="message"
         type="text"
         class="form-control form-control-sm"
+        data-testid="approval-reason-input"
         placeholder="Message (optional)"
-        :disabled="is_processing"
       />
       <button
         class="btn btn-sm btn-success"
-        :disabled="is_processing"
+        data-testid="approval-approve-button"
         @click="approve"
       >
         Approve
       </button>
       <button
         class="btn btn-sm btn-danger"
-        :disabled="is_processing"
+        data-testid="approval-reject-button"
         @click="reject"
       >
         Reject

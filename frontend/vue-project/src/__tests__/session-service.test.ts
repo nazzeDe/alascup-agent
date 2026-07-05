@@ -158,6 +158,30 @@ describe('SessionService', () => {
     expect(chatStore.agentPhase.value).toBe('idle')
   })
 
+  it('normalizes rejected approval history from failed execution rows', async () => {
+    sessionApi.addSession({
+      chat_id: 's1',
+      messages: [],
+      executed_tool_list: [
+        {
+          call_id: 'tc-rejected',
+          chat_id: 's1',
+          tool_name: 'bash',
+          is_read_only: false,
+          approval_status: 'REJECTED',
+          execution_status: 'FAILED',
+          error: { message: 'Tool was rejected by human. Do NOT retry.' },
+          timestamp: 't3',
+        },
+      ],
+      timestamp: 't1',
+    })
+
+    await service.loadHistory('s1', chatStore)
+
+    expect(chatStore.toolCalls.value.get('tc-rejected')!.execution_status).toBe('REJECTED')
+  })
+
   // --- 7. deleteSession removes from store, clears active if matching ---
   it('deleteSession removes from store, clears active if matching', async () => {
     sessionListStore.setSessions([
@@ -204,6 +228,32 @@ describe('SessionService', () => {
     expect(approvalApi.lastReason).toBe('go ahead')
     expect(chatStore.approvalEvent.value!.status).toBe('approved')
     expect(chatStore.agentPhase.value).toBe('thinking')
+  })
+
+  it('ignores duplicate in-flight approval submissions for the same request', async () => {
+    let resolveApproval!: () => void
+    let calls = 0
+    approvalApi.approve = async () => {
+      calls += 1
+      await new Promise<void>(resolve => { resolveApproval = resolve })
+    }
+    chatStore.setApprovalEvent({
+      request_id: 'req-1',
+      tool_name: 'bash',
+      params: {},
+      reason: 'needs approval',
+      status: 'pending',
+      message: '',
+    })
+
+    const first = service.approve('req-1', chatStore, 'go')
+    const second = service.approve('req-1', chatStore, 'go')
+    resolveApproval()
+    await Promise.all([first, second])
+
+    expect(calls).toBe(1)
+    expect(chatStore.connectionError.value).toBeNull()
+    expect(chatStore.approvalEvent.value!.status).toBe('approved')
   })
 
   // --- 9. reject sends correct body, updates chatStore.approvalEvent ---

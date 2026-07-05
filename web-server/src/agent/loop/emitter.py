@@ -22,6 +22,7 @@ class EventEmitter:
 
     def __init__(self, channel: EventChannel):
         self._channel = channel
+        self._started_call_ids: set[str] = set()
 
     # ── Streaming (from think_node) ──
 
@@ -44,56 +45,92 @@ class EventEmitter:
     # ── Tool call lifecycle ──
 
     def emit_tool_started(self, tc: AgentToolCall) -> None:
-        params = tc.function.arguments
-        call_id = tc.id or str(uuid4())
-        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                  id=call_id, tool=tc.function.name)
-        self._channel.send_nowait(ToolCallStarted(
-            call_id=call_id,
-            tool_name=tc.function.name,
-            params=params,
-            is_read_only=bool(tc.is_read_only),
-            server=tc.server_name,
-        ))
+        call_id = self._stable_call_id(tc)
+        if call_id in self._started_call_ids:
+            return
+        self._started_call_ids.add(call_id)
+        debug_log("DEBUG", tp.EMIT_TOOL_STARTED, id=call_id, tool=tc.function.name)
+        self._channel.send_nowait(
+            ToolCallStarted(
+                call_id=call_id,
+                tool_name=tc.function.name,
+                params=tc.function.arguments,
+                is_read_only=bool(tc.is_read_only),
+                server=tc.server_name,
+            )
+        )
 
     def emit_tool_finished(self, r: AgentToolResult) -> None:
-        res = r.result
-        if isinstance(res, dict) and "result" in res and isinstance(res["result"], dict):
-            res = res["result"]
         call_id = r.tool_call_id or str(uuid4())
-        debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
-                  id=call_id,
-                  status=res.get("execution_status", "SUCCEEDED"))
-        d = {
+        res = self._result_payload(r)
+        debug_log(
+            "DEBUG",
+            tp.EMIT_TOOL_FINISHED,
+            id=call_id,
+            status=res.get("execution_status", "SUCCEEDED"),
+        )
+        self._channel.send_nowait(
+            ToolCallFinished(**self._tool_finished_data(call_id, res))
+        )
+
+    def _stable_call_id(self, tc: AgentToolCall) -> str:
+        call_id = tc.id or str(uuid4())
+        tc.id = call_id
+        return call_id
+
+    def _result_payload(self, r: AgentToolResult) -> dict:
+        res = r.result
+        if (
+            isinstance(res, dict)
+            and "result" in res
+            and isinstance(res["result"], dict)
+        ):
+            return res["result"]
+        return res if isinstance(res, dict) else {}
+
+    def _tool_finished_data(self, call_id: str, res: dict) -> dict:
+        data = {
             "call_id": call_id,
             "execution_status": res.get("execution_status", "SUCCEEDED"),
         }
-        output = res.get("output")
-        if output is not None:
-            d["output"] = output
-        error = res.get("error")
-        if error is not None:
-            d["error"] = error
-        et = res.get("execution_time_ms")
-        if et is not None:
-            d["execution_time_ms"] = et
-        self._channel.send_nowait(ToolCallFinished(**d))
+        for source_key, target_key in (
+            ("output", "output"),
+            ("error", "error"),
+            ("execution_time_ms", "execution_time_ms"),
+        ):
+            value = res.get(source_key)
+            if value is not None:
+                data[target_key] = value
+        return data
 
     # ── Approval ──
 
-    def emit_approval_required(self, chat_id: str, request_id: str, tool_name: str, params: dict, reason: str, *, call_id: str = "") -> None:
-        self._channel.send_nowait(ApprovalRequired(
-            chat_id=chat_id,
-            request_id=request_id,
-            tool_name=tool_name,
-            params=params,
-            reason=reason,
-            call_id=call_id,
-        ))
+    def emit_approval_required(
+        self,
+        chat_id: str,
+        request_id: str,
+        tool_name: str,
+        params: dict,
+        reason: str,
+        *,
+        call_id: str = "",
+    ) -> None:
+        self._channel.send_nowait(
+            ApprovalRequired(
+                chat_id=chat_id,
+                request_id=request_id,
+                tool_name=tool_name,
+                params=params,
+                reason=reason,
+                call_id=call_id,
+            )
+        )
 
     # ── Batch helpers used by orchestrator ──
 
-    def emit_tools_started(self, tool_calls: list[AgentToolCall], *, skip_ids: set | None = None) -> None:
+    def emit_tools_started(
+        self, tool_calls: list[AgentToolCall], *, skip_ids: set | None = None
+    ) -> None:
         """Emit ToolCallStarted for each tool call, skipping pending approval IDs."""
         skip = skip_ids or set()
         for tc in tool_calls:
@@ -111,11 +148,13 @@ class EventEmitter:
     def emit_streaming_tool_results(self, results: list[AgentToolResult]) -> None:
         """Emit ToolCallStarted + ToolCallFinished for pre-executed streaming results."""
         for sr in results:
-            self._channel.send_nowait(ToolCallStarted(
-                call_id=sr.tool_call_id or str(uuid4()),
-                tool_name=sr.tool_name,
-                params={},
-                is_read_only=sr.is_read_only,
-                server=sr.server_name,
-            ))
+            self._channel.send_nowait(
+                ToolCallStarted(
+                    call_id=sr.tool_call_id or str(uuid4()),
+                    tool_name=sr.tool_name,
+                    params={},
+                    is_read_only=sr.is_read_only,
+                    server=sr.server_name,
+                )
+            )
             self.emit_tool_finished(sr)

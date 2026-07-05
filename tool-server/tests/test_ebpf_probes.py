@@ -6,7 +6,14 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_PROBES_ROOT = Path(__file__).resolve().parent.parent / "src" / "tools" / "perception" / "ebpf" / "probes"
+_PROBES_ROOT = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "tools"
+    / "perception"
+    / "ebpf"
+    / "probes"
+)
 _SET_6_6 = _PROBES_ROOT / "linux-6.6+"
 
 
@@ -38,8 +45,8 @@ class TestProbeVariants6_6:
         # 6.6 没有 exit_code 和 group_dead
         assert "exit_code" not in content
         # bpftrace 6.6 char[16] 已是 string，printf 直接用 args->comm 配合 %s
-        assert 'args->comm' in content
-        assert 'str(args->comm)' not in content
+        assert "args->comm" in content
+        assert "str(args->comm)" not in content
 
     def test_tcpdrop_exists_and_valid(self) -> None:
         """tcpdrop.bt 存在且使用 tcp_retransmit_skb tracepoint（替代 tcp_drop）"""

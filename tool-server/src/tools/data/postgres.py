@@ -18,9 +18,18 @@ _DANGEROUS_WORDS = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_DANGEROUS_FUNCTIONS = re.compile(
+    r"\b("
+    r"lo_export|lo_import|pg_execute_server_program|pg_ls_dir|pg_read_binary_file|"
+    r"pg_read_file|pg_stat_file|pg_logdir_ls|pg_ls_[a-z_]*dir"
+    r")\s*\(",
+    re.IGNORECASE,
+)
 
 
-async def get_postgres_schema(config: ToolServerConfig, schema: str = "public") -> dict[str, Any]:
+async def get_postgres_schema(
+    config: ToolServerConfig, schema: str = "public"
+) -> dict[str, Any]:
     if not config.postgres_dsn:
         return _missing_dsn()
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
@@ -49,13 +58,19 @@ async def get_postgres_schema(config: ToolServerConfig, schema: str = "public") 
             row["table_name"],
             {"schema": row["table_schema"], "table": row["table_name"], "columns": []},
         )
-        table["columns"].append({
-            "name": row["column_name"],
-            "data_type": row["data_type"],
-            "nullable": row["is_nullable"] == "YES",
-            "default": row["column_default"],
-        })
-    return {"schema": schema, "tables": list(tables.values()), "table_count": len(tables)}
+        table["columns"].append(
+            {
+                "name": row["column_name"],
+                "data_type": row["data_type"],
+                "nullable": row["is_nullable"] == "YES",
+                "default": row["column_default"],
+            }
+        )
+    return {
+        "schema": schema,
+        "tables": list(tables.values()),
+        "table_count": len(tables),
+    }
 
 
 async def postgres_readonly_query(
@@ -73,7 +88,9 @@ async def postgres_readonly_query(
     row_limit = min(max(max_rows, 1), config.postgres_max_rows)
     timeout_seconds = max(config.postgres_statement_timeout_ms, 1) / 1000
     normalized_sql = sql.rstrip().rstrip(";")
-    rows = await _fetch_limited(config, normalized_sql, limit=row_limit + 1, timeout=timeout_seconds)
+    rows = await _fetch_limited(
+        config, normalized_sql, limit=row_limit + 1, timeout=timeout_seconds
+    )
     truncated = len(rows) > row_limit
     limited_rows = rows[:row_limit]
     return {
@@ -95,13 +112,19 @@ def _validate_readonly_sql(sql: str) -> tuple[bool, str]:
     if not _ALLOWED_START.match(scrubbed):
         return False, "only SELECT, WITH, and EXPLAIN are allowed"
     if _DANGEROUS_WORDS.search(scrubbed):
-        return False, "write, DDL, transaction, and session-control statements are not allowed"
+        return (
+            False,
+            "write, DDL, transaction, and session-control statements are not allowed",
+        )
+    function_scan_sql = _strip_string_literals_and_comments(stripped)
+    if _DANGEROUS_FUNCTIONS.search(_unquote_identifiers(function_scan_sql)):
+        return False, "server-side file and program access functions are not allowed"
     return True, ""
 
 
 def _has_multiple_statements(sql: str) -> bool:
     scrubbed = _strip_literals_and_comments(sql)
-    return ";" in scrubbed.rstrip(";")
+    return ";" in scrubbed.strip().rstrip(";").strip()
 
 
 def _strip_literals_and_comments(sql: str) -> str:
@@ -109,12 +132,24 @@ def _strip_literals_and_comments(sql: str) -> str:
     return scanner.scrub()
 
 
+def _strip_string_literals_and_comments(sql: str) -> str:
+    scanner = _SqlScrubber(sql, keep_quoted_identifiers=True)
+    return scanner.scrub()
+
+
+def _unquote_identifiers(sql: str) -> str:
+    return re.sub(
+        r'"((?:[^"]|"")*)"', lambda match: match.group(1).replace('""', '"'), sql
+    )
+
+
 class _SqlScrubber:
-    def __init__(self, sql: str) -> None:
+    def __init__(self, sql: str, keep_quoted_identifiers: bool = False) -> None:
         self.sql = sql
         self.result: list[str] = []
         self.index = 0
         self.state = "default"
+        self.keep_quoted_identifiers = keep_quoted_identifiers
 
     def scrub(self) -> str:
         while self.index < len(self.sql):
@@ -160,6 +195,8 @@ class _SqlScrubber:
         self.index += 1
 
     def _consume_double_quoted(self) -> None:
+        if self.keep_quoted_identifiers:
+            self.result.append(self._char)
         if self._char == '"':
             self.state = "default"
         self.index += 1
@@ -179,13 +216,17 @@ class _SqlScrubber:
             return
         if self._char == '"':
             self.state = "double"
+            if self.keep_quoted_identifiers:
+                self.result.append(self._char)
             self.index += 1
             return
         self.result.append(self._char)
         self.index += 1
 
 
-async def _fetch(config: ToolServerConfig, sql: str, *args: Any, timeout: float | None = None) -> Sequence[Any]:
+async def _fetch(
+    config: ToolServerConfig, sql: str, *args: Any, timeout: float | None = None
+) -> Sequence[Any]:
     conn = await _connect(config)
     try:
         async with conn.transaction(readonly=True):
@@ -219,9 +260,13 @@ async def _connect(config: ToolServerConfig) -> asyncpg.Connection:
     return await asyncpg.connect(config.postgres_dsn)
 
 
-async def _set_statement_timeout(conn: asyncpg.Connection, config: ToolServerConfig) -> None:
+async def _set_statement_timeout(
+    conn: asyncpg.Connection, config: ToolServerConfig
+) -> None:
     timeout_ms = max(int(config.postgres_statement_timeout_ms), 1)
-    await conn.fetchval("select set_config('statement_timeout', $1, true)", f"{timeout_ms}ms")
+    await conn.fetchval(
+        "select set_config('statement_timeout', $1, true)", f"{timeout_ms}ms"
+    )
 
 
 def _record_to_dict(row: Any) -> dict[str, Any]:

@@ -246,11 +246,7 @@ class PostgresSessionManager:
 
 def _message_from_row(row) -> Message:
     raw_tc = row.get("tool_calls")
-    tool_calls = (
-        json.loads(raw_tc)
-        if isinstance(raw_tc, str)
-        else raw_tc
-    )
+    tool_calls = json.loads(raw_tc) if isinstance(raw_tc, str) else raw_tc
     return Message(
         message_id=row["id"],
         chat_id=row["chat_id"],
@@ -266,11 +262,7 @@ def _message_from_row(row) -> Message:
 
 def _tool_call_from_row(row) -> ToolCall:
     raw_result = row.get("result")
-    result = (
-        json.loads(raw_result)
-        if isinstance(raw_result, str)
-        else raw_result
-    )
+    result = json.loads(raw_result) if isinstance(raw_result, str) else raw_result
     return ToolCall(
         call_id=row["id"],
         name=row["tool_name"],

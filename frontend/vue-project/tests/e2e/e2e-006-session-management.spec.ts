@@ -50,7 +50,7 @@ test.describe("E2E-006 会话管理", () => {
         title: "CPU 诊断",
         messages: [
           {
-            messageID: "m1",
+            message_id: "m1",
             chat_id: CHAT_ID_1,
             timestamp: new Date().toISOString(),
             type: "user",
@@ -65,7 +65,7 @@ test.describe("E2E-006 会话管理", () => {
         title: "磁盘清理",
         messages: [
           {
-            messageID: "m2",
+            message_id: "m2",
             chat_id: CHAT_ID_2,
             timestamp: new Date().toISOString(),
             type: "user",
@@ -92,6 +92,8 @@ test.describe("E2E-006 会话管理", () => {
     await items.last().click();
 
     await expect(items.last()).toHaveClass(/active/);
+    await expect(page.getByText("清理磁盘")).toBeVisible();
+    await expect(page.getByText("查看 CPU")).not.toBeVisible();
   });
 
   test("new session button works", async ({ page }) => {

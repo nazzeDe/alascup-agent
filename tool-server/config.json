@@ -1,7 +1,7 @@
 {
     "proc_path": "/proc",
     "log_dir": "/app/logs",
-    "sandbox_root": "/tmp/tool-server-sandbox",
+    "sandbox_root": "/app/sandbox",
     "cache_ttl": 600,
     "bash_timeout": 30,
     "host_exec": "direct",

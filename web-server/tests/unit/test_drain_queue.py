@@ -20,9 +20,15 @@ class MockLLM:
         self._call += 1
         if self._call == 1:
             yield {"event": "assistant", "data": json.dumps({"delta": "I need to"})}
-            yield {"event": "tool_call", "data": json.dumps({
-                "id": "tc-1", "function": {"name": "restart_service", "arguments": "{}"}
-            })}
+            yield {
+                "event": "tool_call",
+                "data": json.dumps(
+                    {
+                        "id": "tc-1",
+                        "function": {"name": "restart_service", "arguments": "{}"},
+                    }
+                ),
+            }
             yield {"event": "done", "data": "{}"}
         else:
             yield {"event": "assistant", "data": json.dumps({"delta": "Service"})}
@@ -50,8 +56,12 @@ class MockExecutor:
 
     def list_tools(self):
         return [
-            {"name": "restart_service", "server_name": "tool-server",
-             "mutable": True, "is_read_only": False}
+            {
+                "name": "restart_service",
+                "server_name": "tool-server",
+                "mutable": True,
+                "is_read_only": False,
+            }
         ]
 
     async def execute(self, tool_name, arguments, **kwargs):
@@ -63,10 +73,19 @@ class MockExecutor:
 
     async def execute_parallel(self, calls: list[dict]) -> list[dict]:
         for c in calls:
-            self.calls.append({"tool_name": c["tool_name"], "arguments": c.get("arguments", {})})
-        return [{"tool_call_id": c.get("call_id", ""), "result": {
-            "execution_status": "SUCCEEDED", "output": "done",
-        }} for c in calls]
+            self.calls.append(
+                {"tool_name": c["tool_name"], "arguments": c.get("arguments", {})}
+            )
+        return [
+            {
+                "tool_call_id": c.get("call_id", ""),
+                "result": {
+                    "execution_status": "SUCCEEDED",
+                    "output": "done",
+                },
+            }
+            for c in calls
+        ]
 
 
 class MockContextManager:
@@ -89,10 +108,15 @@ class MockSessionManager:
 
     async def create_session(self):
         from src.models.session import ChatSession
+
         sid = uuid4()
-        session = ChatSession(id=sid, title=None, messages=[],
-                              executed_tool_list=[],
-                              timestamp=datetime.now(timezone.utc).isoformat())
+        session = ChatSession(
+            id=sid,
+            title=None,
+            messages=[],
+            executed_tool_list=[],
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
         self._sessions[sid] = session
         return session
 
@@ -139,6 +163,7 @@ class TestDrainQueueIntegration:
     @pytest.fixture
     def bridge(self):
         from src.security.pending import ApprovalBridge
+
         return ApprovalBridge()
 
     @pytest.fixture
@@ -163,19 +188,26 @@ class TestDrainQueueIntegration:
         def orch_builder():
             return LoopOrchestrator(
                 context_manager=context_manager,
-                bridge=bridge, audit_logger=audit, error_recovery=None,
-                llm=llm, chat_id="",
+                bridge=bridge,
+                audit_logger=audit,
+                error_recovery=None,
+                llm=llm,
+                chat_id="",
                 tool_executor=executor,
                 rule_engine=rule_engine,
             )
 
         turn = ChatTurn(
-            user_message="restart the service", chat_id=None,
-            session_manager=session_mgr, prompt_manager=prompt_mgr,
-            orchestrator_builder=orch_builder, tool_executor=executor,
+            user_message="restart the service",
+            chat_id=None,
+            session_manager=session_mgr,
+            prompt_manager=prompt_mgr,
+            orchestrator_builder=orch_builder,
+            tool_executor=executor,
         )
 
         from src.sse_stream import SSEStream
+
         stream = SSEStream(turn=turn)
 
         events: list[tuple] = []

@@ -5,12 +5,22 @@ from uuid import uuid4
 from loguru import logger
 
 from src.agent.events import EventChannel, TurnFailed
-from src.agent.loop.approval import ApprovalHandler, _inject_rejection_messages
+from src.agent.loop.approval import (
+    ApprovalHandler,
+    _inject_rejection_messages,
+    _rejection_tool_results,
+)
 from src.agent.loop.emitter import EventEmitter
 from src.agent.loop.circuit_breaker import CircuitBreaker
 from src.agent.loop.step import AgentStep, sync_scratch_from_state
 from src.agent.mappers import messages_from_wire, messages_to_openai
-from src.agent.state import AgentState, Transition, TurnScratch, get_transition, init_scratch
+from src.agent.state import (
+    AgentState,
+    Transition,
+    TurnScratch,
+    get_transition,
+    init_scratch,
+)
 from src.agent.turn_context import TurnContext, Auditor
 from src.models.audit import AuditActor
 from src.observability.debug_log import log as debug_log
@@ -108,9 +118,7 @@ class AgentLoop:
             logger.opt(exception=True).error(
                 "agent_run_failed chat_id={c}", c=str(chat_id)
             )
-            await channel.send(
-                TurnFailed(code="AGENT_CRASH", message=str(exc))
-            )
+            await channel.send(TurnFailed(code="AGENT_CRASH", message=str(exc)))
         finally:
             channel.close()
 
@@ -225,8 +233,14 @@ class AgentLoop:
         if state.transition != Transition.DONE:
             return None
         scratch.transition = Transition.DONE
-        debug_log("DEBUG", tp.TRANSITION, reason="agent_step_terminal",
-                  pending_approval=0, tool_calls=0, approved=0)
+        debug_log(
+            "DEBUG",
+            tp.TRANSITION,
+            reason="agent_step_terminal",
+            pending_approval=0,
+            tool_calls=0,
+            approved=0,
+        )
         return await self._handle_transition(scratch, auditor)
 
     async def _run_approval_loop(
@@ -243,14 +257,13 @@ class AgentLoop:
                 scratch, profiler=profiler, turn_ctx=ctx, emitter=emitter
             )
             self._copy_scratch_to_state(state, scratch)
-            _inject_rejection_messages(state, scratch.rejected_tool_calls)
+            await self._handle_rejected_approvals(state, scratch, ctx, emitter)
             if get_transition(scratch) not in (
                 Transition.APPROVAL_GRANTED,
                 Transition.APPROVAL_REJECTED,
             ):
                 break
 
-            self._emit_approval_started(scratch, emitter)
             await step.run(state, ctx, emitter, phase="approval re-entry")
             profiler.checkpoint("approval_reentry_run")
             sync_scratch_from_state(scratch, state)
@@ -258,10 +271,33 @@ class AgentLoop:
             self._emit_approval_finished(state, scratch, emitter)
 
             if not scratch.pending_approval:
-                debug_log("DEBUG", tp.LOOP_EXIT,
-                          reason="approval_empty",
-                          pending_approval=False)
+                debug_log(
+                    "DEBUG",
+                    tp.LOOP_EXIT,
+                    reason="approval_empty",
+                    pending_approval=False,
+                )
                 break
+
+    async def _handle_rejected_approvals(
+        self,
+        state: AgentState,
+        scratch: TurnScratch,
+        ctx: TurnContext,
+        emitter: EventEmitter,
+    ) -> None:
+        if not scratch.rejected_tool_calls:
+            return
+        rejection_messages = _inject_rejection_messages(
+            state, scratch.rejected_tool_calls
+        )
+        if self._lifecycle and rejection_messages:
+            await self._lifecycle.persist_tool_result(ctx.chat_id, rejection_messages)
+        emitter.emit_tools_finished(
+            _rejection_tool_results(scratch.rejected_tool_calls)
+        )
+        scratch.rejected_tool_calls = []
+        state.rejected_tool_calls = []
 
     def _copy_scratch_to_state(self, state: AgentState, scratch: TurnScratch) -> None:
         state.pending_approval = scratch.pending_approval
@@ -269,11 +305,16 @@ class AgentLoop:
         state.rejected_tool_calls = scratch.rejected_tool_calls
         state.transition = scratch.transition
 
-    def _emit_approval_started(self, scratch: TurnScratch, emitter: EventEmitter) -> None:
-        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                  count=len(scratch.approved_tool_calls),
-                  ids=[tc.id for tc in scratch.approved_tool_calls],
-                  phase="approval")
+    def _emit_approval_started(
+        self, scratch: TurnScratch, emitter: EventEmitter
+    ) -> None:
+        debug_log(
+            "DEBUG",
+            tp.EMIT_TOOL_STARTED,
+            count=len(scratch.approved_tool_calls),
+            ids=[tc.id for tc in scratch.approved_tool_calls],
+            phase="approval",
+        )
         emitter.emit_tools_started(scratch.approved_tool_calls)
 
     def _log_approval_reentry(self, scratch: TurnScratch) -> None:
@@ -289,10 +330,13 @@ class AgentLoop:
         self, state: AgentState, scratch: TurnScratch, emitter: EventEmitter
     ) -> None:
         result_sources = scratch.emitted_results or scratch.streaming_tool_results
-        debug_log("DEBUG", tp.EMIT_TOOL_FINISHED,
-                  count=len(result_sources),
-                  ids=[r.tool_call_id for r in result_sources],
-                  phase="approval")
+        debug_log(
+            "DEBUG",
+            tp.EMIT_TOOL_FINISHED,
+            count=len(result_sources),
+            ids=[r.tool_call_id for r in result_sources],
+            phase="approval",
+        )
         emitter.emit_tools_finished(result_sources)
         scratch.emitted_results = []
         state.emitted_results = []
@@ -310,16 +354,23 @@ class AgentLoop:
     def _emit_iteration_events(
         self, state: AgentState, scratch: TurnScratch, emitter: EventEmitter
     ) -> None:
-        debug_log("DEBUG", tp.EMIT_TOOL_STARTED,
-                  msg_count=len(state.messages),
-                  phase="main_emit")
+        debug_log(
+            "DEBUG",
+            tp.EMIT_TOOL_STARTED,
+            msg_count=len(state.messages),
+            phase="main_emit",
+        )
         pending_ids = {tc.id for tc in scratch.pending_approval if tc.id}
         self._emit_started_events(state, scratch, emitter, pending_ids)
         self._emit_finished_events(state, scratch, emitter)
         self._emit_streaming_events(state, scratch, emitter)
 
     def _emit_started_events(
-        self, state: AgentState, scratch: TurnScratch, emitter: EventEmitter, pending_ids: set
+        self,
+        state: AgentState,
+        scratch: TurnScratch,
+        emitter: EventEmitter,
+        pending_ids: set,
     ) -> None:
         tc_list = scratch.tool_calls
         if tc_list:
@@ -372,7 +423,9 @@ class AgentLoop:
                 chat_id=str(state.chat_id),
                 count=len(stream_src),
                 ids=[r.tool_call_id for r in stream_src],
-                source="emitted_results" if scratch.emitted_results else "streaming_tool_results",
+                source="emitted_results"
+                if scratch.emitted_results
+                else "streaming_tool_results",
             )
         else:
             debug_log(
@@ -390,9 +443,12 @@ class AgentLoop:
         debug_log("DEBUG", tp.TRANSITION, route=action)
         if action in ("continue",):
             return False
-        debug_log("DEBUG", tp.LOOP_EXIT,
-                  reason="transition_stop",
-                  transition=get_transition(scratch))
+        debug_log(
+            "DEBUG",
+            tp.LOOP_EXIT,
+            reason="transition_stop",
+            transition=get_transition(scratch),
+        )
         return True
 
     async def _compress_context(self, state: AgentState, auditor: Auditor) -> None:
@@ -410,14 +466,14 @@ class AgentLoop:
                 msg_count=len(messages),
                 chat_id=str(state.chat_id),
             )
-            state.messages = messages_from_wire(await self._context_manager.compress(messages))
+            state.messages = messages_from_wire(
+                await self._context_manager.compress(messages)
+            )
             await auditor.transition(
                 Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM
             )
 
-    async def _check_token_ceiling(
-        self, state: AgentState, auditor: Auditor
-    ) -> bool:
+    async def _check_token_ceiling(self, state: AgentState, auditor: Auditor) -> bool:
         messages = messages_to_openai(state.messages)
         tokens = self._context_manager.count_tokens(messages)
         if self._breaker.check_token_ceiling(tokens):
@@ -479,9 +535,7 @@ class AgentLoop:
             code=llm_error.get("code", "?"),
             chat_id=str(state.chat_id),
         )
-        handled = await self._handle_llm_error(
-            state, auditor
-        )
+        handled = await self._handle_llm_error(state, auditor)
         if not handled:
             debug_log(
                 "ERROR",
@@ -495,9 +549,7 @@ class AgentLoop:
                 code=llm_error.get("code", "?"),
                 msg=str(orig_msg)[:500],
             )
-            await auditor.transition(
-                Transition.ERROR_EXIT, actor=AuditActor.SYSTEM
-            )
+            await auditor.transition(Transition.ERROR_EXIT, actor=AuditActor.SYSTEM)
             return "return", TurnFailed(
                 code=_error_code(llm_error.get("code", 500)),
                 message=f"Recovery exhausted (cause: code={llm_error.get('code', '?')}, {orig_msg})",
@@ -529,20 +581,32 @@ class AgentLoop:
         action = strategy["action"]
 
         if action == "compress_context":
-            compressed = await self._context_manager.compress(messages_to_openai(state.messages))
+            compressed = await self._context_manager.compress(
+                messages_to_openai(state.messages)
+            )
             state.messages = messages_from_wire(compressed)
-            await auditor.transition(Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM)
+            await auditor.transition(
+                Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM
+            )
         elif action == "aggressive_compress":
-            compressed = await self._context_manager.compress(messages_to_openai(state.messages))
+            compressed = await self._context_manager.compress(
+                messages_to_openai(state.messages)
+            )
             state.messages = messages_from_wire(compressed)
-            await auditor.transition(Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM)
+            await auditor.transition(
+                Transition.CONTEXT_COMPACTED, actor=AuditActor.SYSTEM
+            )
         elif action == "escalate_token_limit":
             self._llm.escalate_max_tokens()
         elif action == "continue_inject":
             msgs = list(state.messages)
             from src.agent.domain import AgentMessage
 
-            msgs.append(AgentMessage(role="user", content="Please continue from where you stopped."))
+            msgs.append(
+                AgentMessage(
+                    role="user", content="Please continue from where you stopped."
+                )
+            )
             state.messages = msgs
         elif action == "switch_fallback_model":
             self._llm.switch_to_fallback()

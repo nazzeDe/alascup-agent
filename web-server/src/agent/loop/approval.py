@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from src.agent.loop.emitter import EventEmitter
 from src.agent.state import AgentState, Transition, TurnScratch
-from src.agent.domain import AgentMessage, AgentToolCall
+from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
 from src.observability.debug_log import log as debug_log
@@ -21,8 +21,12 @@ def _apply_decisions(
     approved: list[AgentToolCall] = []
     rejected: list[AgentToolCall] = []
     for i, tc in enumerate(pending):
-        d = decisions[i] if i < len(decisions) else {"status": "EXPIRED", "reason": None}
-        status = d["status"] if isinstance(d, dict) else d
+        d = (
+            decisions[i]
+            if i < len(decisions)
+            else {"status": "EXPIRED", "reason": None}
+        )
+        status = d.get("status", "EXPIRED") if isinstance(d, dict) else d
         if status == "APPROVED":
             tc.approval_status = "APPROVED"
             approved.append(tc)
@@ -49,22 +53,45 @@ def _format_rejection_message(tc: AgentToolCall) -> str:
     return "\n".join(parts)
 
 
+def _rejection_tool_result(tc: AgentToolCall) -> AgentToolResult:
+    result = {
+        "execution_status": "REJECTED",
+        "error": {"message": "Tool was rejected by human. Do NOT retry."},
+    }
+    if tc.rejection_reason:
+        result["rejection_reason"] = tc.rejection_reason
+    return AgentToolResult(
+        tool_name=tc.function.name or "unknown",
+        tool_call_id=tc.id or "rejected",
+        result=result,
+        server_name=tc.server_name,
+        call_id=tc.call_id,
+    )
+
+
+def _rejection_tool_results(rejected: list[AgentToolCall]) -> list[AgentToolResult]:
+    return [_rejection_tool_result(tc) for tc in rejected]
+
+
 def _inject_rejection_messages(
     state: AgentState, rejected: list[AgentToolCall]
-) -> None:
+) -> list[AgentMessage]:
     """Append tool-role rejection messages so LLM can respond to the rejection."""
     if not rejected:
-        return
+        return []
     messages = []
     for tc in rejected:
         name = tc.function.name or "unknown"
-        messages.append(AgentMessage(
-            role="tool",
-            tool_call_id=tc.id or "rejected",
-            name=name,
-            content=_format_rejection_message(tc),
-        ))
+        messages.append(
+            AgentMessage(
+                role="tool",
+                tool_call_id=tc.id or "rejected",
+                name=name,
+                content=_format_rejection_message(tc),
+            )
+        )
     state.messages.extend(messages)
+    return messages
 
 
 class ApprovalHandler:
@@ -109,11 +136,18 @@ class ApprovalHandler:
         all_approved: list[AgentToolCall] = []
         all_rejected: list[AgentToolCall] = []
         for tc in pending:
-            approved, rejected = await self._resolve_one(tc, chat_id, auditor, emitter, profiler)
+            approved, rejected = await self._resolve_one(
+                tc, chat_id, auditor, emitter, profiler
+            )
             all_approved.extend(approved)
             all_rejected.extend(rejected)
 
-        await auditor.transition(Transition.APPROVAL_GRANTED, actor=AuditActor.POLICY)
+        final_transition = (
+            Transition.APPROVAL_GRANTED
+            if all_approved
+            else Transition.APPROVAL_REJECTED
+        )
+        await auditor.transition(final_transition, actor=AuditActor.POLICY)
 
         await self._audit_approved(auditor, all_approved)
         await self._audit_rejected(auditor, all_rejected)
@@ -123,7 +157,8 @@ class ApprovalHandler:
         scratch.rejected_tool_calls = scratch.rejected_tool_calls + all_rejected
         scratch.pending_approval = []
         scratch.transition = (
-            Transition.APPROVAL_GRANTED if all_approved
+            Transition.APPROVAL_GRANTED
+            if all_approved
             else Transition.APPROVAL_REJECTED
         )
 
@@ -143,13 +178,21 @@ class ApprovalHandler:
         await auditor.transition(Transition.APPROVAL_PENDING, actor=AuditActor.POLICY)
 
         if emitter is not None:
+            emitter.emit_tool_started(tc)
             self._emit_approval_required(emitter, tc, chat_id, request_id)
         if profiler:
             profiler.checkpoint("approval_events_emitted")
 
-        decisions = await self._bridge.gather_decisions(request_id, 1)
-        debug_log("INFO", "Approval decisions collected",
-                  request_id=request_id, count=len(decisions))
+        if self._bridge is None:
+            decisions = [{"status": "EXPIRED", "reason": None}]
+        else:
+            decisions = await self._bridge.gather_decisions(request_id, 1)
+        debug_log(
+            "INFO",
+            "Approval decisions collected",
+            request_id=request_id,
+            count=len(decisions),
+        )
         return _apply_decisions([tc], decisions)
 
     def _emit_approval_required(
@@ -194,7 +237,9 @@ class ApprovalHandler:
                 params=tc.function.arguments,
                 level=AuditLevel.WARN,
                 decision="REJECTED",
-                error={"rejection_reason": rejection_reason} if rejection_reason else None,
+                error={"rejection_reason": rejection_reason}
+                if rejection_reason
+                else None,
             )
 
     async def _update_lifecycle(

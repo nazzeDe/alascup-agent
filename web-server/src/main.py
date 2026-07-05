@@ -31,7 +31,11 @@ def _build_services(settings: Settings) -> Services:
     Moved from module-level scattered os.environ + JSON loader calls to a single
     parameter that can be built from files (production) or inline (tests).
     """
-    servers_path = Path(settings.servers_config) if settings.servers_config else CONFIG_DIR / "servers.json"
+    servers_path = (
+        Path(settings.servers_config)
+        if settings.servers_config
+        else CONFIG_DIR / "servers.json"
+    )
     servers = load_servers_config(servers_path)
     rules_config = load_rules_config(CONFIG_DIR / "rules.json")
 
@@ -97,7 +101,9 @@ def _configure_logging(level: str = "INFO") -> None:
     )
 
 
-def create_app(services: Services | None = None, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    services: Services | None = None, settings: Settings | None = None
+) -> FastAPI:
     """Build a FastAPI application instance.
 
     Three usage modes, in order of precedence:

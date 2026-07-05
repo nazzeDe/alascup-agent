@@ -3,6 +3,7 @@ runner.py — bpftrace 按需快照执行器。
 
 每次调用启动一个 bpftrace --format=json 进程，捕获 JSON 事件流后退出。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,18 +42,57 @@ async def run_on_demand(
     Returns:
         解析后的 JSON 事件列表。失败时返回 [{ "error": ..., "script": ... }]。
     """
+    script_path, error = _resolve_script(script_name, resolve_fn)
+    if error is not None:
+        return [error]
+
+    effective_timeout = (
+        timeout
+        if timeout is not None
+        else _DEFAULT_TIMEOUTS.get(script_name, _DEFAULT_TIMEOUT_FALLBACK)
+    )
+    stdout, stderr, returncode = await _run_bpftrace(
+        script_path, script_name, effective_timeout, args
+    )
+    if returncode == "timeout":
+        return [
+            {"error": "timeout", "script": script_name, "timeout_s": effective_timeout}
+        ]
+    if returncode != 0:
+        stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
+        logger.error(
+            "bpftrace failed script={} returncode={} stderr={}",
+            script_name,
+            returncode,
+            stderr_text,
+        )
+        return [{"error": stderr_text, "script": script_name, "returncode": returncode}]
+
+    return _parse_bpftrace_output(stdout.decode(errors="replace"))
+
+
+def _resolve_script(
+    script_name: str,
+    resolve_fn: Callable[[str], Path | None],
+) -> tuple[Path | None, dict | None]:
     script_path = resolve_fn(script_name)
     if script_path is None:
         err = f"probe script not found (no variant for this kernel): {script_name}"
         logger.error(err)
-        return [{"error": err, "script": script_name}]
+        return None, {"error": err, "script": script_name}
     if not script_path.exists():
         err = f"probe script not found: {script_path}"
         logger.error(err)
-        return [{"error": err, "script": script_name}]
+        return None, {"error": err, "script": script_name}
+    return script_path, None
 
-    effective_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUTS.get(script_name, _DEFAULT_TIMEOUT_FALLBACK)
 
+async def _run_bpftrace(
+    script_path: Path,
+    script_name: str,
+    effective_timeout: float,
+    args: dict[str, str] | None,
+) -> tuple[bytes, bytes, int | str]:
     cmd = ["bpftrace", "--unsafe", "-f", "json", str(script_path)]
     env = {f"BPFTRACE_ARG_{k.upper()}": v for k, v in (args or {}).items()}
 
@@ -69,21 +109,17 @@ async def run_on_demand(
             proc.communicate(), timeout=effective_timeout
         )
     except asyncio.TimeoutError:
-        logger.warning("bpftrace timeout script={} timeout={}s", script_name, effective_timeout)
+        logger.warning(
+            "bpftrace timeout script={} timeout={}s", script_name, effective_timeout
+        )
         proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=5.0)
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-        return [{"error": "timeout", "script": script_name, "timeout_s": effective_timeout}]
-
-    if proc.returncode != 0:
-        stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
-        logger.error("bpftrace failed script={} returncode={} stderr={}", script_name, proc.returncode, stderr_text)
-        return [{"error": stderr_text, "script": script_name, "returncode": proc.returncode}]
-
-    return _parse_bpftrace_output(stdout.decode(errors="replace"))
+        return b"", b"", "timeout"
+    return stdout, stderr, proc.returncode or 0
 
 
 def _parse_bpftrace_output(text: str) -> list[dict]:

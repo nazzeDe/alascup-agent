@@ -46,6 +46,7 @@ services:
       - TOOLSERVER_PROC_PATH=/tmp/test-proc
       - TOOLSERVER_LOG_DIR=/tmp/test-log
       - TOOLSERVER_SANDBOX_ROOT=/tmp/sandbox
+      - TOOLSERVER_HOST=0.0.0.0
       - TOOL_SERVER_LOG_LEVEL=DEBUG
       - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:

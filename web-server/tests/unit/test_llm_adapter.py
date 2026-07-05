@@ -11,7 +11,9 @@ pytestmark = pytest.mark.unit
 def llm_config():
     from src.config.models import LLMConfig
 
-    return LLMConfig(api_key="sk-test", api_url="https://api.example.com/v1", model="test-model")
+    return LLMConfig(
+        api_key="sk-test", api_url="https://api.example.com/v1", model="test-model"
+    )
 
 
 def _mock_response(json_data: dict, status: int = 200) -> MagicMock:
@@ -46,9 +48,15 @@ class TestLLMAdapterGenerate:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=_mock_response({
-            "choices": [{"message": {"content": "Hello, world!", "tool_calls": None}}],
-        }))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(
+                {
+                    "choices": [
+                        {"message": {"content": "Hello, world!", "tool_calls": None}}
+                    ],
+                }
+            )
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._client = lambda: mock_client
@@ -65,11 +73,27 @@ class TestLLMAdapterGenerate:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=_mock_response({
-            "choices": [{"message": {"content": "", "tool_calls": [
-                {"function": {"name": "get_cpu_info", "arguments": "{}"}},
-            ]}}],
-        }))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "function": {
+                                            "name": "get_cpu_info",
+                                            "arguments": "{}",
+                                        }
+                                    },
+                                ],
+                            }
+                        }
+                    ],
+                }
+            )
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._client = lambda: mock_client
@@ -87,14 +111,20 @@ class TestLLMAdapterGenerate:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=_mock_response({
-            "choices": [{"message": {"content": "ok", "tool_calls": None}}],
-        }))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(
+                {
+                    "choices": [{"message": {"content": "ok", "tool_calls": None}}],
+                }
+            )
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._client = lambda: mock_client
 
-        await adapter.generate([{"role": "user", "content": "hi"}], system="You are helpful.")
+        await adapter.generate(
+            [{"role": "user", "content": "hi"}], system="You are helpful."
+        )
 
         call_args = mock_client.post.call_args
         body = call_args.kwargs["json"]
@@ -108,14 +138,20 @@ class TestLLMAdapterGenerate:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=_mock_response({
-            "choices": [{"message": {"content": "ok", "tool_calls": None}}],
-        }))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(
+                {
+                    "choices": [{"message": {"content": "ok", "tool_calls": None}}],
+                }
+            )
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._client = lambda: mock_client
 
-        tools = [{"type": "function", "function": {"name": "get_cpu_info", "parameters": {}}}]
+        tools = [
+            {"type": "function", "function": {"name": "get_cpu_info", "parameters": {}}}
+        ]
         await adapter.generate([{"role": "user", "content": "hi"}], tools=tools)
 
         call_args = mock_client.post.call_args
@@ -129,9 +165,11 @@ class TestLLMAdapterGenerate:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.post = AsyncMock(return_value=_mock_response(
-            {"error": {"message": "internal error"}}, status=500
-        ))
+        mock_client.post = AsyncMock(
+            return_value=_mock_response(
+                {"error": {"message": "internal error"}}, status=500
+            )
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._client = lambda: mock_client
@@ -149,7 +187,7 @@ class TestLLMAdapterGenerateStream:
             'data: {"choices":[{"delta":{"content":"Hello"}}]}',
             'data: {"choices":[{"delta":{"content":" world"}}]}',
             'data: {"choices":[{"delta":{"content":"!"}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -164,7 +202,9 @@ class TestLLMAdapterGenerateStream:
         async for event in adapter.generate_stream([{"role": "user", "content": "hi"}]):
             parts.append(event)
 
-        assert any("Hello" in p.get("data", "") for p in parts if p.get("event") == "assistant")
+        assert any(
+            "Hello" in p.get("data", "") for p in parts if p.get("event") == "assistant"
+        )
         assert any(p["event"] == "done" for p in parts)
 
     @pytest.mark.asyncio
@@ -173,7 +213,7 @@ class TestLLMAdapterGenerateStream:
 
         chunks = [
             'data: {"choices":[{"delta":{"content":"","tool_calls":[{"index":0,"function":{"name":"get_cpu_info","arguments":"{}"}}]}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -184,7 +224,9 @@ class TestLLMAdapterGenerateStream:
         adapter._streaming_client = lambda: mock_client
 
         events = []
-        async for event in adapter.generate_stream([{"role": "user", "content": "check"}]):
+        async for event in adapter.generate_stream(
+            [{"role": "user", "content": "check"}]
+        ):
             events.append(event)
 
         tool_call_events = [e for e in events if e.get("event") == "tool_call"]
@@ -194,7 +236,9 @@ class TestLLMAdapterGenerateStream:
         # tool_calls must be yielded BEFORE done — otherwise think_node breaks too early
         last_tc_idx = max(events.index(e) for e in tool_call_events)
         first_done_idx = min(events.index(e) for e in done_events)
-        assert last_tc_idx < first_done_idx, "tool_call events must come BEFORE done event"
+        assert last_tc_idx < first_done_idx, (
+            "tool_call events must come BEFORE done event"
+        )
 
     @pytest.mark.asyncio
     async def test_generate_stream_tool_calls_before_done(self, llm_config):
@@ -204,7 +248,7 @@ class TestLLMAdapterGenerateStream:
         chunks = [
             'data: {"choices":[{"delta":{"content":null,"tool_calls":[{"index":0,"function":{"name":"get_cpu_info","arguments":""}}]}}]}',
             'data: {"choices":[{"delta":{"content":null,"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -215,7 +259,9 @@ class TestLLMAdapterGenerateStream:
         adapter._streaming_client = lambda: mock_client
 
         events = []
-        async for event in adapter.generate_stream([{"role": "user", "content": "check"}]):
+        async for event in adapter.generate_stream(
+            [{"role": "user", "content": "check"}]
+        ):
             events.append(event)
 
         event_types = [e["event"] for e in events]
@@ -233,7 +279,7 @@ class TestLLMAdapterGenerateStream:
 
         chunks = [
             'data: {"choices":[{"delta":{"content":"ok"}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -260,7 +306,9 @@ class TestLLMAdapterGenerateStream:
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.stream = MagicMock(return_value=_mock_stream_response(chunks, status=500))
+        mock_client.stream = MagicMock(
+            return_value=_mock_stream_response(chunks, status=500)
+        )
 
         adapter = LLMAdapter(llm_config)
         adapter._streaming_client = lambda: mock_client
@@ -280,7 +328,7 @@ class TestStreamTracing:
         chunks = [
             'data: {"choices":[{"delta":{"content":"Hello"}}]}',
             'data: {"choices":[{"delta":{"content":" world"}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -292,7 +340,8 @@ class TestStreamTracing:
         adapter._streaming_client = lambda: mock_client
 
         async for _ in adapter.generate_stream(
-            [{"role": "user", "content": "hi"}], chat_id=UUID("00000000-0000-0000-0000-000000000001")
+            [{"role": "user", "content": "hi"}],
+            chat_id=UUID("00000000-0000-0000-0000-000000000001"),
         ):
             pass
 
@@ -310,7 +359,7 @@ class TestStreamTracing:
         chunks = [
             'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1","function":{"name":"get_cpu","arguments":""}}]}}]}',
             'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}',
-            'data: [DONE]',
+            "data: [DONE]",
         ]
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -335,7 +384,9 @@ class TestBuildPayload:
         from src.services.llm_adapter import LLMAdapter
 
         adapter = LLMAdapter(llm_config)
-        payload = adapter._build_payload([{"role": "user", "content": "hi"}], None, None, False)
+        payload = adapter._build_payload(
+            [{"role": "user", "content": "hi"}], None, None, False
+        )
         assert "max_tokens" in payload
         assert payload["max_tokens"] == llm_config.max_tokens
 
@@ -345,5 +396,7 @@ class TestBuildPayload:
         adapter = LLMAdapter(llm_config)
         original = adapter._max_tokens
         adapter.escalate_max_tokens()
-        payload = adapter._build_payload([{"role": "user", "content": "hi"}], None, None, False)
+        payload = adapter._build_payload(
+            [{"role": "user", "content": "hi"}], None, None, False
+        )
         assert payload["max_tokens"] == original * 2

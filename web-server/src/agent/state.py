@@ -4,7 +4,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
 
-ROLE_MAP = {"human": "user", "ai": "assistant", "tool": "tool", "tool_result": "tool", "tool_call": "assistant"}
+ROLE_MAP = {
+    "human": "user",
+    "ai": "assistant",
+    "tool": "tool",
+    "tool_result": "tool",
+    "tool_call": "assistant",
+}
 
 StreamChunk = tuple[str, str]
 LLMError = dict[str, object]
@@ -12,6 +18,7 @@ LLMError = dict[str, object]
 
 class Transition(StrEnum):
     """循环状态变更原因。每个节点返回时附带，写入 audit_events。"""
+
     USER_MESSAGE = "user_message"
     TOOL_RESULTS = "tool_results"
     APPROVAL_PENDING = "approval_pending"

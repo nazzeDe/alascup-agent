@@ -24,7 +24,8 @@ export type ExecutionStatus =
   | "PENDING_APPROVAL"
   | "RUNNING"
   | "SUCCEEDED"
-  | "FAILED";
+  | "FAILED"
+  | "REJECTED";
 
 export interface ToolCallInfo {
   call_id: string;
@@ -39,7 +40,7 @@ export interface ToolCallInfo {
   execution_status: ExecutionStatus;
   execution_time_ms?: number;
   output?: Record<string, unknown>;
-  error?: { code: number; message: string; data?: string };
+  error?: { code?: number; message: string; data?: string };
   timestamp: string;
 }
 

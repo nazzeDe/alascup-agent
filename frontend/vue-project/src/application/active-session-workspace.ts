@@ -35,8 +35,8 @@ export class ActiveSessionWorkspace {
     }
   }
 
-  adoptServerSession(chatId: string, title: string): void {
-    const store = this.activeChatStore.value
+  adoptServerSession(chatId: string, title: string, targetStore = this.activeChatStore.value): void {
+    const store = targetStore
     store.chatId.value = chatId
     if (!this.sessionListStore.sessions.value.some(s => s.chat_id === chatId)) {
       this.sessionListStore.addSession({
@@ -47,6 +47,8 @@ export class ActiveSessionWorkspace {
         timestamp: new Date().toISOString(),
       })
     }
-    this.sessionListStore.setActive(chatId)
+    if (this.activeChatStore.value === store) {
+      this.sessionListStore.setActive(chatId)
+    }
   }
 }

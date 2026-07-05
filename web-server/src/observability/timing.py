@@ -47,7 +47,6 @@ def write_profile(report: str) -> None:
         pass
 
 
-
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -195,9 +194,7 @@ class FeatureTimeTracker:
         if not self._profile_enabled and not self._features:
             return None
         total_ms = (time.monotonic() - self._start) * 1000
-        lines = [
-            f"Profile ({len(self._checkpoints)} steps, {total_ms:.1f}ms):"
-        ]
+        lines = [f"Profile ({len(self._checkpoints)} steps, {total_ms:.1f}ms):"]
         for c in self._checkpoints:
             flag = " ⚠ SLOW" if c.elapsed_ms > 100 else ""
             lines.append(
@@ -206,13 +203,10 @@ class FeatureTimeTracker:
         if self._features:
             lines.append("  Features:")
             for f in self._features:
-                lines.append(
-                    f"    {f.name:28s} {f.duration_ms:8.1f}ms  [{f.status}]"
-                )
+                lines.append(f"    {f.name:28s} {f.duration_ms:8.1f}ms  [{f.status}]")
         if self._profile_enabled:
             tracemalloc.stop()
         return "\n".join(lines)
-
 
 
 # ---------------------------------------------------------------------------
@@ -252,4 +246,3 @@ def complete_feature(feature_name: str, status: str = "success") -> float:
 
 def summarize_feature_durations() -> dict[str, float]:
     return get_tracker().summarize_feature_durations()
-

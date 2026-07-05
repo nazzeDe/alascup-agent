@@ -18,9 +18,7 @@ def message_from_wire(raw: dict | AgentMessage) -> AgentMessage:
         role = "assistant"
     elif role in ("tool_result",):
         role = "tool"
-    tool_calls = [
-        tool_call_from_openai(tc) for tc in raw.get("tool_calls", []) or []
-    ]
+    tool_calls = [tool_call_from_openai(tc) for tc in raw.get("tool_calls", []) or []]
     return AgentMessage(
         role=role,
         content=str(raw.get("content", "")),
@@ -39,7 +37,9 @@ def message_to_openai(message: AgentMessage) -> dict[str, Any]:
     result: dict[str, Any] = {"role": message.role, "content": message.content}
     if message.role == "assistant":
         if message.tool_calls:
-            result["tool_calls"] = [tool_call_to_openai(tc) for tc in message.tool_calls]
+            result["tool_calls"] = [
+                tool_call_to_openai(tc) for tc in message.tool_calls
+            ]
         if message.reasoning_content:
             result["reasoning_content"] = message.reasoning_content
     if message.role == "tool":
@@ -70,7 +70,9 @@ def tool_call_from_openai(raw: dict | AgentToolCall) -> AgentToolCall:
     data = dict(
         function=ToolFunction(
             name=full_name,
-            arguments=parse_json_object(arguments) if isinstance(arguments, str) else (arguments or {}),
+            arguments=parse_json_object(arguments)
+            if isinstance(arguments, str)
+            else (arguments or {}),
         ),
         server_name=raw.get("server_name", ""),
         mutable=bool(raw.get("mutable", False)),

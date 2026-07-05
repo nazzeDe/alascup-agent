@@ -91,7 +91,11 @@ export class ChatStreamInterpreter {
     this.sessionChatId = chatId
     if (!this.options.isNewChat) return
     this.newChatId = chatId
-    this.options.activeSessionWorkspace.adoptServerSession(chatId, this.options.firstMessageTitle)
+    this.options.activeSessionWorkspace.adoptServerSession(
+      chatId,
+      this.options.firstMessageTitle,
+      this.options.chatStore,
+    )
   }
 
   private applyReasoning(delta: string): void {
@@ -137,19 +141,15 @@ export class ChatStreamInterpreter {
 
   private applyToolCall(data: Extract<ChatStreamEvent, { type: 'tool_call' }>['data']): void {
     const store = this.options.chatStore
-    store.setPhase('calling_tool')
 
-    const tc: ToolCallInfo = {
-      call_id: data.call_id,
-      chat_id: this.sessionChatId,
-      tool_name: data.tool_name,
-      server: data.server,
-      is_read_only: data.is_read_only,
-      params: data.params,
-      execution_status: 'RUNNING',
-      timestamp: this.now(),
+    const existing = store.toolCalls.value.get(data.call_id)
+    if (existing && this.shouldIgnoreRunningDowngrade(existing)) {
+      this.refreshToolMetadata(data)
+      return
     }
-    store.setToolCall(data.call_id, tc)
+
+    store.setPhase('calling_tool')
+    store.setToolCall(data.call_id, this.runningToolCall(data))
 
     this.clearToolTimeout()
     this.toolTimeout = setTimeout(() => {
@@ -189,8 +189,50 @@ export class ChatStreamInterpreter {
     })
     store.setPhase('awaiting_approval')
     const existing = store.toolCalls.value.get(data.call_id)
-    if (existing && existing.execution_status === 'RUNNING') {
+    if (!existing) {
+      store.setToolCall(data.call_id, this.pendingApprovalToolCall(data))
+    } else if (existing.execution_status === 'RUNNING') {
       store.updateToolCall(data.call_id, { execution_status: 'PENDING_APPROVAL' })
+    }
+  }
+
+  private shouldIgnoreRunningDowngrade(toolCall: ToolCallInfo): boolean {
+    return toolCall.execution_status !== 'RUNNING'
+  }
+
+  private refreshToolMetadata(data: Extract<ChatStreamEvent, { type: 'tool_call' }>['data']): void {
+    this.options.chatStore.updateToolCall(data.call_id, {
+      tool_name: data.tool_name,
+      server: data.server,
+      is_read_only: data.is_read_only,
+      params: data.params,
+    })
+  }
+
+  private runningToolCall(data: Extract<ChatStreamEvent, { type: 'tool_call' }>['data']): ToolCallInfo {
+    return {
+      call_id: data.call_id,
+      chat_id: this.sessionChatId,
+      tool_name: data.tool_name,
+      server: data.server,
+      is_read_only: data.is_read_only,
+      params: data.params,
+      execution_status: 'RUNNING',
+      timestamp: this.now(),
+    }
+  }
+
+  private pendingApprovalToolCall(data: Extract<ChatStreamEvent, { type: 'tool_approval_required' }>['data']): ToolCallInfo {
+    return {
+      call_id: data.call_id,
+      chat_id: data.chat_id || this.sessionChatId,
+      tool_name: data.tool_name,
+      is_read_only: false,
+      params: data.params,
+      request_id: data.request_id,
+      approval_status: 'PENDING',
+      execution_status: 'PENDING_APPROVAL',
+      timestamp: this.now(),
     }
   }
 

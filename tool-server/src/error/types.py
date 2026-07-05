@@ -9,6 +9,8 @@ ERROR_CODE_EXECUTION_FAILED = 500
 ERROR_CODE_TIMEOUT = 504
 ERROR_CODE_TOOL_NOT_FOUND = 404
 ERROR_CODE_INVALID_PARAMS = 400
+
+
 @dataclass(frozen=True)
 class ServerError:
     code: int

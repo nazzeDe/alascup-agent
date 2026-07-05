@@ -10,12 +10,14 @@ def get_network_info(config: ToolServerConfig) -> dict:
     for ifname, snic_list in psutil.net_if_addrs().items():
         addrs[ifname] = []
         for snic in snic_list:
-            addrs[ifname].append({
-                "family": str(snic.family),
-                "address": snic.address,
-                "netmask": snic.netmask or "",
-                "broadcast": snic.broadcast or "",
-            })
+            addrs[ifname].append(
+                {
+                    "family": str(snic.family),
+                    "address": snic.address,
+                    "netmask": snic.netmask or "",
+                    "broadcast": snic.broadcast or "",
+                }
+            )
 
     io_counters = {}
     for ifname, snic in psutil.net_io_counters(pernic=True).items():

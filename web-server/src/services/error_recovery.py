@@ -37,7 +37,11 @@ class ErrorRecovery:
         if len(attempted) < len(chain):
             return {**chain[len(attempted)], "recoverable": True}
 
-        return {"recoverable": False, "action": "surface_error", "layer": len(chain) + 1}
+        return {
+            "recoverable": False,
+            "action": "surface_error",
+            "layer": len(chain) + 1,
+        }
 
     def record_attempt(self, error_type: str, action: str) -> None:
         if error_type not in self._attempts:

@@ -273,7 +273,11 @@ LLM 流式输出 token
 | `error` | `{code, message}` | 异常（code: `TURN_LIMIT_EXCEEDED`, `TOKEN_BUDGET_EXCEEDED`, `AGENT_CRASH`, `SSE_CRASH` 或 LLM 错误码） |
 | `done` | `{}` | 流结束（SSEStream 在 finally 中保证发送） |
 
-`call_id` 作为 tool_call ↔ tool_result 关联键。`reasoning`/`assistant` 增量事件不携带 `chat_id`/`message_id`——完整消息通过 `thinking_done`/`assistant_done` / `session_init` 事件标识边界。
+`call_id` 作为 tool_call ↔ tool_result 关联键，当前取 LLM 返回的 `tool_calls[].id`（即持久化字段 `llm_tool_call_id`），不是数据库 `tool_calls.id`。每个已发送的 `tool_call` 必须在依赖该结果的 assistant 文本和最终 `done` 之前收到且仅收到一个匹配 `tool_result`。`tool_result.execution_status` 的 SSE/UI 取值为 `SUCCEEDED` / `FAILED` / `REJECTED`；用户拒绝或审批过期会以 `REJECTED` tool_result 告知前端和 LLM，同时数据库生命周期记录为 `approval_status=REJECTED|EXPIRED`、`execution_status=FAILED`。`tool_result.output` 可为字符串、对象、数组、数字、布尔或 null，`error` 可携带结构化详情。
+
+审批 REST 请求只接受客户端显式决策 `APPROVED` / `REJECTED`。`PENDING` 是等待态，`EXPIRED` 只由服务端超时或缺失 bridge 时内部生成。
+
+`reasoning`/`assistant` 增量事件不携带 `chat_id`/`message_id`——完整消息通过 `thinking_done`/`assistant_done` / `session_init` 事件标识边界。
 
 ## MCP 客户端
 

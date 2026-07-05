@@ -3,6 +3,7 @@ resolver.py — bpftrace 探针跨内核选择器。
 
 根据宿主内核版本自动选择最合适的探针变体，失败时逐级降级。
 """
+
 from __future__ import annotations
 
 import re
@@ -49,17 +50,23 @@ class ProbeResolver:
             if candidate.exists():
                 logger.info(
                     "resolved probe={} set={} kernel={}.{}",
-                    script_name, set_name, version[0], version[1],
+                    script_name,
+                    set_name,
+                    version[0],
+                    version[1],
                 )
                 return candidate
 
         # Tier 2: generic fallback
         generic = self._probes_root / "generic" / script_name
         if generic.exists():
-            reason = f"kernel {version[0]}.{version[1]}" if version else "unknown kernel"
+            reason = (
+                f"kernel {version[0]}.{version[1]}" if version else "unknown kernel"
+            )
             logger.info(
                 "resolved probe={} set=generic ({} - no matching versioned set)",
-                script_name, reason,
+                script_name,
+                reason,
             )
             return generic
 
@@ -86,7 +93,9 @@ class ProbeResolver:
             try:
                 raw = Path("/proc/version").read_text()
             except (FileNotFoundError, PermissionError):
-                logger.warning("cannot read /proc/version, probe resolution limited to generic")
+                logger.warning(
+                    "cannot read /proc/version, probe resolution limited to generic"
+                )
                 return None
 
         m = _VERSION_PATTERN.search(raw)

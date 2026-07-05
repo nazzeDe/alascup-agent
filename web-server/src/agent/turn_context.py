@@ -78,19 +78,21 @@ class Auditor:
     ) -> None:
         if self._audit is None:
             return
-        await self._audit.log(AuditEvent(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            chat_id=self._ctx.chat_id if self._ctx else None,
-            request_id=request_id,
-            turn_id=self._ctx.turn_id if self._ctx else None,
-            iteration=self._ctx.iteration if self._ctx else None,
-            level=AuditLevel.INFO,
-            actor=actor.value,
-            event="LOOP_TRANSITION",
-            params=params,
-            model=self._ctx.model if self._ctx else None,
-            transition=transition.value,
-        ))
+        await self._audit.log(
+            AuditEvent(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                chat_id=self._ctx.chat_id if self._ctx else None,
+                request_id=request_id,
+                turn_id=self._ctx.turn_id if self._ctx else None,
+                iteration=self._ctx.iteration if self._ctx else None,
+                level=AuditLevel.INFO,
+                actor=actor.value,
+                event="LOOP_TRANSITION",
+                params=params,
+                model=self._ctx.model if self._ctx else None,
+                transition=transition.value,
+            )
+        )
 
     # ── tool_event helper (collapses act.py _audit_tool_executed, review.py _audit_review_decision,
     #    approval.py _audit_approved / _audit_rejected) ──
@@ -112,19 +114,21 @@ class Auditor:
             return
         if level is None:
             level = AuditLevel.WARN if "REJECT" in event else AuditLevel.INFO
-        await self._audit.log(AuditEvent(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            chat_id=self._ctx.chat_id if self._ctx else None,
-            request_id=request_id,
-            turn_id=self._ctx.turn_id if self._ctx else None,
-            iteration=self._ctx.iteration if self._ctx else None,
-            level=level,
-            actor=actor.value,
-            event=event,
-            tool_name=tool_name,
-            params=params,
-            model=self._ctx.model if self._ctx else None,
-            decision=decision,
-            execution_status=execution_status,
-            **{k: v for k, v in kwargs.items() if v is not None},
-        ))
+        await self._audit.log(
+            AuditEvent(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                chat_id=self._ctx.chat_id if self._ctx else None,
+                request_id=request_id,
+                turn_id=self._ctx.turn_id if self._ctx else None,
+                iteration=self._ctx.iteration if self._ctx else None,
+                level=level,
+                actor=actor.value,
+                event=event,
+                tool_name=tool_name,
+                params=params,
+                model=self._ctx.model if self._ctx else None,
+                decision=decision,
+                execution_status=execution_status,
+                **{k: v for k, v in kwargs.items() if v is not None},
+            )
+        )

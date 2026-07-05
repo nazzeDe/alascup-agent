@@ -34,7 +34,9 @@ class ToolExecutor:
 
     # ── classification ──────────────────────────────────────────────────
 
-    async def classify_companion(self, tool_name: str, params: dict, server_name: str) -> dict:
+    async def classify_companion(
+        self, tool_name: str, params: dict, server_name: str
+    ) -> dict:
         """Call ``{tool_name}_classify`` companion tool on *server_name*.
 
         Returns ``{"safe": bool}``.
@@ -45,7 +47,8 @@ class ToolExecutor:
         url = self._registry.url_for(server_name)
         async with Client(url) as client:
             result = await client.call_tool(
-                f"{tool_name}_classify", params,
+                f"{tool_name}_classify",
+                params,
             )
             content = getattr(result, "content", None)
             if isinstance(content, list) and content:
@@ -84,7 +87,9 @@ class ToolExecutor:
         for attempt in range(self._max_retries + 1):
             try:
                 async with Client(url) as client:
-                    args = arguments if isinstance(arguments, dict) and arguments else None
+                    args = (
+                        arguments if isinstance(arguments, dict) and arguments else None
+                    )
                     result = await client.call_tool(tool_name, args)
                     output = _extract_output(result)
                     return {
@@ -140,7 +145,11 @@ class ToolExecutor:
                     return ExecutionStatus(raw)
                 except ValueError:
                     pass
-        return ExecutionStatus.FAILED if getattr(result, "isError", False) else ExecutionStatus.SUCCEEDED
+        return (
+            ExecutionStatus.FAILED
+            if getattr(result, "isError", False)
+            else ExecutionStatus.SUCCEEDED
+        )
 
 
 def _extract_output(result) -> str | None:

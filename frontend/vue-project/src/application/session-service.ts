@@ -10,6 +10,8 @@ export class SessionService {
     private sessionListStore: SessionListStore,
   ) {}
 
+  private readonly pendingApprovals = new Set<string>()
+
   async loadSessions(): Promise<void> {
     this.sessionListStore.setLoading(true)
     this.sessionListStore.setError('')
@@ -62,6 +64,8 @@ export class SessionService {
   }
 
   async approve(requestId: string, chatStore: ChatStore, message?: string): Promise<void> {
+    if (this.pendingApprovals.has(requestId)) return
+    this.pendingApprovals.add(requestId)
     try {
       await this.approvalApi.approve(requestId, message)
       chatStore.updateApprovalStatus('approved', message)
@@ -71,10 +75,14 @@ export class SessionService {
         code: 'APPROVAL_FAILED',
         message: err instanceof Error ? err.message : 'Unknown error',
       })
+    } finally {
+      this.pendingApprovals.delete(requestId)
     }
   }
 
   async reject(requestId: string, chatStore: ChatStore, message?: string): Promise<void> {
+    if (this.pendingApprovals.has(requestId)) return
+    this.pendingApprovals.add(requestId)
     try {
       await this.approvalApi.reject(requestId, message)
       chatStore.updateApprovalStatus('rejected', message)
@@ -84,6 +92,8 @@ export class SessionService {
         code: 'APPROVAL_FAILED',
         message: err instanceof Error ? err.message : 'Unknown error',
       })
+    } finally {
+      this.pendingApprovals.delete(requestId)
     }
   }
 }

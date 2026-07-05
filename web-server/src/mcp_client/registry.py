@@ -49,7 +49,12 @@ class ServerRegistry:
             for delay in (1, 5, 10):
                 try:
                     server_tools = await self._fetch_tools(entry)
-                except (ConnectionError, ConnectionRefusedError, OSError, RuntimeError) as exc:
+                except (
+                    ConnectionError,
+                    ConnectionRefusedError,
+                    OSError,
+                    RuntimeError,
+                ) as exc:
                     last_exc = exc
                     logger.warning(
                         "Server {name} ({url}) unreachable, retry in {delay}s: {err}",
@@ -92,13 +97,15 @@ class ServerRegistry:
             meta = getattr(t, "meta", None) or {}
             if meta.get("hidden"):
                 continue
-            tools.append({
-                "name": t.name,
-                "server_name": entry.name,
-                "description": getattr(t, "description", ""),
-                "params_schema": getattr(t, "inputSchema", None) or {},
-                "mutable": meta.get("mutable", False),
-                "is_read_only": meta.get("is_read_only", False),
-                "is_rollbackable": meta.get("is_rollbackable", False),
-            })
+            tools.append(
+                {
+                    "name": t.name,
+                    "server_name": entry.name,
+                    "description": getattr(t, "description", ""),
+                    "params_schema": getattr(t, "inputSchema", None) or {},
+                    "mutable": meta.get("mutable", False),
+                    "is_read_only": meta.get("is_read_only", False),
+                    "is_rollbackable": meta.get("is_rollbackable", False),
+                }
+            )
         return tools
