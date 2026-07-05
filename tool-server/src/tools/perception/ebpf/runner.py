@@ -15,15 +15,16 @@ from loguru import logger
 
 from .resolver import resolve
 
-# 各探针的超时预设（秒）
-_DEFAULT_TIMEOUTS: dict[str, float] = {
-    "syscount.bt": 15.0,
+# 各按需探针脚本内固定采样窗口（秒）
+_SCRIPT_WINDOWS: dict[str, float] = {
+    "syscount.bt": 10.0,
     "syscall_slow.bt": 5.0,
     "tcpdrop.bt": 10.0,
     "biolatency.bt": 10.0,
     "oomkill.bt": 30.0,
 }
-_DEFAULT_TIMEOUT_FALLBACK: float = 10.0
+_DEFAULT_WINDOW_FALLBACK: float = 10.0
+_TIMEOUT_GRACE_SECONDS: float = 5.0
 
 
 async def run_on_demand(
@@ -47,9 +48,7 @@ async def run_on_demand(
         return [error]
 
     effective_timeout = (
-        timeout
-        if timeout is not None
-        else _DEFAULT_TIMEOUTS.get(script_name, _DEFAULT_TIMEOUT_FALLBACK)
+        timeout if timeout is not None else on_demand_timeout(script_name)
     )
     stdout, stderr, returncode = await _run_bpftrace(
         script_path, script_name, effective_timeout, args
@@ -69,6 +68,14 @@ async def run_on_demand(
         return [{"error": stderr_text, "script": script_name, "returncode": returncode}]
 
     return _parse_bpftrace_output(stdout.decode(errors="replace"))
+
+
+def on_demand_timeout(
+    script_name: str, requested_duration: float | None = None
+) -> float:
+    script_window = _SCRIPT_WINDOWS.get(script_name, _DEFAULT_WINDOW_FALLBACK)
+    requested_window = requested_duration if requested_duration is not None else 0.0
+    return max(script_window, requested_window) + _TIMEOUT_GRACE_SECONDS
 
 
 def _resolve_script(
@@ -112,14 +119,22 @@ async def _run_bpftrace(
         logger.warning(
             "bpftrace timeout script={} timeout={}s", script_name, effective_timeout
         )
-        proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+        await _terminate_bpftrace(proc)
         return b"", b"", "timeout"
+    except asyncio.CancelledError:
+        logger.warning("bpftrace cancelled script={}", script_name)
+        await _terminate_bpftrace(proc)
+        raise
     return stdout, stderr, proc.returncode or 0
+
+
+async def _terminate_bpftrace(proc) -> None:
+    proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
 
 
 def _parse_bpftrace_output(text: str) -> list[dict]:

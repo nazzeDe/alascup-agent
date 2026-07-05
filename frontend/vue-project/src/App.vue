@@ -3,6 +3,7 @@ import { provide, onMounted } from 'vue'
 import { FetchEventSourceClient } from '@/infrastructure/sse-client'
 import { FetchSessionApi } from '@/infrastructure/session-api'
 import { FetchApprovalApi } from '@/infrastructure/approval-api'
+import type { ChatStreamController } from '@/application/ports'
 import { ToastStore } from '@/application/toast-store'
 import { SessionListStore } from '@/application/session-list-store'
 import { SessionService } from '@/application/session-service'
@@ -21,6 +22,7 @@ const toastStore = new ToastStore()
 const sessionListStore = new SessionListStore()
 const sessionService = new SessionService(sessionApi, approvalApi, sessionListStore)
 const activeSessionWorkspace = new ActiveSessionWorkspace(sessionService, sessionListStore)
+const chatStreamController: ChatStreamController = { abortCurrent: () => {} }
 
 provide('toastStore', toastStore)
 provide('sessionListStore', sessionListStore)
@@ -28,20 +30,24 @@ provide('sessionService', sessionService)
 provide('activeSessionWorkspace', activeSessionWorkspace)
 provide('chatStore', activeSessionWorkspace.activeChatStore)
 provide('sseClient', sseClient)
+provide('chatStreamController', chatStreamController)
 
 onMounted(() => {
   activeSessionWorkspace.loadSessions()
 })
 
 async function handleSelectSession(chatId: string) {
+  chatStreamController.abortCurrent()
   await activeSessionWorkspace.select(chatId)
 }
 
 function handleCreateSession() {
+  chatStreamController.abortCurrent()
   activeSessionWorkspace.createDraftSession()
 }
 
 async function handleDeleteSession(chatId: string) {
+  chatStreamController.abortCurrent()
   await activeSessionWorkspace.delete(chatId)
 }
 </script>

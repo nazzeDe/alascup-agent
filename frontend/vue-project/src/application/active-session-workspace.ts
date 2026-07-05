@@ -5,6 +5,7 @@ import { SessionService } from '@/application/session-service'
 
 export class ActiveSessionWorkspace {
   readonly activeChatStore: Ref<ChatStore> = shallowRef(new ChatStore())
+  private selectionVersion = 0
 
   constructor(
     private readonly sessionService: SessionService,
@@ -16,14 +17,30 @@ export class ActiveSessionWorkspace {
   }
 
   async select(chatId: string): Promise<void> {
+    const version = ++this.selectionVersion
+    const previousActiveChatId = this.sessionListStore.activeChatId.value
     this.sessionListStore.setActive(chatId)
     const newStore = new ChatStore()
     newStore.chatId.value = chatId
-    await this.sessionService.loadHistory(chatId, newStore)
+    const loaded = await this.sessionService.loadHistory(chatId, newStore)
+    if (!loaded) {
+      if (version === this.selectionVersion) {
+        this.sessionListStore.setActive(previousActiveChatId)
+      }
+      return
+    }
+    if (
+      newStore.chatId.value !== chatId
+      || version !== this.selectionVersion
+      || this.sessionListStore.activeChatId.value !== chatId
+    ) {
+      return
+    }
     this.activeChatStore.value = newStore
   }
 
   createDraftSession(): void {
+    this.selectionVersion += 1
     this.sessionListStore.setActive(null)
     this.activeChatStore.value = new ChatStore()
   }
@@ -31,6 +48,7 @@ export class ActiveSessionWorkspace {
   async delete(chatId: string): Promise<void> {
     await this.sessionService.deleteSession(chatId)
     if (this.sessionListStore.activeChatId.value === null) {
+      this.selectionVersion += 1
       this.activeChatStore.value = new ChatStore()
     }
   }

@@ -118,14 +118,17 @@ class TestSettings:
         assert llm.max_tokens == 4096
 
     def test_env_prefix(self, monkeypatch):
+        shared_token = "test-" + "token"
         monkeypatch.setenv("DATABASE_URL", "postgresql://env/db")
         monkeypatch.setenv("ALASCUP_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("TOOLSERVER_SHARED_SECRET", shared_token)
 
         from src.config.models import Settings
 
         cfg = Settings()
         assert cfg.database_url == "postgresql://env/db"
         assert cfg.log_level == "DEBUG"
+        assert cfg.toolserver_shared_secret == shared_token
 
     def test_kwarg_overrides_env(self, monkeypatch):
         monkeypatch.setenv("ALASCUP_LOG_LEVEL", "DEBUG")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .resolver import ProbeResolver
-from .runner import run_on_demand
+from .runner import on_demand_timeout, run_on_demand
 from .subscription import SubscriptionManager
 
 
@@ -37,6 +37,8 @@ class EbpfRuntime:
     async def trace(self, script_name: str, duration: int) -> dict:
         return {
             "events": await run_on_demand(
-                script_name, timeout=float(duration), resolve_fn=self.resolve
+                script_name,
+                timeout=on_demand_timeout(script_name, float(duration)),
+                resolve_fn=self.resolve,
             )
         }

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { FetchEventSourceClient } from '@/infrastructure/sse-client'
 import { ToastStore } from '@/application/toast-store'
 import { SessionListStore } from '@/application/session-list-store'
 import { SessionService } from '@/application/session-service'
@@ -58,6 +59,47 @@ describe('App', () => {
     const wrapper = mount(App)
     await nextTick()
     expect(wrapper.find('.row').exists()).toBe(true)
+  })
+
+  it('aborts the active stream before switching or creating sessions', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => [
+        {
+          chat_id: 'session-1',
+          title: 'Session 1',
+          messages: [],
+          executed_tool_list: [],
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    })
+    const connectSpy = vi
+      .spyOn(FetchEventSourceClient.prototype, 'connect')
+      .mockImplementation((_body, _onEvent, signal) => new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      }))
+    const { default: App } = await import('@/App.vue')
+    const wrapper = mount(App)
+    await nextTick()
+    await nextTick()
+
+    const textarea = wrapper.get('textarea')
+    await textarea.setValue('hello')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+    const firstSignal = connectSpy.mock.calls[0]?.[2]
+
+    await wrapper.get('[data-testid="session-item"]').trigger('click')
+
+    expect(firstSignal?.aborted).toBe(true)
+
+    await textarea.setValue('hello again')
+    await wrapper.get('[data-testid="send-button"]').trigger('click')
+    const secondSignal = connectSpy.mock.calls[1]?.[2]
+
+    await wrapper.get('[data-testid="new-session-button"]').trigger('click')
+
+    expect(secondSignal?.aborted).toBe(true)
   })
 })
 

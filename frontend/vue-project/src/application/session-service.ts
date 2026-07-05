@@ -67,7 +67,8 @@ export class SessionService {
     if (this.pendingApprovals.has(requestId)) return
     this.pendingApprovals.add(requestId)
     try {
-      await this.approvalApi.approve(requestId, message)
+      const chatId = this.approvalChatId(requestId, chatStore)
+      await this.approvalApi.approve(requestId, chatId, message)
       chatStore.updateApprovalStatus('approved', message)
       chatStore.setPhase('thinking')
     } catch (err: unknown) {
@@ -84,7 +85,8 @@ export class SessionService {
     if (this.pendingApprovals.has(requestId)) return
     this.pendingApprovals.add(requestId)
     try {
-      await this.approvalApi.reject(requestId, message)
+      const chatId = this.approvalChatId(requestId, chatStore)
+      await this.approvalApi.reject(requestId, chatId, message)
       chatStore.updateApprovalStatus('rejected', message)
       chatStore.setPhase('thinking')
     } catch (err: unknown) {
@@ -95,5 +97,11 @@ export class SessionService {
     } finally {
       this.pendingApprovals.delete(requestId)
     }
+  }
+
+  private approvalChatId(requestId: string, chatStore: ChatStore): string {
+    const event = chatStore.approvalEvent.value
+    if (event?.request_id === requestId) return event.chat_id
+    throw new Error('Approval event does not match request_id')
   }
 }

@@ -160,6 +160,7 @@ class ToolCallLifecycle:
         error=None,
         backup_ref=None,
         llm_trace_id=None,
+        request_id=None,
         result=None,
     ) -> None:
         """UPDATE tool_call row after review/execution/approval.
@@ -176,31 +177,41 @@ class ToolCallLifecycle:
             error=error,
             backup_ref=backup_ref,
             llm_trace_id=llm_trace_id,
+            request_id=request_id,
             result=result,
         )
 
-    async def mark_approved(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_approved(
+        self, chat_id: UUID | None, call_id, request_id: str | None = None
+    ) -> None:
         await self.update(
             chat_id,
             call_id,
             approval_status=ApprovalStatus.APPROVED,
             execution_status=ExecutionStatus.RUNNING,
+            request_id=request_id,
         )
 
-    async def mark_rejected(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_rejected(
+        self, chat_id: UUID | None, call_id, request_id: str | None = None
+    ) -> None:
         await self.update(
             chat_id,
             call_id,
             approval_status=ApprovalStatus.REJECTED,
             execution_status=ExecutionStatus.FAILED,
+            request_id=request_id,
         )
 
-    async def mark_expired(self, chat_id: UUID | None, call_id) -> None:
+    async def mark_expired(
+        self, chat_id: UUID | None, call_id, request_id: str | None = None
+    ) -> None:
         await self.update(
             chat_id,
             call_id,
             approval_status=ApprovalStatus.EXPIRED,
             execution_status=ExecutionStatus.FAILED,
+            request_id=request_id,
         )
 
     async def mark_executed(

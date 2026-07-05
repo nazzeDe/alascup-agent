@@ -220,6 +220,7 @@ class EventFlow:
     async def events(self) -> AsyncIterator[DomainEvent]:
         channel = EventChannel()
         task = asyncio.create_task(self._run_producer(channel))
+        observe_finished_producer = False
         try:
             while True:
                 event = await self._receive_event(channel, task)
@@ -228,14 +229,19 @@ class EventFlow:
                 if event == "drain":
                     for drained in self._drain_channel(channel, task):
                         yield drained
+                    observe_finished_producer = True
                     break
                 if event is None:
+                    observe_finished_producer = True
                     break
                 yield event
                 if await self._is_disconnected():
                     break
         finally:
-            await self._cancel_task(task)
+            if observe_finished_producer:
+                await self._finish_task(task)
+            else:
+                await self._cancel_task(task)
             channel.close()
 
     async def _run_producer(self, channel: EventChannel) -> None:
@@ -276,9 +282,26 @@ class EventFlow:
         return await self._disconnect_check()
 
     async def _cancel_task(self, task: asyncio.Task | None) -> None:
-        if not task or task.done():
+        if not task:
+            return
+        if task.done():
+            try:
+                task.exception()
+            except asyncio.CancelledError:
+                pass
             return
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _finish_task(self, task: asyncio.Task | None) -> None:
+        if not task:
+            return
+        if not task.done():
+            await self._cancel_task(task)
+            return
         try:
             await task
         except asyncio.CancelledError:

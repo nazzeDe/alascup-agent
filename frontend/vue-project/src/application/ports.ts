@@ -9,6 +9,10 @@ export interface SseClient {
   ): Promise<void>
 }
 
+export interface ChatStreamController {
+  abortCurrent(): void
+}
+
 export interface SessionApi {
   listSessions(): Promise<ChatSession[]>
   getSession(chatId: string): Promise<ChatSession>
@@ -16,6 +20,6 @@ export interface SessionApi {
 }
 
 export interface ApprovalApi {
-  approve(requestId: string, reason?: string): Promise<void>
-  reject(requestId: string, reason?: string): Promise<void>
+  approve(requestId: string, chatId: string, reason?: string): Promise<void>
+  reject(requestId: string, chatId: string, reason?: string): Promise<void>
 }

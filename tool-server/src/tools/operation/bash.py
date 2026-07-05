@@ -6,13 +6,22 @@ import subprocess
 from loguru import logger
 
 from src.config import ToolServerConfig
+from src.error.types import security_violation
+from src.security.execution_context import is_controlled_execution
 from src.tool_result import failed, succeeded
+from src.tool_result import failed_error
 from src.tools.operation._host_exec import prepare_host_command
 
 
 def run_bash(
     config: ToolServerConfig, command: str = "", timeout: int | None = None
 ) -> dict:
+    if not is_controlled_execution():
+        logger.warning("bash_direct_call_rejected cmd={c!r}", c=command[:120])
+        return failed_error(
+            security_violation("mutable tools must be called through execute_tool")
+        )
+
     effective_timeout = timeout if timeout is not None else config.bash_timeout
     host_command = prepare_host_command(["bash", "-c", command], config)
     logger.debug(

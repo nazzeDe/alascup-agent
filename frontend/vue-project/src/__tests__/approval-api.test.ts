@@ -18,14 +18,14 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       json: async () => ({}),
     })
 
-    await api.approve('req-1', 'looks safe')
+    await api.approve('req-1', 'chat-1', 'looks safe')
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/tool-requests/req-1/approval',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_status: 'APPROVED', reason: 'looks safe' }),
+        body: JSON.stringify({ chat_id: 'chat-1', approval_status: 'APPROVED', reason: 'looks safe' }),
       },
     )
   })
@@ -36,14 +36,14 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       json: async () => ({}),
     })
 
-    await api.approve('req-2')
+    await api.approve('req-2', 'chat-2')
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/tool-requests/req-2/approval',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_status: 'APPROVED', reason: '' }),
+        body: JSON.stringify({ chat_id: 'chat-2', approval_status: 'APPROVED', reason: '' }),
       },
     )
   })
@@ -54,7 +54,7 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       status: 500,
     })
 
-    await expect(api.approve('req-1')).rejects.toThrow('HTTP 500')
+    await expect(api.approve('req-1', 'chat-1')).rejects.toThrow('HTTP 500')
   })
 
   it('reject sends POST with REJECTED status and reason', async () => {
@@ -63,14 +63,14 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       json: async () => ({}),
     })
 
-    await api.reject('req-1', 'not safe')
+    await api.reject('req-1', 'chat-1', 'not safe')
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/tool-requests/req-1/approval',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_status: 'REJECTED', reason: 'not safe' }),
+        body: JSON.stringify({ chat_id: 'chat-1', approval_status: 'REJECTED', reason: 'not safe' }),
       },
     )
   })
@@ -81,14 +81,14 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       json: async () => ({}),
     })
 
-    await api.reject('req-2')
+    await api.reject('req-2', 'chat-2')
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/tool-requests/req-2/approval',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approval_status: 'REJECTED', reason: '' }),
+        body: JSON.stringify({ chat_id: 'chat-2', approval_status: 'REJECTED', reason: '' }),
       },
     )
   })
@@ -99,12 +99,12 @@ describe('infrastructure/approval-api — FetchApprovalApi', () => {
       status: 400,
     })
 
-    await expect(api.reject('req-1')).rejects.toThrow('HTTP 400')
+    await expect(api.reject('req-1', 'chat-1')).rejects.toThrow('HTTP 400')
   })
 
   it('reject throws on network error', async () => {
     mockFetch.mockRejectedValue(new Error('Network down'))
 
-    await expect(api.reject('req-1')).rejects.toThrow('Network down')
+    await expect(api.reject('req-1', 'chat-1')).rejects.toThrow('Network down')
   })
 })

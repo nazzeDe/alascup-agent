@@ -78,6 +78,9 @@ Agent 循环以 ReAct 模式（Think → Review → Act → Observe → 循环�
 关键行为：
 - `AgentLoop` 直接调用节点函数（think/review/act/observe）；think 节点内通过 LLMAdapter.generate_stream 流式调用
 - 审批循环内嵌在 AgentLoop 中：`ApprovalHandler.resolve()` 等待用户在 ApprovalBridge 上做出决策，合并后重新进入 think → act → observe 子循环
+- `EventFlow` 在生产者结束时先排空已入队事件；若生产者异常退出，异常会经 `ChatTurn` 映射为 `SSE_CRASH`
+- 工具生命周期更新按 `tool_calls.id + chat_id` 定位，审批 `request_id` 会随批准、拒绝或过期状态写回 `tool_calls`
+- SSE turn 被取消时，等待中的审批会持久化为 `EXPIRED/FAILED`，已进入执行的工具会持久化为 `APPROVED/FAILED`
 - 每轮 LLM 调用前主动检查 token 用量，超阈值时分层压缩
 - LLM 返回可恢复错误（prompt_too_long、max_output_tokens）时逐层升级恢复
 
@@ -275,7 +278,7 @@ LLM 流式输出 token
 
 `call_id` 作为 tool_call ↔ tool_result 关联键，当前取 LLM 返回的 `tool_calls[].id`（即持久化字段 `llm_tool_call_id`），不是数据库 `tool_calls.id`。每个已发送的 `tool_call` 必须在依赖该结果的 assistant 文本和最终 `done` 之前收到且仅收到一个匹配 `tool_result`。`tool_result.execution_status` 的 SSE/UI 取值为 `SUCCEEDED` / `FAILED` / `REJECTED`；用户拒绝或审批过期会以 `REJECTED` tool_result 告知前端和 LLM，同时数据库生命周期记录为 `approval_status=REJECTED|EXPIRED`、`execution_status=FAILED`。`tool_result.output` 可为字符串、对象、数组、数字、布尔或 null，`error` 可携带结构化详情。
 
-审批 REST 请求只接受客户端显式决策 `APPROVED` / `REJECTED`。`PENDING` 是等待态，`EXPIRED` 只由服务端超时或缺失 bridge 时内部生成。
+审批 REST 请求必须携带 `tool_approval_required` 事件中的 `chat_id`，后端会校验它与 `request_id` 的归属一致；缺失或不匹配的 `chat_id` 不会完成内存审批请求。决策值只接受客户端显式提交的 `APPROVED` / `REJECTED`。`PENDING` 是等待态，`EXPIRED` 只由服务端超时或缺失 bridge 时内部生成。
 
 `reasoning`/`assistant` 增量事件不携带 `chat_id`/`message_id`——完整消息通过 `thinking_done`/`assistant_done` / `session_init` 事件标识边界。
 
@@ -327,6 +330,6 @@ Prompt section 默认值由 `PromptManager` 内置，当前版本不支持 `prom
 | DELETE /api/sessions/{chat_id} | 删除会话 |
 | GET /api/tools | 列出可用 MCP 工具 |
 | POST /api/tools/refresh | 刷新工具列表（可选指定 server_name 参数单服务器刷新） |
-| POST /api/tool-requests/{request_id}/approval | 审批回调 |
+| POST /api/tool-requests/{request_id}/approval | 审批回调；请求体携带 `chat_id`、`approval_status`、可选 `reason` |
 
 完整规范见 `docs/api-spec/openapi.yaml`。

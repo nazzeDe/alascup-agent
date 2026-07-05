@@ -45,6 +45,7 @@ class FakeSessionApi implements SessionApi {
 // FakeApprovalApi
 class FakeApprovalApi implements ApprovalApi {
   private _lastRequestId: string | null = null
+  private _lastChatId: string | null = null
   private _lastReason: string | null = null
   private _lastApproved: boolean | null = null
   private _failOnApprove = false
@@ -53,19 +54,22 @@ class FakeApprovalApi implements ApprovalApi {
   setFailOnApprove(v: boolean) { this._failOnApprove = v }
   setFailOnReject(v: boolean) { this._failOnReject = v }
   get lastRequestId() { return this._lastRequestId }
+  get lastChatId() { return this._lastChatId }
   get lastReason() { return this._lastReason }
   get lastApproved() { return this._lastApproved }
 
-  async approve(requestId: string, reason?: string): Promise<void> {
+  async approve(requestId: string, chatId: string, reason?: string): Promise<void> {
     if (this._failOnApprove) throw new Error('Approve failed')
     this._lastRequestId = requestId
+    this._lastChatId = chatId
     this._lastReason = reason ?? ''
     this._lastApproved = true
   }
 
-  async reject(requestId: string, reason?: string): Promise<void> {
+  async reject(requestId: string, chatId: string, reason?: string): Promise<void> {
     if (this._failOnReject) throw new Error('Reject failed')
     this._lastRequestId = requestId
+    this._lastChatId = chatId
     this._lastReason = reason ?? ''
     this._lastApproved = false
   }
@@ -212,6 +216,7 @@ describe('SessionService', () => {
   // --- 8. approve sends correct body, updates chatStore.approvalEvent ---
   it('approve sends correct body and updates approvalEvent', async () => {
     const ev: ApprovalEvent = {
+      chat_id: 'chat-approve',
       request_id: 'req-1',
       tool_name: 'bash',
       params: { cmd: 'ls' },
@@ -224,10 +229,32 @@ describe('SessionService', () => {
     await service.approve('req-1', chatStore, 'go ahead')
 
     expect(approvalApi.lastRequestId).toBe('req-1')
+    expect(approvalApi.lastChatId).toBe('chat-approve')
     expect(approvalApi.lastApproved).toBe(true)
     expect(approvalApi.lastReason).toBe('go ahead')
     expect(chatStore.approvalEvent.value!.status).toBe('approved')
     expect(chatStore.agentPhase.value).toBe('thinking')
+  })
+
+  it('approval requires a matching approval event request id', async () => {
+    chatStore.chatId.value = 'active-chat'
+    chatStore.setApprovalEvent({
+      chat_id: 'approval-chat',
+      request_id: 'req-expected',
+      tool_name: 'bash',
+      params: {},
+      reason: 'needs approval',
+      status: 'pending',
+      message: '',
+    })
+
+    await service.approve('req-other', chatStore, 'go')
+
+    expect(approvalApi.lastRequestId).toBeNull()
+    expect(chatStore.connectionError.value).toMatchObject({
+      code: 'APPROVAL_FAILED',
+      message: 'Approval event does not match request_id',
+    })
   })
 
   it('ignores duplicate in-flight approval submissions for the same request', async () => {
@@ -238,6 +265,7 @@ describe('SessionService', () => {
       await new Promise<void>(resolve => { resolveApproval = resolve })
     }
     chatStore.setApprovalEvent({
+      chat_id: 'chat-approve',
       request_id: 'req-1',
       tool_name: 'bash',
       params: {},
@@ -259,6 +287,7 @@ describe('SessionService', () => {
   // --- 9. reject sends correct body, updates chatStore.approvalEvent ---
   it('reject sends correct body and updates approvalEvent', async () => {
     const ev: ApprovalEvent = {
+      chat_id: 'chat-reject',
       request_id: 'req-2',
       tool_name: 'rm',
       params: { path: '/tmp/x' },
@@ -271,6 +300,7 @@ describe('SessionService', () => {
     await service.reject('req-2', chatStore, 'too risky')
 
     expect(approvalApi.lastRequestId).toBe('req-2')
+    expect(approvalApi.lastChatId).toBe('chat-reject')
     expect(approvalApi.lastApproved).toBe(false)
     expect(approvalApi.lastReason).toBe('too risky')
     expect(chatStore.approvalEvent.value!.status).toBe('rejected')

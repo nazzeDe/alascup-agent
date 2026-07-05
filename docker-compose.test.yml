@@ -23,6 +23,7 @@ services:
       - LLM_MOCK=true
       - TOOL_REQUEST_TIMEOUT_SECONDS=3
       - LOG_LEVEL=DEBUG
+      - TOOLSERVER_SHARED_SECRET=test-toolserver-secret
     volumes:
       - ./web-server/config:/app/config:ro,Z
     read_only: true
@@ -48,6 +49,7 @@ services:
       - TOOLSERVER_SANDBOX_ROOT=/tmp/sandbox
       - TOOLSERVER_HOST=0.0.0.0
       - TOOL_SERVER_LOG_LEVEL=DEBUG
+      - TOOLSERVER_SHARED_SECRET=test-toolserver-secret
       - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:
       - /sys/kernel/tracing:/sys/kernel/tracing:ro,Z

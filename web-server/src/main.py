@@ -52,7 +52,9 @@ def _build_services(settings: Settings) -> Services:
     llm_adapter = LLMAdapter(settings.llm_config, tracer=tracer)
 
     registry = ServerRegistry(servers)
-    tool_executor = ToolExecutor(registry)
+    tool_executor = ToolExecutor(
+        registry, toolserver_auth_token=settings.toolserver_shared_secret
+    )
 
     rule_engine = RuleEngine(rules_config)
 

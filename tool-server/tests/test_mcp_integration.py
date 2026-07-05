@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -24,8 +23,7 @@ async def mcp_client(tmp_path: Path):
     from src.main import create_server
 
     config = ToolServerConfig(sandbox_root=str(tmp_path))
-    with patch("src.main.init_ebpf_runtime", return_value=_DummyEbpfRuntime()):
-        server = await create_server(config)
+    server = await create_server(config, ebpf_runtime=_DummyEbpfRuntime())
 
     async with Client(server) as client:
         yield client
@@ -91,3 +89,63 @@ class TestMcpIntegration:
 
         assert result.structured_content["execution_status"] == "SUCCEEDED"
         assert result.structured_content["stdout"] == "mcp-ok\n"
+
+    async def test_direct_mutable_tool_call_is_rejected(self, mcp_client: Client):
+        result = await mcp_client.call_tool(
+            "bash", {"command": "echo bypass", "timeout": 2}
+        )
+
+        assert result.structured_content == {
+            "execution_status": "FAILED",
+            "error": {
+                "code": 403,
+                "message": "SECURITY_VIOLATION",
+                "data": "mutable tools must be called through execute_tool",
+            },
+        }
+
+    async def test_execute_tool_requires_auth_token_when_secret_configured(
+        self, tmp_path: Path
+    ):
+        from src.config import ToolServerConfig
+        from src.main import create_server
+
+        shared_token = "shared-" + "token"
+        config = ToolServerConfig(
+            sandbox_root=str(tmp_path), shared_secret=shared_token
+        )
+        server = await create_server(config, ebpf_runtime=_DummyEbpfRuntime())
+
+        async with Client(server) as client:
+            missing = await client.call_tool(
+                "execute_tool",
+                {
+                    "tool_name": "bash",
+                    "chat_id": "chat-it",
+                    "params": {"command": "echo nope", "timeout": 2},
+                    "request_id": "550e8400-e29b-41d4-a716-446655440001",
+                    "approval_status": "APPROVED",
+                },
+            )
+            approved = await client.call_tool(
+                "execute_tool",
+                {
+                    "tool_name": "bash",
+                    "chat_id": "chat-it",
+                    "params": {"command": "echo auth-ok", "timeout": 2},
+                    "request_id": "550e8400-e29b-41d4-a716-446655440002",
+                    "approval_status": "APPROVED",
+                    "auth_token": shared_token,
+                },
+            )
+
+        assert missing.structured_content == {
+            "execution_status": "FAILED",
+            "error": {
+                "code": 403,
+                "message": "SECURITY_VIOLATION",
+                "data": "invalid tool-server auth token",
+            },
+        }
+        assert approved.structured_content["execution_status"] == "SUCCEEDED"
+        assert approved.structured_content["stdout"] == "auth-ok\n"

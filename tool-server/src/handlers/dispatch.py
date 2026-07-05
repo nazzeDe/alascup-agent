@@ -18,6 +18,8 @@ async def handle_execute_tool(
     request_id: str,
     approval_status: str,
     cache: ToolCache,
+    auth_token: str = "",
+    shared_secret: str = "",
 ) -> dict:
     """FastMCP adapter for execute_tool requests."""
     return await execute_tool_lifecycle(
@@ -28,4 +30,6 @@ async def handle_execute_tool(
         request_id=request_id,
         approval_status=approval_status,
         cache=cache,
+        auth_token=auth_token,
+        shared_secret=shared_secret,
     )

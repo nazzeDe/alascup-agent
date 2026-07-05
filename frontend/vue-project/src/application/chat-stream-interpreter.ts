@@ -179,6 +179,7 @@ export class ChatStreamInterpreter {
   private applyApprovalRequired(data: Extract<ChatStreamEvent, { type: 'tool_approval_required' }>['data']): void {
     const store = this.options.chatStore
     store.setApprovalEvent({
+      chat_id: data.chat_id,
       request_id: data.request_id,
       tool_name: data.tool_name,
       params: data.params,

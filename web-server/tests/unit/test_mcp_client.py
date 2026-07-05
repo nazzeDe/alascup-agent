@@ -125,21 +125,62 @@ class TestToolExecutorExecute:
             mock_client = MagicMock()
             mock_result = MagicMock()
             mock_result.isError = False
+            mock_result.data = {"execution_status": "SUCCEEDED", "stdout": "ok\n"}
             mock_client.call_tool = AsyncMock(return_value=mock_result)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
+            shared_token = "test-" + "token"
 
-            executor = ToolExecutor(registry)
+            executor = ToolExecutor(registry, toolserver_auth_token=shared_token)
             result = await executor.execute(
-                "restart_service",
-                {},
+                "bash",
+                {"command": "echo ok"},
                 server_name="tool-server",
+                approval_status="APPROVED",
+                request_id="req-1",
+                chat_id="chat-1",
+            )
+
+            assert result["execution_status"] == "SUCCEEDED"
+            mock_client.call_tool.assert_called_once_with(
+                "execute_tool",
+                {
+                    "tool_name": "bash",
+                    "chat_id": "chat-1",
+                    "params": {"command": "echo ok"},
+                    "request_id": "req-1",
+                    "approval_status": "APPROVED",
+                    "auth_token": shared_token,
+                },
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_tool_server_executes_direct_tool(self):
+        from src.mcp_client.executor import ToolExecutor
+
+        registry = FakeRegistry({"metrics": "http://metrics:8001"})
+
+        with patch("src.mcp_client.executor.Client") as MockClient:
+            mock_client = MagicMock()
+            mock_result = MagicMock()
+            mock_result.isError = False
+            mock_client.call_tool = AsyncMock(return_value=mock_result)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            MockClient.return_value = mock_client
+            shared_token = "test-" + "token"
+
+            executor = ToolExecutor(registry, toolserver_auth_token=shared_token)
+            await executor.execute(
+                "get_metrics",
+                {"limit": 1},
+                server_name="metrics",
                 approval_status="APPROVED",
                 request_id="req-1",
             )
 
-            assert result["execution_status"] == "SUCCEEDED"
+            mock_client.call_tool.assert_called_once_with("get_metrics", {"limit": 1})
 
     @pytest.mark.asyncio
     async def test_retries_on_connect_error(self):

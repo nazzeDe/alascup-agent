@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID, uuid4
 
 from loguru import logger
@@ -27,9 +28,9 @@ async def act_node(
         return ExecuteOutput()
 
     auditor = Auditor(audit_logger=audit_logger, ctx=ctx)
-    calls = [_call_from_tool_call(tc) for tc in tool_calls]
-
     chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
+    calls = [_call_from_tool_call(tc, chat_id=chat_id) for tc in tool_calls]
+
     feature = f"tool_exec:{chat_id}"
     start_feature(feature)
     debug_log(
@@ -39,7 +40,12 @@ async def act_node(
         names=[c["tool_name"] for c in calls],
         input_ids=[tool_calls[i].id for i in range(len(tool_calls))],
     )
-    results = await _execute_with_error_handling(executor, calls)
+    try:
+        results = await _execute_with_error_handling(executor, calls)
+    except asyncio.CancelledError:
+        complete_feature(feature, status="cancelled")
+        await _record_cancelled_executions(lifecycle, chat_id, tool_calls)
+        raise
     complete_feature(feature)
     formatted = []
     for tc, call, result in zip(tool_calls, calls, results, strict=True):
@@ -52,10 +58,10 @@ async def act_node(
     return ExecuteOutput(results=formatted)
 
 
-def _call_from_tool_call(tc: AgentToolCall) -> dict:
+def _call_from_tool_call(tc: AgentToolCall, chat_id: str | None = None) -> dict:
     if not tc.request_id:
         tc.request_id = str(uuid4())
-    return tool_call_to_dispatch(tc)
+    return tool_call_to_dispatch(tc, chat_id=chat_id)
 
 
 def _formatted_result(tc: AgentToolCall, call: dict, result: dict) -> AgentToolResult:
@@ -88,6 +94,19 @@ async def _record_execution_lifecycle(
         return
     cid = UUID(chat_id) if chat_id else None
     await lifecycle.mark_executed(cid, tc.call_id, result)
+
+
+async def _record_cancelled_executions(
+    lifecycle, chat_id: str | None, tool_calls: list[AgentToolCall]
+) -> None:
+    if lifecycle is None:
+        return
+    result = {
+        "execution_status": "FAILED",
+        "error": {"code": "CANCELLED", "message": "tool execution cancelled"},
+    }
+    for tc in tool_calls:
+        await _record_execution_lifecycle(lifecycle, chat_id, tc, result)
 
 
 def _log_failed_execution(call: dict, result: dict) -> None:

@@ -11,12 +11,12 @@ from loguru import logger
 from src.cache import create_cache
 from src.config import ToolServerConfig, load_config
 from src.tool_catalog import register_tool_catalog
-from src.tools.perception.ebpf import (
-    init_ebpf_runtime,
-)
+from src.tools.perception.ebpf.runtime import EbpfRuntime
 
 
-async def create_server(config: ToolServerConfig) -> FastMCP:
+async def create_server(
+    config: ToolServerConfig, ebpf_runtime: EbpfRuntime | None = None
+) -> FastMCP:
     """Create a fully configured FastMCP tool-server.
 
     Tool definitions live in the Tool catalog Module. FastMCP's own
@@ -27,7 +27,7 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
     ``on_shutdown`` callback.
     """
     cache = create_cache(ttl=config.cache_ttl)
-    ebpf_runtime = init_ebpf_runtime()
+    ebpf_runtime = ebpf_runtime or EbpfRuntime()
 
     @asynccontextmanager
     async def _lifespan(server: FastMCP):
@@ -53,7 +53,7 @@ async def create_server(config: ToolServerConfig) -> FastMCP:
         lifespan=_lifespan,
     )
 
-    register_tool_catalog(server, config, cache)
+    register_tool_catalog(server, config, cache, ebpf_runtime)
     return server
 
 

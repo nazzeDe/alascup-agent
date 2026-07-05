@@ -478,7 +478,7 @@ class TestPostgresSessionManagerUpdateToolCall:
 
     @pytest.mark.asyncio
     async def test_update_tool_call_writes_result(self):
-        """result dict is persisted to tool_calls.result JSONB column."""
+        """result dict is persisted to the owning tool_calls row."""
         from src.services.session_manager import PostgresSessionManager
         from src.models.tool import ExecutionStatus
 
@@ -497,6 +497,9 @@ class TestPostgresSessionManagerUpdateToolCall:
         # First call: UPDATE tool_calls SET ... result = $n
         update_sql = db.execute.call_args_list[0][0][0]
         assert "result" in update_sql
+        assert "WHERE id = $" in update_sql
+        assert "AND chat_id = $" in update_sql
+        assert db.execute.call_args_list[0].args[-2:] == (call_id, chat_id)
         # Second call: UPDATE chat_sessions SET updated_at
         assert db.execute.call_count >= 2
 
@@ -520,6 +523,29 @@ class TestPostgresSessionManagerUpdateToolCall:
         )
         update_sql = db.execute.call_args_list[0][0][0]
         assert "result" not in update_sql
+
+    @pytest.mark.asyncio
+    async def test_update_tool_call_writes_request_id(self):
+        """Approval request ids are persisted when lifecycle status changes."""
+        from src.services.session_manager import PostgresSessionManager
+        from src.models.tool import ApprovalStatus
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        mgr = PostgresSessionManager(db)
+
+        call_id = uuid.uuid4()
+        chat_id = uuid.uuid4()
+        await mgr.update_tool_call(
+            call_id,
+            chat_id,
+            approval_status=ApprovalStatus.APPROVED,
+            request_id="req-123",
+        )
+
+        update_sql = db.execute.call_args_list[0].args[0]
+        assert "request_id" in update_sql
+        assert db.execute.call_args_list[0].args[-3:] == ("req-123", call_id, chat_id)
 
 
 class TestPersistAssistantMessage:
@@ -684,6 +710,33 @@ class TestToolCallLifecycleRegister:
             execution_status=ExecutionStatus.SUCCEEDED,
             error=None,
             result=result,
+        )
+
+
+class TestToolCallLifecycleUpdate:
+    @pytest.mark.asyncio
+    async def test_mark_approved_persists_request_id(self):
+        from src.services.tool_lifecycle import ToolCallLifecycle
+        from src.models.tool import ApprovalStatus, ExecutionStatus
+
+        sm = MagicMock()
+        sm.update_tool_call = AsyncMock()
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+        call_id = uuid.uuid4()
+
+        await lifecycle.mark_approved(chat_id, call_id, "req-123")
+
+        sm.update_tool_call.assert_awaited_once_with(
+            call_id,
+            chat_id,
+            approval_status=ApprovalStatus.APPROVED,
+            execution_status=ExecutionStatus.RUNNING,
+            error=None,
+            backup_ref=None,
+            llm_trace_id=None,
+            request_id="req-123",
+            result=None,
         )
 
 

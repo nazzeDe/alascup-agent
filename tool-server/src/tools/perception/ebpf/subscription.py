@@ -38,9 +38,11 @@ class BpftraceDaemon:
         self._stderr_task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         self._permanent_failure: bool = False
+        self._stopped: bool = False
 
     async def start(self) -> None:
         """启动子进程及其消费者协程。"""
+        self._stopped = False
         if self._script_path is None:
             logger.error(
                 "bpftrace_daemon no_variant script={} - no probe variant found for this kernel",
@@ -157,6 +159,7 @@ class BpftraceDaemon:
 
     async def stop(self) -> None:
         """安全停止。"""
+        self._stopped = True
         if self._watchdog_task:
             self._watchdog_task.cancel()
         if self._consume_task:
@@ -176,6 +179,9 @@ class BpftraceDaemon:
         """是否因权限等永久性错误而停止。"""
         return self._permanent_failure
 
+    def mark_permanent_failure(self) -> None:
+        self._permanent_failure = True
+
     @property
     def status(self) -> str:
         """探针守护进程状态。
@@ -186,6 +192,8 @@ class BpftraceDaemon:
             "permanent_failure" — 永久性失败，不会重试
             "stopped" — 已调用 stop()
         """
+        if self._stopped:
+            return "stopped"
         if self._watchdog_task and not self._watchdog_task.done():
             return "running"
         if self._permanent_failure:
@@ -231,9 +239,22 @@ class SubscriptionManager:
         """启动所有启用的持续探针。"""
         scripts = enabled or ["execsnoop.bt", "proc_exit.bt", "tcpconn.bt"]
         for name in scripts:
+            existing = self._daemons.get(name)
+            if existing is not None and existing.status == "running":
+                logger.debug("bpftrace_daemon already_running script={}", name)
+                continue
+            if existing is not None:
+                await existing.stop()
+
             daemon = BpftraceDaemon(name, resolve_fn=self._resolve_fn)
-            await daemon.start()
             self._daemons[name] = daemon
+            try:
+                await daemon.start()
+            except Exception:
+                daemon.mark_permanent_failure()
+                logger.opt(exception=True).warning(
+                    "bpftrace_daemon start_failed script={}", name
+                )
         if self._daemons:
             logger.info(
                 "bpftrace_subscription started count={} scripts={}",

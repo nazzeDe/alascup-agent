@@ -20,6 +20,7 @@ services:
       - HOST=0.0.0.0
       - PORT=11450
       - DATABASE_URL=postgresql+asyncpg://alascup:alascup@postgres:5432/alascup
+      - TOOLSERVER_SHARED_SECRET=${TOOLSERVER_SHARED_SECRET:?TOOLSERVER_SHARED_SECRET required}
     volumes:
       - ./web-server/config:/app/config:ro,Z
       - ./logs/web-server:/app/logs:Z
@@ -77,6 +78,7 @@ services:
       - TOOLSERVER_HOST_EXEC=nsenter
       - TOOLSERVER_HOST=0.0.0.0
       - TOOLSERVER_LOG_DIR=/app/logs
+      - TOOLSERVER_SHARED_SECRET=${TOOLSERVER_SHARED_SECRET:?TOOLSERVER_SHARED_SECRET required}
       - POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup
     volumes:
       - /var/log:/host/var/log:ro,Z
@@ -92,6 +94,8 @@ services:
       - /app/sandbox:size=64m,mode=1777
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     ulimits:
       memlock:
         soft: -1

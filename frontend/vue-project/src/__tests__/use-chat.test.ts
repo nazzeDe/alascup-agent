@@ -10,7 +10,7 @@ import { ChatStore } from '@/application/chat-store'
 import { SessionListStore } from '@/application/session-list-store'
 import { ToastStore } from '@/application/toast-store'
 import type { ActiveSessionWorkspace } from '@/application/active-session-workspace'
-import type { SseClient } from '@/application/ports'
+import type { ChatStreamController, SseClient } from '@/application/ports'
 import { useChat } from '@/presentation/composables/use-chat'
 import type {
   ChatStreamEvent,
@@ -53,11 +53,36 @@ class FakeSseClient implements SseClient {
   }
 }
 
+class ControlledSseClient implements SseClient {
+  readonly connections: Array<{
+    onEvent: (event: ChatStreamEvent) => void
+    signal: AbortSignal
+    resolve: () => void
+    reject: (err: unknown) => void
+  }> = []
+
+  connect(
+    _body: Record<string, unknown>,
+    onEvent: (event: ChatStreamEvent) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let resolve!: () => void
+    let reject!: (err: unknown) => void
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    this.connections.push({ onEvent, signal, resolve, reject })
+    return promise
+  }
+}
+
 // Parent provides, Child injects — Vue's provide/inject only works ancestor→descendant.
 function mountUseChat(
   fakeSse: FakeSseClient,
   store: ChatStore,
   sessionListStore: SessionListStore,
+  chatStreamController?: ChatStreamController,
 ) {
   let chat: ReturnType<typeof useChat> | undefined
   const toastStore = new ToastStore()
@@ -91,6 +116,9 @@ function mountUseChat(
       provide('sessionListStore', sessionListStore)
       provide('toastStore', toastStore)
       provide('activeSessionWorkspace', activeSessionWorkspace)
+      if (chatStreamController) {
+        provide('chatStreamController', chatStreamController)
+      }
       return {}
     },
     template: '<Child />',
@@ -287,6 +315,25 @@ describe('useChat', () => {
     expect(fakeSse.isAborted()).toBe(true)
   })
 
+  it('registers current abort handler with injected stream controller', () => {
+    const chatStreamController: ChatStreamController = { abortCurrent: vi.fn() }
+    const { getChat } = mountUseChat(
+      fakeSse,
+      chatStore,
+      sessionListStore,
+      chatStreamController,
+    )
+    chatStore.chatId.value = 'c1'
+
+    getChat().send('test')
+    fakeSse.emit({ type: 'reasoning', data: { delta: 'thinking...' } })
+    chatStreamController.abortCurrent()
+
+    expect(chatStore.isStreaming.value).toBe(false)
+    expect(chatStore.agentPhase.value).toBe('idle')
+    expect(fakeSse.isAborted()).toBe(true)
+  })
+
   // --- 15. AbortError silently handled ---
   it('AbortError in connect is silently ignored', async () => {
     const abortFake: SseClient = {
@@ -298,6 +345,29 @@ describe('useChat', () => {
     await flushMicrotasks()
     expect(chatStore.isStreaming.value).toBe(false)
     expect(chatStore.connectionError.value).toBeNull()
+  })
+
+  it('ignores callbacks from an aborted stream after a new stream starts', async () => {
+    const controlledSse = new ControlledSseClient()
+    const { getChat } = mountUseChat(controlledSse, chatStore, sessionListStore)
+    chatStore.chatId.value = 'c1'
+
+    getChat().send('first')
+    const first = controlledSse.connections[0]!
+    getChat().abort()
+    getChat().send('second')
+    const second = controlledSse.connections[1]!
+
+    first.onEvent({ type: 'assistant', data: { delta: 'stale' } })
+    first.resolve()
+    await flushMicrotasks()
+
+    expect(chatStore.isStreaming.value).toBe(true)
+    expect(chatStore.messages.value.filter(m => m.type === 'assistant')).toHaveLength(0)
+
+    second.onEvent({ type: 'assistant', data: { delta: 'current' } })
+    expect(chatStore.messages.value.filter(m => m.type === 'assistant')).toHaveLength(1)
+    expect(chatStore.messages.value.find(m => m.type === 'assistant')!.content).toBe('current')
   })
 
   // --- 16. Network error sets connectionError ---

@@ -211,6 +211,7 @@ describe('ChatStore', () => {
   // --- ApprovalEvent mutations ---
   it('setApprovalEvent sets and clears approval', () => {
     const ev: ApprovalEvent = {
+      chat_id: 'chat-1',
       request_id: 'req1',
       tool_name: 'bash',
       params: { cmd: 'ls' },
@@ -227,6 +228,7 @@ describe('ChatStore', () => {
 
   it('updateApprovalStatus updates pending approval', () => {
     const ev: ApprovalEvent = {
+      chat_id: 'chat-1',
       request_id: 'req1',
       tool_name: 'bash',
       params: { cmd: 'ls' },

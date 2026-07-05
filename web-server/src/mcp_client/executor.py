@@ -13,9 +13,15 @@ class ToolExecutor:
     Classification for mutable tools uses companion tools (``{tool}_classify``).
     """
 
-    def __init__(self, registry: ServerRegistry, max_retries: int = 2) -> None:
+    def __init__(
+        self,
+        registry: ServerRegistry,
+        max_retries: int = 2,
+        toolserver_auth_token: str = "",
+    ) -> None:
         self._registry = registry
         self._max_retries = max_retries
+        self._toolserver_auth_token = toolserver_auth_token
 
     # ── tool discovery (delegated to registry) ──────────────────────────
 
@@ -69,6 +75,7 @@ class ToolExecutor:
         server_name: str,
         approval_status: str,
         request_id: str,
+        chat_id: str = "",
     ) -> dict:
         """Execute *tool_name* on *server_name*.
 
@@ -87,10 +94,18 @@ class ToolExecutor:
         for attempt in range(self._max_retries + 1):
             try:
                 async with Client(url) as client:
-                    args = (
-                        arguments if isinstance(arguments, dict) and arguments else None
+                    call_name, args = self._call_payload(
+                        tool_name,
+                        arguments,
+                        server_name=server_name,
+                        approval_status=approval_status,
+                        request_id=request_id,
+                        chat_id=chat_id,
                     )
-                    result = await client.call_tool(tool_name, args)
+                    result = await client.call_tool(call_name, args)
+                    tool_server_result = self._tool_server_result(result, server_name)
+                    if tool_server_result is not None:
+                        return tool_server_result
                     output = _extract_output(result)
                     return {
                         "execution_status": ToolExecutor._resolve_status(result),
@@ -124,10 +139,48 @@ class ToolExecutor:
                 server_name=c["server_name"],
                 approval_status=c.get("approval_status", "APPROVED"),
                 request_id=c.get("request_id", ""),
+                chat_id=c.get("chat_id", ""),
             )
             for c in calls
         ]
         return await asyncio.gather(*tasks)
+
+    def _call_payload(
+        self,
+        tool_name: str,
+        arguments: dict,
+        *,
+        server_name: str,
+        approval_status: str,
+        request_id: str,
+        chat_id: str,
+    ) -> tuple[str, dict | None]:
+        args = arguments if isinstance(arguments, dict) and arguments else None
+        if server_name != "tool-server":
+            return tool_name, args
+        return (
+            "execute_tool",
+            {
+                "tool_name": tool_name,
+                "chat_id": chat_id,
+                "params": arguments if isinstance(arguments, dict) else {},
+                "request_id": request_id,
+                "approval_status": approval_status,
+                "auth_token": self._toolserver_auth_token,
+            },
+        )
+
+    @staticmethod
+    def _tool_server_result(result, server_name: str) -> dict | None:
+        if server_name != "tool-server":
+            return None
+        data = getattr(result, "data", None)
+        if isinstance(data, dict):
+            return data
+        structured = getattr(result, "structured_content", None)
+        if isinstance(structured, dict):
+            return structured
+        return None
 
     @staticmethod
     def _resolve_status(result) -> ExecutionStatus:

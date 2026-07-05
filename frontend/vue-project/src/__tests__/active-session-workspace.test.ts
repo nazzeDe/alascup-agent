@@ -7,12 +7,14 @@ import type { ChatSession } from '@/domain/models'
 
 class FakeSessionApi implements SessionApi {
   sessions = new Map<string, ChatSession>()
+  private blockers = new Map<string, Promise<void>>()
 
   async listSessions(): Promise<ChatSession[]> {
     return [...this.sessions.values()]
   }
 
   async getSession(chatId: string): Promise<ChatSession> {
+    await this.blockers.get(chatId)
     const session = this.sessions.get(chatId)
     if (!session) throw new Error('missing')
     return session
@@ -20,6 +22,10 @@ class FakeSessionApi implements SessionApi {
 
   async deleteSession(chatId: string): Promise<void> {
     this.sessions.delete(chatId)
+  }
+
+  blockGet(chatId: string, blocker: Promise<void>): void {
+    this.blockers.set(chatId, blocker)
   }
 }
 
@@ -55,6 +61,48 @@ describe('ActiveSessionWorkspace', () => {
     expect(sessionListStore.activeChatId.value).toBe('chat-1')
     expect(workspace.activeChatStore.value.chatId.value).toBe('chat-1')
     expect(workspace.activeChatStore.value.messages.value).toHaveLength(1)
+  })
+
+  it('ignores stale history responses from earlier session selections', async () => {
+    let releaseSlow!: () => void
+    sessionApi.sessions.set('slow-chat', {
+      chat_id: 'slow-chat',
+      messages: [{ message_id: 'slow-m1', chat_id: 'slow-chat', timestamp: 't', type: 'user', content: 'slow' }],
+      executed_tool_list: [],
+      timestamp: 't',
+    })
+    sessionApi.sessions.set('fast-chat', {
+      chat_id: 'fast-chat',
+      messages: [{ message_id: 'fast-m1', chat_id: 'fast-chat', timestamp: 't', type: 'user', content: 'fast' }],
+      executed_tool_list: [],
+      timestamp: 't',
+    })
+    sessionApi.blockGet('slow-chat', new Promise<void>(resolve => { releaseSlow = resolve }))
+
+    const slowSelect = workspace.select('slow-chat')
+    await workspace.select('fast-chat')
+    releaseSlow()
+    await slowSelect
+
+    expect(sessionListStore.activeChatId.value).toBe('fast-chat')
+    expect(workspace.activeChatStore.value.chatId.value).toBe('fast-chat')
+    expect(workspace.activeChatStore.value.messages.value[0]!.content).toBe('fast')
+  })
+
+  it('keeps the previous active session when selected history fails to load', async () => {
+    sessionApi.sessions.set('current-chat', {
+      chat_id: 'current-chat',
+      messages: [{ message_id: 'current-m1', chat_id: 'current-chat', timestamp: 't', type: 'user', content: 'current' }],
+      executed_tool_list: [],
+      timestamp: 't',
+    })
+    await workspace.select('current-chat')
+
+    await workspace.select('missing-chat')
+
+    expect(sessionListStore.activeChatId.value).toBe('current-chat')
+    expect(workspace.activeChatStore.value.chatId.value).toBe('current-chat')
+    expect(workspace.activeChatStore.value.messages.value[0]!.content).toBe('current')
   })
 
   it('creates a draft session with a fresh store', () => {

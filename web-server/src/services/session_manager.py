@@ -7,6 +7,7 @@ from src.models.session import ChatSession
 from src.models.tool import ApprovalStatus, ExecutionStatus, ToolCall
 
 _TOOL_CALL_UPDATE_COLUMNS = {
+    "request_id": "request_id",
     "approval_status": "approval_status",
     "execution_status": "execution_status",
     "error": "error",
@@ -64,6 +65,7 @@ class InMemorySessionManager:
         error: dict | None = None,
         backup_ref: str | None = None,
         llm_trace_id: uuid.UUID | None = None,
+        request_id: str | None = None,
         result: dict | None = None,
     ) -> None:
         """No-op for in-memory manager: tool calls are mutated in-place."""
@@ -193,6 +195,7 @@ class PostgresSessionManager:
         error: dict | None = None,
         backup_ref: str | None = None,
         llm_trace_id: uuid.UUID | None = None,
+        request_id: str | None = None,
         result: dict | None = None,
     ) -> None:
         """Update tool_call row after classification, approval, or execution."""
@@ -210,6 +213,8 @@ class PostgresSessionManager:
             values.append(("backup_ref", backup_ref))
         if llm_trace_id is not None:
             values.append(("llm_trace_id", llm_trace_id))
+        if request_id is not None:
+            values.append(("request_id", request_id))
         if result is not None:
             values.append(("result", json.dumps(result)))
         if execution_status in (ExecutionStatus.SUCCEEDED, ExecutionStatus.FAILED):
@@ -225,7 +230,8 @@ class PostgresSessionManager:
             args.append(value)
 
         args.append(tool_call_id)
-        query = f"UPDATE tool_calls SET {', '.join(sets)} WHERE id = ${len(args)}"  # nosec B608  # noqa: S608 - columns are fixed whitelist values.
+        args.append(chat_id)
+        query = f"UPDATE tool_calls SET {', '.join(sets)} WHERE id = ${len(args) - 1} AND chat_id = ${len(args)}"  # nosec B608  # noqa: S608 - columns are fixed whitelist values.
         await self._db.execute(
             query,
             *args,

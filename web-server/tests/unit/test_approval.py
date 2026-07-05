@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest
@@ -88,7 +89,7 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
-                json={"approval_status": "INVALID_STATUS"},
+                json={"chat_id": chat_id, "approval_status": "INVALID_STATUS"},
             )
             assert r.status_code == 400
             assert "invalid approval_status" in r.json()["detail"]
@@ -105,7 +106,7 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
-                json={"approval_status": "EXPIRED"},
+                json={"chat_id": chat_id, "approval_status": "EXPIRED"},
             )
             assert r.status_code == 400
             assert "invalid approval_status" in r.json()["detail"]
@@ -117,9 +118,31 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 "/api/tool-requests/00000000-0000-0000-0000-000000000000/approval",
-                json={"approval_status": "APPROVED"},
+                json={
+                    "chat_id": "11111111-1111-1111-1111-111111111111",
+                    "approval_status": "APPROVED",
+                },
             )
             assert r.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_chat_id_mismatch_returns_403(self, app_with_bridge):
+        """Approval must be bound to the chat that owns the pending request."""
+        services, bridge = app_with_bridge
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        await self._setup_session(services, bridge, chat_id, req_id)
+
+        async with _make_client(services) as c:
+            r = await c.post(
+                f"/api/tool-requests/{req_id}/approval",
+                json={
+                    "chat_id": str(uuid.uuid4()),
+                    "approval_status": "APPROVED",
+                },
+            )
+            assert r.status_code == 403
+            assert "chat_id mismatch" in r.json()["detail"]
 
     async def _setup_session(self, services, bridge, chat_id: str, req_id: str):
         """Create a session with the given chat_id and register the approval request."""
@@ -145,7 +168,11 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
-                json={"approval_status": "APPROVED", "reason": "looks safe"},
+                json={
+                    "chat_id": chat_id,
+                    "approval_status": "APPROVED",
+                    "reason": "looks safe",
+                },
             )
             assert r.status_code == 200
             data = r.json()
@@ -164,12 +191,33 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
-                json={"approval_status": "REJECTED"},
+                json={"chat_id": chat_id, "approval_status": "REJECTED"},
             )
             assert r.status_code == 200
             data = r.json()
             assert data["approval_status"] == "REJECTED"
             assert data["request_id"] == req_id
+
+    @pytest.mark.asyncio
+    async def test_duplicate_decision_returns_404(self, app_with_bridge):
+        """Once a decision is accepted, later POSTs cannot append more decisions."""
+        services, bridge = app_with_bridge
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        await self._setup_session(services, bridge, chat_id, req_id)
+
+        async with _make_client(services) as c:
+            first = await c.post(
+                f"/api/tool-requests/{req_id}/approval",
+                json={"chat_id": chat_id, "approval_status": "APPROVED"},
+            )
+            second = await c.post(
+                f"/api/tool-requests/{req_id}/approval",
+                json={"chat_id": chat_id, "approval_status": "REJECTED"},
+            )
+
+            assert first.status_code == 200
+            assert second.status_code == 404
 
     @pytest.mark.asyncio
     async def test_approval_without_reason(self, app_with_bridge):
@@ -182,6 +230,53 @@ class TestApprovalEndpoint:
         async with _make_client(services) as c:
             r = await c.post(
                 f"/api/tool-requests/{req_id}/approval",
-                json={"approval_status": "APPROVED"},
+                json={"chat_id": chat_id, "approval_status": "APPROVED"},
             )
             assert r.status_code == 200
+
+
+class TestApprovalBridge:
+    @pytest.mark.asyncio
+    async def test_gather_decisions_cleans_up_after_timeout(self):
+        from src.security.pending import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        bridge.create(req_id, chat_id)
+
+        decisions = await bridge.gather_decisions(req_id, 1, timeout=0.001)
+
+        assert decisions == [{"status": "EXPIRED", "reason": "timeout"}]
+        assert bridge.get_chat_id(req_id) is None
+        assert bridge.complete(req_id, "APPROVED") is False
+
+    def test_complete_requires_chat_id(self):
+        from src.security.pending import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        bridge.create(req_id, chat_id)
+
+        assert bridge.complete(req_id, "APPROVED") is False
+        assert bridge.complete(req_id, "APPROVED", chat_id=chat_id) is True
+
+    @pytest.mark.asyncio
+    async def test_gather_decisions_cleans_up_when_cancelled(self):
+        from src.security.pending import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        req_id = str(uuid.uuid4())
+        chat_id = str(uuid.uuid4())
+        bridge.create(req_id, chat_id)
+
+        task = asyncio.create_task(bridge.gather_decisions(req_id, 1))
+        await asyncio.sleep(0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert bridge.get_chat_id(req_id) is None
+        assert bridge.complete(req_id, "APPROVED") is False

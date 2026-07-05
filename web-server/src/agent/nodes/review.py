@@ -106,6 +106,7 @@ async def _apply_decision(
 ) -> None:
     chat_id_uuid = _safe_uuid(chat_id)
     if decision == "REJECT":
+        tc.request_id = tc.request_id or str(uuid4())
         rejected.append(tc)
         await auditor.tool_event(
             "TOOL_REJECTED",
@@ -116,7 +117,7 @@ async def _apply_decision(
             decision="REJECT",
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.mark_rejected(chat_id_uuid, tc.call_id)
+            await lifecycle.mark_rejected(chat_id_uuid, tc.call_id, tc.request_id)
     elif decision == "AUTO_APPROVE":
         tc.is_read_only = is_read_only
         tc.request_id = str(uuid4())
@@ -129,7 +130,7 @@ async def _apply_decision(
             params=args,
         )
         if lifecycle is not None and chat_id_uuid is not None:
-            await lifecycle.mark_approved(chat_id_uuid, tc.call_id)
+            await lifecycle.mark_approved(chat_id_uuid, tc.call_id, tc.request_id)
     else:
         tc.is_read_only = is_read_only
         pending.append(tc)

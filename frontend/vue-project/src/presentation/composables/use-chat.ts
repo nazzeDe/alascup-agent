@@ -1,7 +1,7 @@
 import { computed, inject, onUnmounted, type Ref } from 'vue'
 import { ChatStore } from '@/application/chat-store'
 import type { ToastStore } from '@/application/toast-store'
-import type { SseClient } from '@/application/ports'
+import type { ChatStreamController, SseClient } from '@/application/ports'
 import { ChatStreamInterpreter } from '@/application/chat-stream-interpreter'
 import type { ActiveSessionWorkspace } from '@/application/active-session-workspace'
 import type { Message } from '@/domain/models'
@@ -17,6 +17,7 @@ export function useChat() {
   const storeRef = inject<Ref<ChatStore>>('chatStore')!
   const toastStore = inject<ToastStore>('toastStore')!
   const activeSessionWorkspace = inject<ActiveSessionWorkspace>('activeSessionWorkspace')!
+  const chatStreamController = inject<ChatStreamController | null>('chatStreamController', null)
 
   let abortController: AbortController | null = null
   let streamInterpreter: ChatStreamInterpreter | null = null
@@ -41,23 +42,32 @@ export function useChat() {
     store.setStreaming(true)
 
     abortController = new AbortController()
+    const currentController = abortController
 
     const firstMessageTitle = text.length > 30 ? text.slice(0, 30) + '...' : text
-    streamInterpreter = new ChatStreamInterpreter({
+    const currentInterpreter = new ChatStreamInterpreter({
       chatStore: store,
       activeSessionWorkspace,
       toastStore,
       isNewChat,
       firstMessageTitle,
     })
+    streamInterpreter = currentInterpreter
+
+    const isCurrentStream = () =>
+      abortController === currentController
+      && streamInterpreter === currentInterpreter
 
     sseClient.connect(
       { chat_id: store.chatId.value ?? undefined, message: text },
-      event => streamInterpreter?.apply(event),
-      abortController.signal,
+      event => {
+        if (isCurrentStream()) currentInterpreter.apply(event)
+      },
+      currentController.signal,
     ).then(() => {
-      streamInterpreter?.completeConnection()
+      if (isCurrentStream()) currentInterpreter.completeConnection()
     }).catch((err: unknown) => {
+      if (!isCurrentStream()) return
       store.setStreaming(false)
       if (err instanceof DOMException && err.name === 'AbortError') return
       store.setConnectionError({
@@ -71,11 +81,24 @@ export function useChat() {
   }
 
   function abort(): void {
-    abortController?.abort()
-    streamInterpreter?.abort()
+    const controller = abortController
+    const interpreter = streamInterpreter
+    abortController = null
+    streamInterpreter = null
+    controller?.abort()
+    interpreter?.abort()
   }
 
-  onUnmounted(() => abort())
+  if (chatStreamController) {
+    chatStreamController.abortCurrent = abort
+  }
+
+  onUnmounted(() => {
+    abort()
+    if (chatStreamController?.abortCurrent === abort) {
+      chatStreamController.abortCurrent = () => {}
+    }
+  })
 
   // Reactive state — computed through storeRef so they stay reactive
   // when AppShell replaces the active ChatStore (shallowRef swap).

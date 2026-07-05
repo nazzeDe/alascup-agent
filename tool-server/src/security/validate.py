@@ -1,11 +1,19 @@
+import hmac
 import uuid
 
 from loguru import logger
 
 
 def validate_execution(
-    approval_status: str, request_id: str, is_read_only: bool
+    approval_status: str,
+    request_id: str,
+    is_read_only: bool,
+    auth_token: str = "",
+    shared_secret: str = "",
 ) -> tuple[bool, str]:
+    if shared_secret and not hmac.compare_digest(auth_token, shared_secret):
+        logger.warning("execution_rejected reason=invalid_auth_token")
+        return False, "invalid tool-server auth token"
     if approval_status != "APPROVED":
         logger.warning(
             "execution_rejected reason=not_approved got={s}", s=approval_status

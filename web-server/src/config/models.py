@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     agent_token_ceiling_ratio: float = 0.95
     context_window_size: int = 128000
     tool_request_timeout_seconds: int = 300
+    toolserver_shared_secret: str = Field(
+        default="", validation_alias="TOOLSERVER_SHARED_SECRET"
+    )
 
     # ── Logging ──────────────────────────────────────────────────────
     log_level: str = "INFO"

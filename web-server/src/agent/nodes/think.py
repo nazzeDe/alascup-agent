@@ -194,8 +194,9 @@ async def _build_think_result(
     tool_call_blocks = [tool_call_from_openai(tc) for tc in assembly.tool_calls]
 
     if executor is not None and tool_call_blocks:
+        chat_id = str(ctx.chat_id) if ctx and ctx.chat_id else None
         pending_tool_calls, pre_executed = await _dispatch_tool_calls(
-            tool_call_blocks, executor, available_tools
+            tool_call_blocks, executor, available_tools, chat_id=chat_id
         )
     else:
         pending_tool_calls = tool_call_blocks

@@ -22,15 +22,26 @@ class ApprovalBridge:
     def get_chat_id(self, request_id: str) -> str | None:
         return self._chat_ids.get(request_id)
 
-    def complete(self, request_id: str, status: str, reason: str | None = None) -> None:
-        """Push a decision. Each call wakes one await_approval consumer."""
-        if request_id not in self._pending:
-            return
+    def complete(
+        self,
+        request_id: str,
+        status: str,
+        reason: str | None = None,
+        chat_id: str | None = None,
+    ) -> bool:
+        """Push one decision and consume the public request handle."""
+        expected_chat_id = self._chat_ids.get(request_id)
+        if request_id not in self._pending or expected_chat_id is None:
+            return False
+        if chat_id is None or chat_id != expected_chat_id:
+            return False
+        self._chat_ids.pop(request_id, None)
         self._pending[request_id].append({"status": status, "reason": reason})
         event = self._events.get(request_id)
         if event:
             event.set()
             self._events[request_id] = asyncio.Event()
+        return True
 
     async def _await_one(self, request_id: str, timeout: float = 300) -> dict:
         """Wait for exactly one decision. Used by gather_decisions internally."""
@@ -54,11 +65,12 @@ class ApprovalBridge:
     ) -> list[dict]:
         """Collect N decisions from N complete() calls. Returns list of {status, reason} dicts."""
         decisions: list[dict] = []
-        for _ in range(expected_count):
-            d = await self._await_one(request_id, timeout)
-            decisions.append(d)
-        # Cleanup
-        self._events.pop(request_id, None)
-        self._pending.pop(request_id, None)
-        self._chat_ids.pop(request_id, None)
-        return decisions
+        try:
+            for _ in range(expected_count):
+                d = await self._await_one(request_id, timeout)
+                decisions.append(d)
+            return decisions
+        finally:
+            self._events.pop(request_id, None)
+            self._pending.pop(request_id, None)
+            self._chat_ids.pop(request_id, None)

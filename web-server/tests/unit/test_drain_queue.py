@@ -216,7 +216,9 @@ class TestDrainQueueIntegration:
             parsed = json.loads(ev_data) if isinstance(ev_data, str) else ev_data
             events.append((e["event"], parsed))
             if e["event"] == "tool_approval_required":
-                bridge.complete(parsed["request_id"], "APPROVED")
+                bridge.complete(
+                    parsed["request_id"], "APPROVED", chat_id=parsed["chat_id"]
+                )
 
         event_types = [e[0] for e in events]
 

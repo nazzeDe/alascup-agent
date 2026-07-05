@@ -1,6 +1,8 @@
+import asyncio
 import json
 from uuid import uuid4
 
+import pytest
 
 from src.agent.nodes import (
     act_node,
@@ -244,12 +246,16 @@ class TestActNode:
                 {"function": {"name": "get_memory", "arguments": "{}"}},
             ]
         )
-        result = await act_node(state, executor=_SpyExecutor())
+        chat_id = uuid4()
+        ctx = TurnContext(chat_id=chat_id, turn_id=uuid4(), iteration=1, model=None)
+        result = await act_node(state, ctx=ctx, executor=_SpyExecutor())
 
         assert parallel_called
         assert len(call_args) == 2
         assert call_args[0]["tool_name"] == "get_cpu"
         assert call_args[1]["tool_name"] == "get_memory"
+        assert call_args[0]["chat_id"] == str(chat_id)
+        assert call_args[1]["chat_id"] == str(chat_id)
         assert len(result.results) == 2
 
     async def test_empty_approved_list_returns_nothing(self):
@@ -326,6 +332,35 @@ class TestActNode:
         assert lifecycle.mark_executed.call_args.args[1] == tool_call["call_id"]
         assert lifecycle.mark_executed.call_args.args[2]["output"] == "CPU: 45%"
 
+    async def test_cancelled_execution_marks_lifecycle_failed(self):
+        """SSE cancellation during execution does not leave RUNNING tool calls stale."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        class _CancellingExecutor:
+            async def execute_parallel(self, calls):
+                raise asyncio.CancelledError
+
+        lifecycle = MagicMock()
+        lifecycle.mark_executed = AsyncMock()
+        chat_id = uuid4()
+        call_id = uuid4()
+        state = _state_with_tools(
+            [{"function": {"name": "get_cpu", "arguments": "{}"}, "call_id": call_id}]
+        )
+        ctx = TurnContext(chat_id=chat_id, turn_id=uuid4(), iteration=1, model=None)
+
+        with pytest.raises(asyncio.CancelledError):
+            await act_node(
+                state, ctx=ctx, executor=_CancellingExecutor(), lifecycle=lifecycle
+            )
+
+        lifecycle.mark_executed.assert_called_once()
+        assert lifecycle.mark_executed.call_args.args[0] == chat_id
+        assert lifecycle.mark_executed.call_args.args[1] == call_id
+        result = lifecycle.mark_executed.call_args.args[2]
+        assert result["execution_status"] == "FAILED"
+        assert result["error"]["code"] == "CANCELLED"
+
 
 class TestStreamingThink:
     """AG-007: think_node stream-dispatch based on tool metadata (three pools)."""
@@ -368,6 +403,48 @@ class TestStreamingThink:
         assert len(result.pre_executed) == 1
         assert result.pre_executed[0].tool_name == "get_cpu"
         assert result.tool_calls == []
+
+    async def test_readonly_pre_execution_dispatches_chat_id(self):
+        """Read-only inline execution keeps tool-server request binding scoped by chat."""
+        dispatched = []
+
+        class _SpyExecutor:
+            async def execute_parallel(self, calls):
+                dispatched.extend(calls)
+                return [{"execution_status": "SUCCEEDED"} for _ in calls]
+
+        llm = MockLLM(
+            [
+                {
+                    "event": "tool_call",
+                    "data": json.dumps(
+                        {
+                            "function": {
+                                "name": "tool-server__get_cpu",
+                                "arguments": "{}",
+                            }
+                        }
+                    ),
+                },
+                {"event": "done", "data": "{}"},
+            ]
+        )
+        state = self._state_with_tools(
+            [
+                {
+                    "name": "get_cpu",
+                    "server_name": "tool-server",
+                    "mutable": False,
+                    "is_read_only": True,
+                },
+            ]
+        )
+        chat_id = uuid4()
+        ctx = TurnContext(chat_id=chat_id, turn_id=uuid4(), iteration=1, model=None)
+
+        await think_node(state, ctx=ctx, llm=llm, executor=_SpyExecutor())
+
+        assert dispatched[0]["chat_id"] == str(chat_id)
 
     async def test_non_readonly_stays_in_tool_calls(self):
         """Approval-pool (non-mutable, not readonly) → stays in tool_calls."""

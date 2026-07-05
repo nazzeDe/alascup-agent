@@ -60,7 +60,10 @@ def _parse_args(args: str | dict[str, Any]) -> dict[str, Any]:
 
 
 async def _dispatch_tool_calls(
-    tool_call_blocks: list[AgentToolCall], executor, available_tools: list[dict]
+    tool_call_blocks: list[AgentToolCall],
+    executor,
+    available_tools: list[dict],
+    chat_id: str | None = None,
 ) -> tuple[list[AgentToolCall], list[AgentToolResult]]:
     """Parse server_name prefix, attach metadata, pre-execute readonly tools."""
     tool_index = _build_tool_index(available_tools)
@@ -91,6 +94,7 @@ async def _dispatch_tool_calls(
             pending,
             dispatch,
             dispatch_call_ids,
+            chat_id,
         )
 
     pre_executed: list[AgentToolResult] = []
@@ -153,6 +157,7 @@ def _classify_and_route(
     pending: list[AgentToolCall],
     dispatch: list[dict[str, Any]],
     dispatch_call_ids: list[str],
+    chat_id: str | None,
 ) -> None:
     """Classify a tool_call as mutable/readonly/write and route to pending or dispatch."""
     is_mutable = meta.get("mutable", False)
@@ -165,7 +170,7 @@ def _classify_and_route(
     elif is_read_only:
         tc.approval_status = "APPROVED"
         tc.request_id = str(uuid4())
-        dispatch.append(tool_call_to_dispatch(tc))
+        dispatch.append(tool_call_to_dispatch(tc, chat_id=chat_id))
         dispatch_call_ids.append(tc_id)
     else:
         tc.mutable = False

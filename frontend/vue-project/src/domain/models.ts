@@ -69,6 +69,7 @@ export interface ReasoningEntry {
 }
 
 export interface ApprovalEvent {
+  chat_id: string;
   request_id: string;
   tool_name: string;
   params: Record<string, unknown>;

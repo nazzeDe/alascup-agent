@@ -43,6 +43,38 @@ class TestConfigLoading:
         assert config.port == 11451
         assert config.postgres_dsn is None
 
+    def test_non_loopback_host_requires_shared_secret(self) -> None:
+        from pydantic import ValidationError
+
+        from src.config import ToolServerConfig
+
+        all_interfaces = ".".join(("0", "0", "0", "0"))
+        with pytest.raises(ValidationError, match="TOOLSERVER_SHARED_SECRET"):
+            ToolServerConfig(host=all_interfaces)
+
+    def test_env_non_loopback_host_requires_shared_secret(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pydantic import ValidationError
+
+        from src.config import load_config
+
+        monkeypatch.setenv("TOOLSERVER_CONFIG_PATH", str(tmp_path / "missing.json"))
+        all_interfaces = ".".join(("0", "0", "0", "0"))
+        monkeypatch.setenv("TOOLSERVER_HOST", all_interfaces)
+
+        with pytest.raises(ValidationError, match="TOOLSERVER_SHARED_SECRET"):
+            load_config()
+
+    def test_non_loopback_host_allows_shared_secret(self) -> None:
+        from src.config import ToolServerConfig
+
+        all_interfaces = ".".join(("0", "0", "0", "0"))
+        shared_token = "shared-" + "token"
+        config = ToolServerConfig(host=all_interfaces, shared_secret=shared_token)
+
+        assert config.shared_secret == shared_token
+
 
 class TestPostgresEdges:
     @pytest.mark.asyncio
@@ -229,7 +261,10 @@ class TestBashExecutionEdges:
 
         monkeypatch.setattr(bash._os, "makedirs", deny_makedirs)
 
-        result = bash.run_bash(ToolServerConfig(), command="echo hello")
+        from src.security.execution_context import controlled_execution
+
+        with controlled_execution():
+            result = bash.run_bash(ToolServerConfig(), command="echo hello")
 
         assert result["execution_status"] == "FAILED"
         assert result["stderr"] == "denied"
@@ -274,6 +309,12 @@ def _fake_subprocess_factory(proc: _FakeProcess):
 
 
 class TestBpftraceRunnerEdges:
+    def test_on_demand_timeout_uses_script_window_with_grace(self) -> None:
+        from src.tools.perception.ebpf.runner import on_demand_timeout
+
+        assert on_demand_timeout("syscount.bt", requested_duration=3) == 15.0
+        assert on_demand_timeout("syscount.bt", requested_duration=20) == 25.0
+
     @pytest.mark.asyncio
     async def test_run_on_demand_parses_json_and_skips_console_lines(
         self,
@@ -337,6 +378,29 @@ class TestBpftraceRunnerEdges:
         )
 
         assert result == [{"error": "timeout", "script": "slow.bt", "timeout_s": 0.001}]
+        assert proc.terminated is True
+
+    @pytest.mark.asyncio
+    async def test_run_on_demand_terminates_on_cancellation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "slow.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(hang=True)
+        monkeypatch.setattr(
+            runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
+        )
+
+        task = asyncio.create_task(
+            runner.run_on_demand("slow.bt", timeout=10, resolve_fn=lambda _name: script)
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
         assert proc.terminated is True
 
     @pytest.mark.asyncio
@@ -429,3 +493,113 @@ class TestBpftraceSubscriptionEdges:
         await daemon._collect_stderr()
 
         assert daemon.permanent_failure is True
+
+    @pytest.mark.asyncio
+    async def test_stop_reports_stopped_status_after_process_exit(self) -> None:
+        from src.tools.perception.ebpf.subscription import BpftraceDaemon
+
+        daemon = BpftraceDaemon(
+            "execsnoop.bt", resolve_fn=lambda _name: Path("execsnoop.bt")
+        )
+        daemon._proc = _FakeProcess(returncode=None)
+
+        await daemon.stop()
+
+        assert daemon.status == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_start_clears_previous_stopped_status(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import subscription
+        from src.tools.perception.ebpf.subscription import BpftraceDaemon
+
+        script = tmp_path / "execsnoop.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(returncode=None)
+        proc.stdout = _AsyncLines([])
+        proc.stderr = _ReadableBytes(b"")
+        monkeypatch.setattr(
+            subscription.asyncio,
+            "create_subprocess_exec",
+            _fake_subprocess_factory(proc),
+        )
+
+        daemon = BpftraceDaemon("execsnoop.bt", resolve_fn=lambda _name: script)
+        daemon._stopped = True
+
+        await daemon.start()
+
+        assert daemon.status == "running"
+        await daemon.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_all_is_idempotent_for_running_daemons(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import subscription
+        from src.tools.perception.ebpf.subscription import SubscriptionManager
+
+        script = tmp_path / "execsnoop.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(returncode=None)
+        proc.stdout = _AsyncLines([])
+        proc.stderr = _ReadableBytes(b"")
+        calls = 0
+
+        async def fake_create_subprocess_exec(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return proc
+
+        monkeypatch.setattr(
+            subscription.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        manager = SubscriptionManager(resolve_fn=lambda _name: script)
+
+        await manager.start_all(enabled=["execsnoop.bt"])
+        await manager.start_all(enabled=["execsnoop.bt"])
+
+        assert calls == 1
+        assert manager.probe_status("execsnoop.bt") == "running"
+        await manager.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_start_all_keeps_failed_probe_registered_and_continues(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import subscription
+        from src.tools.perception.ebpf.subscription import SubscriptionManager
+
+        bad_script = tmp_path / "bad.bt"
+        good_script = tmp_path / "good.bt"
+        bad_script.write_text("// bad", encoding="utf-8")
+        good_script.write_text("// good", encoding="utf-8")
+        good_proc = _FakeProcess(returncode=None)
+        good_proc.stdout = _AsyncLines([])
+        good_proc.stderr = _ReadableBytes(b"")
+        calls = 0
+
+        async def fake_create_subprocess_exec(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("spawn failed")
+            return good_proc
+
+        monkeypatch.setattr(
+            subscription.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        manager = SubscriptionManager(
+            resolve_fn=lambda name: bad_script if name == "bad.bt" else good_script
+        )
+
+        await manager.start_all(enabled=["bad.bt", "good.bt"])
+
+        assert manager.probe_status("bad.bt") == "permanent_failure"
+        assert manager.probe_status("good.bt") == "running"
+        await manager.shutdown()

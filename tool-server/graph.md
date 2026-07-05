@@ -229,8 +229,10 @@ flowchart TD
     main["main.py<br/>fastmcp Server 入口"]
 
     subgraph tools["tools/"]
-        perception["perception/<br/>cpu, memory, disk<br/>network, process, log_reader"]
-        operation["operation/<br/>bash, systemd"]
+        perception["perception/<br/>cpu, memory, disk<br/>network, process, eBPF"]
+        operation["operation/<br/>bash"]
+        data["data/<br/>PostgreSQL readonly"]
+        runtime["runtime/<br/>status, logs"]
     end
 
     subgraph infra["基础设施"]
@@ -242,12 +244,13 @@ flowchart TD
     subgraph external["外部依赖"]
         fastmcp["fastmcp<br/>MCP Server 框架"]
         psutil["psutil<br/>系统指标"]
-        systemd["systemd-python<br/>D-Bus 通信"]
+        asyncpg["asyncpg<br/>PostgreSQL 客户端"]
+        bpftrace["bpftrace<br/>eBPF 探针执行"]
         host["宿主机文件系统<br/>只读挂载"]
     end
 
     subgraph config["配置注入"]
-        cfg["ToolServerConfig<br/>proc_path / sys_path<br/>log_path / sandbox_root"]
+        cfg["ToolServerConfig<br/>proc_path / log_dir<br/>sandbox_root / shared_secret"]
     end
 
     %% 连线
@@ -258,10 +261,12 @@ flowchart TD
     tools --> cache
     tools --> error_mod
     perception --> psutil
+    perception --> bpftrace
     perception --> host
     operation --> host
-    operation --> systemd
     operation --> error_mod
+    data --> asyncpg
+    runtime --> host
 ```
 
 ---

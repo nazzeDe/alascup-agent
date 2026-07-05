@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -241,6 +243,36 @@ class TestSecurityValidation:
         assert ok is False
         assert "request_id required" in err
 
+    def test_rejects_invalid_auth_token_when_secret_configured(self):
+        from src.security.validate import validate_execution
+
+        shared_token = "shared-" + "token"
+        ok, err = validate_execution(
+            "APPROVED",
+            self.rid,
+            False,
+            auth_token="wrong-" + "token",
+            shared_secret=shared_token,
+        )
+
+        assert ok is False
+        assert "auth token" in err
+
+    def test_allows_matching_auth_token_when_secret_configured(self):
+        from src.security.validate import validate_execution
+
+        shared_token = "shared-" + "token"
+        ok, err = validate_execution(
+            "APPROVED",
+            self.rid,
+            False,
+            auth_token=shared_token,
+            shared_secret=shared_token,
+        )
+
+        assert ok is True
+        assert err == ""
+
     def test_allows_readonly_without_request_id(self):
         from src.security.validate import validate_execution
 
@@ -298,14 +330,100 @@ class TestPerceptionTools:
         from src.tools.perception.process import get_process_list
 
         result = get_process_list(config)
-        assert isinstance(result, list)
-        if result:
-            p = result[0]
-            assert "pid" in p
-            assert "name" in p
-            assert "cpu_time" in p
-            assert "mem_mb" in p
-            assert "status" in p
+        assert isinstance(result["processes"], list)
+        assert {
+            "limit": 50,
+            "max_limit": 200,
+            "truncated": result["total_seen"] > result["limit"],
+        }.items() <= result.items()
+        assert result["total_seen"] >= len(result["processes"])
+        if result["processes"]:
+            assert {"pid", "name", "cpu_time", "mem_mb", "status"} <= set(
+                result["processes"][0]
+            )
+
+    def test_get_process_list_limits_and_sorts_processes(self, config, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.tools.perception import process
+
+        class FakeProcess:
+            def __init__(self, pid, cpu_user, rss):
+                self.info = {
+                    "pid": pid,
+                    "name": f"p{pid}",
+                    "cpu_times": SimpleNamespace(user=cpu_user, system=0.5),
+                    "memory_info": SimpleNamespace(rss=rss),
+                    "status": "running",
+                }
+
+        monkeypatch.setattr(
+            process.psutil,
+            "process_iter",
+            lambda _attrs: [
+                FakeProcess(1, 1, 10),
+                FakeProcess(2, 4, 10),
+                FakeProcess(3, 2, 10),
+            ],
+        )
+
+        result = process.get_process_list(config, top_n=2)
+
+        assert [proc["pid"] for proc in result["processes"]] == [2, 3]
+        assert result["limit"] == 2
+        assert result["total_seen"] == 3
+        assert result["truncated"] is True
+
+    def test_get_process_list_clamps_limits(self, config, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.tools.perception import process
+
+        class FakeProcess:
+            def __init__(self, pid):
+                self.info = {
+                    "pid": pid,
+                    "name": f"p{pid}",
+                    "cpu_times": SimpleNamespace(user=pid, system=0),
+                    "memory_info": SimpleNamespace(rss=0),
+                    "status": "running",
+                }
+
+        monkeypatch.setattr(
+            process.psutil,
+            "process_iter",
+            lambda _attrs: [FakeProcess(pid) for pid in range(1, 4)],
+        )
+
+        low = process.get_process_list(config, top_n=0)
+        high = process.get_process_list(config, top_n=999)
+
+        assert low["limit"] == 1
+        assert len(low["processes"]) == 1
+        assert high["limit"] == 200
+        assert high["truncated"] is False
+
+    def test_get_process_list_uses_configured_proc_path(
+        self, config, monkeypatch, tmp_path: Path
+    ):
+        from src.tools.perception import process
+
+        seen_procfs_paths: list[str] = []
+        original_procfs_path = process.psutil.PROCFS_PATH
+        proc_path = tmp_path / "proc"
+        config.proc_path = str(proc_path)
+
+        def fake_process_iter(_attrs):
+            seen_procfs_paths.append(process.psutil.PROCFS_PATH)
+            return []
+
+        monkeypatch.setattr(process.psutil, "process_iter", fake_process_iter)
+
+        result = process.get_process_list(config)
+
+        assert result["processes"] == []
+        assert seen_procfs_paths == [str(proc_path)]
+        assert process.psutil.PROCFS_PATH == original_procfs_path
 
 
 class TestRuntimeTools:
@@ -385,34 +503,34 @@ class TestPostgresTools:
 
 
 class TestOperationTools:
-    def test_bash_echo(self, sandbox):
+    def _run_bash(self, *args, **kwargs):
+        from src.security.execution_context import controlled_execution
         from src.tools.operation.bash import run_bash
 
-        result = run_bash(sandbox, command="echo hello", timeout=5)
+        with controlled_execution():
+            return run_bash(*args, **kwargs)
+
+    def test_bash_echo(self, sandbox):
+        result = self._run_bash(sandbox, command="echo hello", timeout=5)
         assert result["execution_status"] == "SUCCEEDED"
         assert "hello" in result.get("stdout", "")
 
     def test_bash_invalid_command(self, sandbox):
-        from src.tools.operation.bash import run_bash
-
-        result = run_bash(sandbox, command="nonexistent_cmd_xyz", timeout=5)
+        result = self._run_bash(sandbox, command="nonexistent_cmd_xyz", timeout=5)
         assert result["execution_status"] == "FAILED"
         assert result.get("returncode", 0) != 0
 
     def test_bash_timeout(self, sandbox):
-        from src.tools.operation.bash import run_bash
-
-        result = run_bash(sandbox, command="sleep 10", timeout=1)
+        result = self._run_bash(sandbox, command="sleep 10", timeout=1)
         assert result["execution_status"] == "FAILED"
 
     def test_bash_file_not_found(self, sandbox):
         from unittest.mock import patch
-        from src.tools.operation.bash import run_bash
 
         with patch(
             "src.tools.operation.bash.subprocess.run", side_effect=FileNotFoundError
         ):
-            result = run_bash(sandbox, command="echo hi", timeout=5)
+            result = self._run_bash(sandbox, command="echo hi", timeout=5)
             assert result["execution_status"] == "FAILED"
             assert "bash not found" in result["stderr"]
 
@@ -455,56 +573,59 @@ class TestHostExecution:
 
 
 class TestBashWithNsenter:
+    def _run_bash(self, *args, **kwargs):
+        from src.security.execution_context import controlled_execution
+        from src.tools.operation.bash import run_bash
+
+        with controlled_execution():
+            return run_bash(*args, **kwargs)
+
     def test_run_bash_uses_nsenter(self):
         from unittest.mock import patch
-        from src.tools.operation.bash import run_bash
         from src.config import ToolServerConfig
 
         ns_config = ToolServerConfig(host_exec="nsenter")
         with patch("src.tools.operation.bash.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "hello"
-            result = run_bash(ns_config, command="echo hello", timeout=5)
+            result = self._run_bash(ns_config, command="echo hello", timeout=5)
             assert result["execution_status"] == "SUCCEEDED"
             cmd = mock_run.call_args[0][0]
             assert cmd[:6] == ["nsenter", "-t", "1", "-a", "--", "bash"]
 
     def test_run_bash_nsenter_no_cwd(self):
         from unittest.mock import patch
-        from src.tools.operation.bash import run_bash
         from src.config import ToolServerConfig
 
         ns_config = ToolServerConfig(host_exec="nsenter")
         with patch("src.tools.operation.bash.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = ""
-            run_bash(ns_config, command="whoami", timeout=5)
+            self._run_bash(ns_config, command="whoami", timeout=5)
             assert mock_run.call_args[1].get("cwd") is None
 
     def test_run_bash_uses_chroot(self):
         from unittest.mock import patch
-        from src.tools.operation.bash import run_bash
         from src.config import ToolServerConfig
 
         ch_config = ToolServerConfig(host_exec="chroot")
         with patch("src.tools.operation.bash.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "hello"
-            result = run_bash(ch_config, command="echo hello", timeout=5)
+            result = self._run_bash(ch_config, command="echo hello", timeout=5)
             assert result["execution_status"] == "SUCCEEDED"
             cmd = mock_run.call_args[0][0]
             assert cmd == ["chroot", "/host_root", "bash", "-c", "echo hello"]
 
     def test_run_bash_chroot_no_cwd(self):
         from unittest.mock import patch
-        from src.tools.operation.bash import run_bash
         from src.config import ToolServerConfig
 
         ch_config = ToolServerConfig(host_exec="chroot")
         with patch("src.tools.operation.bash.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = ""
-            run_bash(ch_config, command="whoami", timeout=5)
+            self._run_bash(ch_config, command="whoami", timeout=5)
             assert mock_run.call_args[1].get("cwd") is None
 
 
@@ -659,7 +780,15 @@ class TestHandleExecuteTool:
         from src.handlers.dispatch import handle_execute_tool
 
         server = await create_server(config)
-        cache.put(self.rid, {"cached": True})
+        first = await handle_execute_tool(
+            server=server,
+            tool_name="get_cpu_info",
+            chat_id="c1",
+            params={},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
         result = await handle_execute_tool(
             server=server,
             tool_name="get_cpu_info",
@@ -669,7 +798,211 @@ class TestHandleExecuteTool:
             approval_status="APPROVED",
             cache=cache,
         )
-        assert result == {"cached": True}
+        assert result == first
+
+    @pytest.mark.asyncio
+    async def test_cache_rejects_request_id_reuse_for_different_context(
+        self, config, cache
+    ):
+        from src.main import create_server
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = await create_server(config)
+        await handle_execute_tool(
+            server=server,
+            tool_name="get_cpu_info",
+            chat_id="c1",
+            params={},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="get_memory_info",
+            chat_id="c1",
+            params={},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
+
+        assert result == {
+            "execution_status": "FAILED",
+            "error": {
+                "code": 403,
+                "message": "SECURITY_VIOLATION",
+                "data": "request_id reused with different execution context",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_cache_rejects_request_id_reuse_for_different_params(
+        self, config, cache
+    ):
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+
+        @server.tool(name="echo", meta={"is_read_only": True})
+        def echo(value: str = "") -> dict:
+            return {"value": value}
+
+        await handle_execute_tool(
+            server=server,
+            tool_name="echo",
+            chat_id="c1",
+            params={"value": "first"},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="echo",
+            chat_id="c1",
+            params={"value": "second"},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
+
+        assert result["execution_status"] == "FAILED"
+        assert result["error"]["message"] == "SECURITY_VIOLATION"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_same_request_id_single_flights(self, cache):
+        import asyncio
+
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+        calls = 0
+        gate = asyncio.Event()
+
+        @server.tool(name="slow_echo", meta={"is_read_only": True})
+        async def slow_echo(value: str = "") -> dict:
+            nonlocal calls
+            calls += 1
+            await gate.wait()
+            return {"value": value}
+
+        first = asyncio.create_task(
+            handle_execute_tool(
+                server=server,
+                tool_name="slow_echo",
+                chat_id="c1",
+                params={"value": "ok"},
+                request_id=self.rid,
+                approval_status="APPROVED",
+                cache=cache,
+            )
+        )
+        await asyncio.sleep(0)
+        second = asyncio.create_task(
+            handle_execute_tool(
+                server=server,
+                tool_name="slow_echo",
+                chat_id="c1",
+                params={"value": "ok"},
+                request_id=self.rid,
+                approval_status="APPROVED",
+                cache=cache,
+            )
+        )
+
+        gate.set()
+        first_result, second_result = await asyncio.gather(first, second)
+
+        assert calls == 1
+        assert first_result == second_result
+        assert first_result == {"value": "ok", "execution_status": "SUCCEEDED"}
+
+    @pytest.mark.asyncio
+    async def test_inflight_future_unblocks_when_owner_cancelled(self, cache):
+        import asyncio
+
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+        gate = asyncio.Event()
+        started = asyncio.Event()
+
+        @server.tool(name="slow_echo", meta={"is_read_only": True})
+        async def slow_echo(value: str = "") -> dict:
+            started.set()
+            await gate.wait()
+            return {"value": value}
+
+        first = asyncio.create_task(
+            handle_execute_tool(
+                server=server,
+                tool_name="slow_echo",
+                chat_id="c1",
+                params={"value": "ok"},
+                request_id=self.rid,
+                approval_status="APPROVED",
+                cache=cache,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        inflight = cache.get_inflight(self.rid)
+        assert inflight is not None
+        _, future = inflight
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(future), timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_request_id_reuse_with_different_params_rejected(
+        self, cache
+    ):
+        import asyncio
+
+        from fastmcp import FastMCP
+        from src.handlers.dispatch import handle_execute_tool
+
+        server = FastMCP(name="test-tool-server")
+        gate = asyncio.Event()
+
+        @server.tool(name="slow_echo", meta={"is_read_only": True})
+        async def slow_echo(value: str = "") -> dict:
+            await gate.wait()
+            return {"value": value}
+
+        first = asyncio.create_task(
+            handle_execute_tool(
+                server=server,
+                tool_name="slow_echo",
+                chat_id="c1",
+                params={"value": "first"},
+                request_id=self.rid,
+                approval_status="APPROVED",
+                cache=cache,
+            )
+        )
+        await asyncio.sleep(0)
+        second = await handle_execute_tool(
+            server=server,
+            tool_name="slow_echo",
+            chat_id="c1",
+            params={"value": "second"},
+            request_id=self.rid,
+            approval_status="APPROVED",
+            cache=cache,
+        )
+
+        gate.set()
+        await first
+
+        assert second["execution_status"] == "FAILED"
+        assert second["error"]["message"] == "SECURITY_VIOLATION"
 
     @pytest.mark.asyncio
     async def test_execute_async_tool(self, config, cache):
@@ -737,6 +1070,40 @@ class TestServerCreation:
         assert server is not None
         assert server.name == "tool-server"
 
+    @pytest.mark.asyncio
+    async def test_create_server_uses_isolated_ebpf_runtime(self, config):
+        from src.main import create_server
+
+        class FakeRuntime:
+            def __init__(self, label: str) -> None:
+                self.label = label
+
+            async def start_all(self) -> None:
+                return None
+
+            async def shutdown(self) -> None:
+                return None
+
+            def watch(self, script_name: str) -> dict:
+                return {
+                    "events": [{"runtime": self.label, "script": script_name}],
+                    "probe_status": "running",
+                }
+
+            async def trace(self, script_name: str, duration: int) -> dict:
+                return {"events": [{"runtime": self.label, "script": script_name}]}
+
+        first = await create_server(config, ebpf_runtime=FakeRuntime("first"))
+        second = await create_server(config, ebpf_runtime=FakeRuntime("second"))
+
+        first_tool = await first.get_tool("watch_process_exec")
+        second_tool = await second.get_tool("watch_process_exec")
+
+        assert first_tool is not None
+        assert second_tool is not None
+        assert first_tool.fn()["events"][0]["runtime"] == "first"
+        assert second_tool.fn()["events"][0]["runtime"] == "second"
+
 
 class TestToolRegistrationContract:
     @pytest.mark.asyncio
@@ -780,6 +1147,17 @@ class TestToolRegistrationContract:
         hidden_names = {t.name for t in tools if (t.meta or {}).get("hidden") is True}
 
         assert hidden_names == {"execute_tool", "health", "bash_classify"}
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_output_schema_is_result_object(self, config):
+        from src.main import create_server
+
+        server = await create_server(config)
+        tools = await server.list_tools()
+        execute_tool = next(tool for tool in tools if tool.name == "execute_tool")
+
+        assert execute_tool.output_schema == {"type": "object"}
+        assert "tool_name" in execute_tool.parameters["properties"]
 
     @pytest.mark.asyncio
     async def test_tool_metadata_is_stable(self, config):

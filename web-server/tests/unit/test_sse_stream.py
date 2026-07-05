@@ -826,7 +826,7 @@ class TestSSEStreamApproval:
             events.append(e)
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         event_types = [e["event"] for e in events]
         assert "session_init" in event_types, f"Missing session_init: {event_types}"
@@ -906,7 +906,12 @@ class TestSSEStreamApproval:
             events.append(e)
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "REJECTED", reason="too risky")
+                bridge.complete(
+                    data["request_id"],
+                    "REJECTED",
+                    reason="too risky",
+                    chat_id=data["chat_id"],
+                )
 
         event_types = [e["event"] for e in events]
         tool_call_payloads = [
@@ -1005,7 +1010,7 @@ class TestSSEStreamApproval:
             events.append(e)
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         assert len(events) >= 3, f"Expected at least 3 events, got {len(events)}"
         assert events[0]["event"] == "session_init"
@@ -1093,7 +1098,7 @@ class TestSSEStreamApprovalEventOrdering:
             events.append(e)
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         event_types = [e["event"] for e in events]
 
@@ -1206,7 +1211,7 @@ class TestSSEStreamApprovalEventOrdering:
             events.append(e)
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         # Collect all tool_call and tool_result call_ids
         tool_call_ids: set[str] = set()

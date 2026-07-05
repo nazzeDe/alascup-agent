@@ -86,10 +86,28 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 | 输入 | `execute_tool` 执行 `bash command="echo mcp-ok"`，approval 为 `APPROVED` |
 | 预期 | `execution_status=SUCCEEDED`，stdout 为 `mcp-ok\n` |
 
+### MCP-103A 配置共享密钥时 execute_tool 必须携带 auth_token
+
+| 前置 | `ToolServerConfig(shared_secret="secret")` |
+| 输入 | `execute_tool` 不携带或携带错误 `auth_token` |
+| 预期 | `SECURITY_VIOLATION`；携带匹配 token 时才执行 |
+
+### MCP-104 直接调用可变工具被拒绝
+
+| 前置 | FastMCP server 已创建 |
+| 输入 | 直接 `call_tool("bash", {"command": "echo bypass"})`，不经过 `execute_tool` |
+| 预期 | `SECURITY_VIOLATION`，命令不执行 |
+
 ### SC-101 approval_status 校验
 
 | 前置 | tool-server 正常 |
 | 输入 | web-server 发 approval_status=PENDING |
+| 预期 | 拒绝；返回 error code=403 message=SECURITY_VIOLATION |
+
+### SC-100 auth_token 校验
+
+| 前置 | 配置 `TOOLSERVER_SHARED_SECRET` |
+| 输入 | `auth_token` 缺失或不匹配 |
 | 预期 | 拒绝；返回 error code=403 message=SECURITY_VIOLATION |
 
 ### SC-102 request_id 格式校验
@@ -109,6 +127,12 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 | 前置 | tool-server 正常 |
 | 输入 | `is_read_only=true`，`approval_status=APPROVED`，无 `request_id` |
 | 预期 | 校验通过，执行工具 |
+
+### SC-105 request_id 幂等缓存绑定上下文
+
+| 前置 | 同一 `request_id` 已执行过一次 |
+| 输入 | 使用同一 `request_id` 调用不同工具或同工具不同参数 |
+| 预期 | 返回 `SECURITY_VIOLATION`，不返回旧缓存结果 |
 
 ### PR-101 get_cpu_info
 
@@ -131,8 +155,8 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 ### PR-104 get_process_list
 
 | 前置 | /proc 进程目录模拟 |
-| 输入 | 调用 get_process_list |
-| 预期 | 返回进程列表含 pid + name + cpu_percent |
+| 输入 | 调用 get_process_list，默认 `top_n=50` |
+| 预期 | 返回 `processes`、`limit`、`max_limit`、`total_seen`、`truncated`；进程按 CPU/内存排序，条目含 pid + name + cpu_time + mem_mb + status |
 
 ### OP-101 bash 执行成功
 
@@ -151,6 +175,36 @@ uv run pytest tests/ --cov=src --cov-branch --cov-report=term-missing
 | 前置 | sandbox_root 可写 |
 | 输入 | bash command="nonexistent_cmd" |
 | 预期 | FAILED，output 含 returncode 和 stderr |
+
+### EBPF-101 订阅缺少探针变体
+
+| 前置 | 当前内核无匹配探针脚本 |
+| 输入 | 启动 `BpftraceDaemon("missing.bt")` |
+| 预期 | `permanent_failure=true`，`probe_status=permanent_failure` |
+
+### EBPF-102 订阅停止状态
+
+| 前置 | eBPF daemon 已持有运行中进程 |
+| 输入 | 调用 `stop()` |
+| 预期 | `probe_status=stopped` |
+
+### EBPF-103 订阅重启清除停止状态
+
+| 前置 | daemon 曾进入 `stopped` 状态，探针脚本可解析 |
+| 输入 | 再次调用 `start()` |
+| 预期 | 清除旧停止状态；成功拉起进程后 `probe_status=running` |
+
+### EBPF-104 订阅批量启动幂等
+
+| 前置 | 指定探针 daemon 已运行 |
+| 输入 | 重复调用 `SubscriptionManager.start_all(enabled=[...])` |
+| 预期 | 不重复 spawn 同名运行中 daemon |
+
+### EBPF-105 单探针启动失败不阻断其他探针
+
+| 前置 | 多个探针同时启动，其中一个 spawn 抛异常 |
+| 输入 | 调用 `start_all(enabled=["bad.bt", "good.bt"])` |
+| 预期 | 失败探针注册为 `permanent_failure`，其他探针继续启动 |
 
 ## Mock 配置
 

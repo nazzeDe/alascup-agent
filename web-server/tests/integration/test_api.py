@@ -305,6 +305,9 @@ class TestApprovalEndpoint:
     async def test_approve_request_not_found(self, client):
         response = await client.post(
             "/api/tool-requests/00000000-0000-0000-0000-000000000000/approval",
-            json={"approval_status": "APPROVED"},
+            json={
+                "chat_id": "11111111-1111-1111-1111-111111111111",
+                "approval_status": "APPROVED",
+            },
         )
         assert response.status_code == 404

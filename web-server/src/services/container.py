@@ -43,6 +43,8 @@ class SessionManager(Protocol):
         error: dict | None = None,
         backup_ref: str | None = None,
         llm_trace_id: UUID | None = None,
+        request_id: str | None = None,
+        result: dict | None = None,
     ) -> None: ...
 
 

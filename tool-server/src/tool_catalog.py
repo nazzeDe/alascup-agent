@@ -18,23 +18,17 @@ from src.tools.perception import (
     get_network_info,
     get_process_list,
 )
-from src.tools.perception.ebpf import (
-    trace_io_latency,
-    trace_oom_events,
-    trace_slow_syscalls,
-    trace_syscall_stats,
-    trace_tcp_drops,
-    watch_process_exec,
-    watch_process_exit,
-    watch_tcp_connections,
-)
+from src.tools.perception.ebpf.runtime import EbpfRuntime
 from src.tools.runtime import get_tool_server_logs, get_tool_server_status
 
 _ANY_OBJECT: dict[str, Any] = {"type": "object"}
 
 
 def register_tool_catalog(
-    server: FastMCP, config: ToolServerConfig, cache: ToolCache
+    server: FastMCP,
+    config: ToolServerConfig,
+    cache: ToolCache,
+    ebpf_runtime: EbpfRuntime,
 ) -> None:
     """Register tool-server tools on FastMCP without owning server lifecycle."""
     classify_fns: dict[str, Callable] = {}
@@ -43,8 +37,8 @@ def register_tool_catalog(
     _register_runtime_tools(server, config)
     _register_postgres_tools(server, config)
     _register_operation_tools(server, config, classify_fns)
-    _register_execute_tool(server, cache)
-    _register_ebpf_tools(server)
+    _register_execute_tool(server, cache, config.shared_secret)
+    _register_ebpf_tools(server, ebpf_runtime)
     _register_health_tool(server)
     _register_classify_companions(server, classify_fns)
 
@@ -92,8 +86,8 @@ def _register_perception_tools(server: FastMCP, config: ToolServerConfig) -> Non
         output_schema=_ANY_OBJECT,
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
-    def _get_process_list() -> dict:
-        return {"processes": get_process_list(config)}
+    def _get_process_list(top_n: int = 50) -> dict:
+        return get_process_list(config, top_n=top_n)
 
 
 def _register_runtime_tools(server: FastMCP, config: ToolServerConfig) -> None:
@@ -154,21 +148,14 @@ def _register_operation_tools(
     classify_fns["bash"] = classify_bash
 
 
-def _register_execute_tool(server: FastMCP, cache: ToolCache) -> None:
+def _register_execute_tool(
+    server: FastMCP, cache: ToolCache, shared_secret: str
+) -> None:
     @server.tool(
         name="execute_tool",
         description="安全执行工具（需 APPROVED 状态 + 有效 request_id）",
         meta={"hidden": True},
-        output_schema={
-            "type": "object",
-            "properties": {
-                "tool_name": {"type": "string"},
-                "chat_id": {"type": "string"},
-                "params": {"type": "object"},
-                "request_id": {"type": "string"},
-                "approval_status": {"type": "string"},
-            },
-        },
+        output_schema=_ANY_OBJECT,
     )
     async def execute(
         tool_name: str = "",
@@ -176,6 +163,7 @@ def _register_execute_tool(server: FastMCP, cache: ToolCache) -> None:
         params: dict | None = None,
         request_id: str = "",
         approval_status: str = "PENDING",
+        auth_token: str = "",
     ) -> dict:
         return await handle_execute_tool(
             server=server,
@@ -185,10 +173,12 @@ def _register_execute_tool(server: FastMCP, cache: ToolCache) -> None:
             request_id=request_id,
             approval_status=approval_status,
             cache=cache,
+            auth_token=auth_token,
+            shared_secret=shared_secret,
         )
 
 
-def _register_ebpf_tools(server: FastMCP) -> None:
+def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
     @server.tool(
         name="watch_process_exec",
         description="实时进程启动事件流（基于 eBPF 的持续跟踪）",
@@ -196,7 +186,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_process_exec() -> dict:
-        return watch_process_exec()
+        return ebpf_runtime.watch("execsnoop.bt")
 
     @server.tool(
         name="watch_process_exit",
@@ -205,7 +195,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_process_exit() -> dict:
-        return watch_process_exit()
+        return ebpf_runtime.watch("proc_exit.bt")
 
     @server.tool(
         name="watch_tcp_connections",
@@ -214,7 +204,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_tcp_connections() -> dict:
-        return watch_tcp_connections()
+        return ebpf_runtime.watch("tcpconn.bt")
 
     @server.tool(
         name="trace_syscall_stats",
@@ -223,7 +213,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_syscall_stats(duration: int = 5) -> dict:
-        return await trace_syscall_stats(duration=duration)
+        return await ebpf_runtime.trace("syscount.bt", duration)
 
     @server.tool(
         name="trace_slow_syscalls",
@@ -232,7 +222,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_slow_syscalls(duration: int = 5) -> dict:
-        return await trace_slow_syscalls(duration=duration)
+        return await ebpf_runtime.trace("syscall_slow.bt", duration)
 
     @server.tool(
         name="trace_tcp_drops",
@@ -241,7 +231,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_tcp_drops(duration: int = 10) -> dict:
-        return await trace_tcp_drops(duration=duration)
+        return await ebpf_runtime.trace("tcpdrop.bt", duration)
 
     @server.tool(
         name="trace_io_latency",
@@ -250,7 +240,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_io_latency(duration: int = 10) -> dict:
-        return await trace_io_latency(duration=duration)
+        return await ebpf_runtime.trace("biolatency.bt", duration)
 
     @server.tool(
         name="trace_oom_events",
@@ -259,7 +249,7 @@ def _register_ebpf_tools(server: FastMCP) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_oom_events(duration: int = 30) -> dict:
-        return await trace_oom_events(duration=duration)
+        return await ebpf_runtime.trace("oomkill.bt", duration)
 
 
 def _register_health_tool(server: FastMCP) -> None:

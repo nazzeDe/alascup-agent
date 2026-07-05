@@ -24,7 +24,7 @@ Mock E2E 使用 Playwright route 拦截：
 - `GET /api/sessions`
 - `GET /api/sessions/{chat_id}`
 - `DELETE /api/sessions/{chat_id}`
-- `POST /api/tool-requests/{request_id}/approval`
+- `POST /api/tool-requests/{request_id}/approval`，请求体包含 `chat_id` 与决策
 
 它验证前端是否正确处理 `session_init`、`tool_call`、`tool_result`、`tool_approval_required`、`assistant`、`assistant_done`、`done` 和 `error` 等 SSE 事件。
 

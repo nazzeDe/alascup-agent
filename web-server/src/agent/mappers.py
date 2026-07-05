@@ -99,13 +99,16 @@ def tool_call_to_openai(call: AgentToolCall) -> dict[str, Any]:
     }
 
 
-def tool_call_to_dispatch(call: AgentToolCall) -> dict[str, Any]:
+def tool_call_to_dispatch(
+    call: AgentToolCall, chat_id: str | None = None
+) -> dict[str, Any]:
     return {
         "tool_name": call.function.name,
         "arguments": call.function.arguments,
         "server_name": call.server_name,
         "approval_status": call.approval_status or "APPROVED",
         "request_id": call.request_id or "",
+        "chat_id": chat_id or "",
     }
 
 

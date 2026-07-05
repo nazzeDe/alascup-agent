@@ -26,6 +26,7 @@ describe('projectTimeline', () => {
       timestamp: '2026-06-17T00:00:01.000Z',
     }
     const approval: ApprovalEvent = {
+      chat_id: 'chat-1',
       request_id: 'req-1',
       tool_name: 'bash',
       params: {},

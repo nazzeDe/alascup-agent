@@ -1,5 +1,6 @@
 """Unit tests for ApprovalHandler and its module-level helpers."""
 
+import asyncio
 from uuid import UUID, uuid4
 from unittest.mock import MagicMock
 
@@ -266,6 +267,11 @@ class _MockBridge:
         return self._decisions
 
 
+class _CancellingBridge(_MockBridge):
+    async def gather_decisions(self, request_id: str, expected_count: int):
+        raise asyncio.CancelledError
+
+
 class _MockLifecycle:
     def __init__(self):
         self.updates: list[dict] = []
@@ -273,31 +279,34 @@ class _MockLifecycle:
     async def update(self, chat_id, call_id, **kwargs):
         self.updates.append({"chat_id": chat_id, "call_id": call_id, **kwargs})
 
-    async def mark_approved(self, chat_id, call_id):
+    async def mark_approved(self, chat_id, call_id, request_id=None):
         self.updates.append(
             {
                 "chat_id": chat_id,
                 "call_id": call_id,
+                "request_id": request_id,
                 "approval_status": ApprovalStatus.APPROVED,
                 "execution_status": ExecutionStatus.RUNNING,
             }
         )
 
-    async def mark_rejected(self, chat_id, call_id):
+    async def mark_rejected(self, chat_id, call_id, request_id=None):
         self.updates.append(
             {
                 "chat_id": chat_id,
                 "call_id": call_id,
+                "request_id": request_id,
                 "approval_status": ApprovalStatus.REJECTED,
                 "execution_status": ExecutionStatus.FAILED,
             }
         )
 
-    async def mark_expired(self, chat_id, call_id):
+    async def mark_expired(self, chat_id, call_id, request_id=None):
         self.updates.append(
             {
                 "chat_id": chat_id,
                 "call_id": call_id,
+                "request_id": request_id,
                 "approval_status": ApprovalStatus.EXPIRED,
                 "execution_status": ExecutionStatus.FAILED,
             }
@@ -580,6 +589,7 @@ class TestApprovalHandlerResolve:
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
         assert update["call_id"] == call_id
+        assert update["request_id"] == "req-1"
         assert update["approval_status"] == ApprovalStatus.APPROVED
         assert update["execution_status"] == ExecutionStatus.RUNNING
 
@@ -614,6 +624,7 @@ class TestApprovalHandlerResolve:
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
         assert update["call_id"] == call_id
+        assert update["request_id"] == "req-1"
         assert update["approval_status"] == ApprovalStatus.REJECTED
         assert update["execution_status"] == ExecutionStatus.FAILED
 
@@ -648,6 +659,44 @@ class TestApprovalHandlerResolve:
         assert len(lifecycle.updates) == 1
         update = lifecycle.updates[0]
         assert update["call_id"] == call_id
+        assert update["request_id"] == "req-1"
+        assert update["approval_status"] == ApprovalStatus.EXPIRED
+        assert update["execution_status"] == ExecutionStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_cancelled_approval_wait_marks_pending_expired(self):
+        """SSE cancellation during approval wait does not leave pending rows stale."""
+        bridge = _CancellingBridge()
+        lifecycle = _MockLifecycle()
+        handler = ApprovalHandler(
+            bridge=bridge,
+            audit_logger=_MockAuditLogger(),
+            lifecycle=lifecycle,
+        )
+        chat_id = "12345678-1234-5678-1234-567812345678"
+        call_id = uuid4()
+        scratch = _make_scratch(
+            pending_approval=[
+                {
+                    "function": {"name": "rm_file", "arguments": "{}"},
+                    "request_id": "req-1",
+                    "call_id": call_id,
+                },
+            ],
+        )
+        channel = EventChannel()
+        emitter = EventEmitter(channel)
+
+        with pytest.raises(asyncio.CancelledError):
+            await handler.resolve(
+                scratch, turn_ctx=_make_turn_ctx(chat_id=chat_id), emitter=emitter
+            )
+        channel.close()
+
+        assert len(lifecycle.updates) == 1
+        update = lifecycle.updates[0]
+        assert update["call_id"] == call_id
+        assert update["request_id"] == "req-1"
         assert update["approval_status"] == ApprovalStatus.EXPIRED
         assert update["execution_status"] == ExecutionStatus.FAILED
 

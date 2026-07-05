@@ -1,5 +1,6 @@
 """Approval handler — resolves pending tool approvals on the same SSE stream."""
 
+import asyncio
 from uuid import uuid4
 
 from src.agent.loop.emitter import EventEmitter
@@ -135,12 +136,16 @@ class ApprovalHandler:
         pending = scratch.pending_approval
         all_approved: list[AgentToolCall] = []
         all_rejected: list[AgentToolCall] = []
-        for tc in pending:
-            approved, rejected = await self._resolve_one(
-                tc, chat_id, auditor, emitter, profiler
-            )
-            all_approved.extend(approved)
-            all_rejected.extend(rejected)
+        try:
+            for tc in pending:
+                approved, rejected = await self._resolve_one(
+                    tc, chat_id, auditor, emitter, profiler
+                )
+                all_approved.extend(approved)
+                all_rejected.extend(rejected)
+        except asyncio.CancelledError:
+            await self._mark_cancelled_pending(turn_ctx, pending)
+            raise
 
         final_transition = (
             Transition.APPROVAL_GRANTED
@@ -248,9 +253,19 @@ class ApprovalHandler:
         if self._lifecycle is None:
             return
         for tc in approved:
-            await self._lifecycle.mark_approved(chat_id, tc.call_id)
+            await self._lifecycle.mark_approved(chat_id, tc.call_id, tc.request_id)
         for tc in rejected:
             if tc.approval_status == "EXPIRED":
-                await self._lifecycle.mark_expired(chat_id, tc.call_id)
+                await self._lifecycle.mark_expired(chat_id, tc.call_id, tc.request_id)
             else:
-                await self._lifecycle.mark_rejected(chat_id, tc.call_id)
+                await self._lifecycle.mark_rejected(chat_id, tc.call_id, tc.request_id)
+
+    async def _mark_cancelled_pending(
+        self, turn_ctx: TurnContext | None, pending: list[AgentToolCall]
+    ) -> None:
+        if self._lifecycle is None or turn_ctx is None:
+            return
+        for tc in pending:
+            await self._lifecycle.mark_expired(
+                turn_ctx.chat_id, tc.call_id, tc.request_id
+            )

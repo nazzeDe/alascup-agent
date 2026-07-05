@@ -293,7 +293,7 @@ class TestEbpfRuntime:
             script_name, timeout=None, args=None, resolve_fn=None
         ):
             assert script_name == "syscount.bt"
-            assert timeout == 3.0
+            assert timeout == 15.0
             assert args is None
             assert resolve_fn("syscount.bt") == script_path
             return [{"ok": True}]

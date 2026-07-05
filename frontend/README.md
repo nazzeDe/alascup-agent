@@ -55,8 +55,9 @@ frontend/
 - `ChatStore`：单个活动会话的状态容器，包含消息、工具调用、思考过程、审批事件、流式状态、错误和输入草稿。
 - `SessionListStore`：会话列表状态，包含当前选中会话、加载状态和加载错误。
 - `SessionService`：会话加载/删除与审批提交的应用服务。删除会话是 best-effort，后端失败时仍会清理本地列表；同一 `request_id` 的审批提交会做 in-flight 去重，避免双击重复请求。
-- `ActiveSessionWorkspace`：管理当前活动 `ChatStore`，负责加载会话列表、选择历史会话、新建草稿会话、删除会话、接收服务端 `session_init`。`session_init` 会采用发起请求时的目标 store，避免用户切换会话后污染当前活动会话。
+- `ActiveSessionWorkspace`：管理当前活动 `ChatStore`，负责加载会话列表、选择历史会话、新建草稿会话、删除会话、接收服务端 `session_init`。历史会话选择只接受最新一次选择的加载结果；`session_init` 会采用发起请求时的目标 store，避免用户切换会话后污染当前活动会话。
 - `ChatStreamInterpreter`：解释单轮 `/api/chat` SSE 流，将事件转换为前端状态变化。
+- `ChatStreamController`：由 `App.vue` 提供给 `useChat`，在选择、创建或删除会话前中断当前 SSE 流，避免旧流继续写入已切换的活动会话。
 - `projectTimeline`：把 `messages`、`toolCalls`、`reasonings`、`approvalEvent` 合并成按时间排序的 UI 时间线。
 
 ### 聊天状态机
@@ -73,7 +74,7 @@ frontend/
 | `responding` | 正在接收 assistant 文本 |
 | `done` | 收到 `done`，本轮流结束 |
 
-`useChat.send(text)` 会立即追加用户消息、清空上一轮 reasoning、进入 `thinking`，并创建 `AbortController`。如果当前 `chat_id` 为空，本轮被视为新会话；收到 `session_init` 后，`ActiveSessionWorkspace` 会把服务端会话 ID 写入本轮请求对应的 store，并用首条用户消息生成侧边栏标题。标题规则为前 30 个字符，超长追加 `...`。
+`useChat.send(text)` 会立即追加用户消息、清空上一轮 reasoning、进入 `thinking`，并创建 `AbortController`。如果当前 `chat_id` 为空，本轮被视为新会话；收到 `session_init` 后，`ActiveSessionWorkspace` 会把服务端会话 ID 写入本轮请求对应的 store，并用首条用户消息生成侧边栏标题。标题规则为前 30 个字符，超长追加 `...`。用户切换、新建或删除会话时，`App.vue` 会先通过 `ChatStreamController` abort 当前流；`useChat` 也会忽略已中断旧流的后续回调。
 
 ### 时间线投影
 
@@ -105,14 +106,16 @@ messages + toolCalls + reasonings + approvalEvent
 审批请求体：
 
 ```json
-{ "approval_status": "APPROVED", "reason": "" }
+{ "chat_id": "<chat-uuid>", "approval_status": "APPROVED", "reason": "" }
 ```
 
 拒绝请求体：
 
 ```json
-{ "approval_status": "REJECTED", "reason": "" }
+{ "chat_id": "<chat-uuid>", "approval_status": "REJECTED", "reason": "" }
 ```
+
+`chat_id` 来自同一个 `tool_approval_required` SSE 事件，后端会校验它与 `request_id` 的归属一致。
 
 聊天请求体：
 
@@ -145,7 +148,7 @@ messages + toolCalls + reasonings + approvalEvent
 
 ## UI 行为
 
-- `App.vue` 创建并 `provide` 全局依赖：SSE client、session API、approval API、stores、services、active workspace。
+- `App.vue` 创建并 `provide` 全局依赖：SSE client、session API、approval API、stores、services、active workspace、stream abort controller。
 - `SessionList.vue` 按 Today、Yesterday、Previous 7 days、Previous 30 days、Older 分组展示会话；右键会话可删除。
 - `ChatView.vue` 负责消息区、输入区、停止生成、错误横幅、滚动到底部按钮和审批事件分发。
 - `MessageItem.vue` 渲染用户、assistant、system 消息；assistant 内容走 Markdown 渲染。

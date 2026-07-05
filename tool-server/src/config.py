@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from ipaddress import ip_address
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 _ENV_TO_FIELD: dict[str, str] = {
     "TOOLSERVER_PROC_PATH": "proc_path",
@@ -17,6 +18,7 @@ _ENV_TO_FIELD: dict[str, str] = {
     "POSTGRES_DSN": "postgres_dsn",
     "TOOLSERVER_POSTGRES_STATEMENT_TIMEOUT_MS": "postgres_statement_timeout_ms",
     "TOOLSERVER_POSTGRES_MAX_ROWS": "postgres_max_rows",
+    "TOOLSERVER_SHARED_SECRET": "shared_secret",
 }
 
 
@@ -32,6 +34,15 @@ class ToolServerConfig(BaseModel):
     postgres_dsn: str | None = None
     postgres_statement_timeout_ms: int = 5000
     postgres_max_rows: int = 1000
+    shared_secret: str = ""
+
+    @model_validator(mode="after")
+    def _require_secret_for_non_loopback(self) -> "ToolServerConfig":
+        if not _is_loopback_host(self.host) and not self.shared_secret:
+            raise ValueError(
+                "TOOLSERVER_SHARED_SECRET is required for non-loopback hosts"
+            )
+        return self
 
 
 def load_config() -> ToolServerConfig:
@@ -52,4 +63,17 @@ def load_config() -> ToolServerConfig:
             field_type = ToolServerConfig.model_fields[field_name].annotation
             overrides[field_name] = int(val) if field_type is int else val
 
-    return config.model_copy(update=overrides) if overrides else config
+    return (
+        ToolServerConfig(**{**config.model_dump(), **overrides})
+        if overrides
+        else config
+    )
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False

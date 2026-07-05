@@ -50,6 +50,17 @@ class MockAuditLogger:
         )
 
 
+class MockLifecycle:
+    def __init__(self):
+        self.rejections: list[tuple] = []
+
+    async def mark_rejected(self, chat_id, call_id, request_id=None):
+        self.rejections.append((chat_id, call_id, request_id))
+
+    async def mark_approved(self, chat_id, call_id, request_id=None):
+        pass
+
+
 def _state(tool_calls=None):
     return AgentState(
         messages=[{"role": "user", "content": "check system"}],
@@ -273,6 +284,42 @@ class TestReviewNode:
         assert audit.events[0]["event"] == "TOOL_REJECTED"
         assert audit.events[0]["tool_name"] == "blacklist_cmd"
         assert audit.events[0]["decision"] == "REJECT"
+
+    async def test_policy_reject_persists_request_id(self):
+        from uuid import UUID, uuid4
+
+        from src.agent.nodes import review_node
+        from src.agent.turn_context import TurnContext
+
+        call_id = uuid4()
+        lifecycle = MockLifecycle()
+        chat_id = UUID("12345678-1234-5678-1234-567812345678")
+        tool_calls = [
+            {
+                "function": {"name": "blacklist_cmd", "arguments": "{}"},
+                "mutable": False,
+                "is_read_only": True,
+                "call_id": call_id,
+            },
+        ]
+
+        result = await review_node(
+            _state(tool_calls),
+            ctx=TurnContext(
+                chat_id=chat_id,
+                turn_id=uuid4(),
+                iteration=0,
+                model="test-model",
+            ),
+            executor=MockExecutorWithClassify(),
+            rule_engine=MockRuleEngine(),
+            audit_logger=MockAuditLogger(),
+            lifecycle=lifecycle,
+        )
+
+        request_id = result.rejected[0].request_id
+        assert request_id
+        assert lifecycle.rejections == [(chat_id, call_id, request_id)]
 
     async def test_transition_when_all_auto_approved(self):
         from src.agent.nodes import review_node

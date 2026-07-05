@@ -291,8 +291,8 @@ sequenceDiagram
     AH-->>API: ApprovalRequired DomainEvent
     API-->>F: event: tool_approval_required
     AH->>B: gather_decisions(request_id, timeout=300)
-    F->>Approve: POST APPROVED / REJECTED
-    Approve->>B: complete(request_id, status, reason)
+    F->>Approve: POST chat_id + APPROVED / REJECTED
+    Approve->>B: complete(request_id, status, reason, chat_id)
     B-->>AH: decision
     alt approved
         AH->>Loop: approved_tool_calls
@@ -391,7 +391,7 @@ classDiagram
     }
     class ApprovalBridge {
         +create(request_id, chat_id)
-        +complete(request_id, status, reason)
+        +complete(request_id, status, reason, chat_id)
         +gather_decisions(request_id, expected_count, timeout)
     }
     class ToolExecutor {
@@ -413,7 +413,9 @@ classDiagram
         +persist_assistant_message(chat_id, assistant_msg)
         +persist_tool_result(chat_id, tool_messages)
         +register(chat_id, pending, pre_executed, llm_trace_id)
-        +mark_approved(chat_id, call_id)
+        +mark_approved(chat_id, call_id, request_id)
+        +mark_rejected(chat_id, call_id, request_id)
+        +mark_expired(chat_id, call_id, request_id)
         +mark_executed(chat_id, call_id, result)
     }
 
@@ -463,7 +465,7 @@ sequenceDiagram
     else high risk tool
         AL-->>API: ApprovalRequired
         API-->>FE: tool_approval_required
-        FE->>API: POST /tool-requests/{id}/approval
+        FE->>API: POST /tool-requests/{id}/approval with chat_id
         AL->>Tool: tools/call after approval
         Tool-->>AL: result
         API-->>FE: tool_call / tool_result

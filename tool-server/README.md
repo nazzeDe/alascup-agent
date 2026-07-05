@@ -5,8 +5,8 @@
 ## 职责
 
 - 暴露系统感知 MCP 工具（CPU/内存/磁盘/网络/进程/日志采集）
-- 暴露运维操作 MCP 工具（bash、systemd）
-- 根据工具参数动态判定操作安全分级（classify_tool：isReadOnly / isRollbackable）
+- 暴露运维操作 MCP 工具（bash）和运行时状态/日志工具
+- 通过伴生分类工具动态判定可变工具是否可作为只读操作免审批
 - 执行前二次安全校验（验证 approval_status + request_id）
 - 返回统一结构的 ToolResult
 
@@ -23,7 +23,6 @@
 |------|------|
 | fastmcp | MCP Server 框架 |
 | psutil | 系统指标采集（CPU/内存/磁盘/网络/进程） |
-| systemd-python | systemd 服务管理（首版：status + restart） |
 | tree-sitter | bash 命令 AST 解析（只读免审批分类） |
 | tree-sitter-bash | tree-sitter bash grammar |
 
@@ -69,6 +68,8 @@ tool-server 启动时自动扫描已注册工具，对带有 `__classify__` 属�
 - `inputSchema` 由 `classify_fn` 的函数签名自动推断（仅关键参数）
 - 返回 `{"safe": bool}`。`safe=true` 仅表示“可免审批只读执行”；`safe=false` 表示“需要审批”，不表示 tool-server 强制禁止该命令。
 
+隐藏工具 `execute_tool` 作为 web-server 的执行入口，输入参数由函数签名生成，输出统一为 `ToolResult` 对象。
+
 #### bash 分类规则
 
 `bash_classify` 按本项目运维工具定位收窄为“只读免审批”判定：
@@ -93,18 +94,18 @@ tool-server 启动时自动扫描已注册工具，对带有 `__classify__` 属�
 
 `sed` 和 `awk` 只允许读取/格式化输出子集。`sed -i`、`sed -f`、`e/r/w/W/R` 命令、带地址表达式的写入/读取/执行绕过，以及 `s///e`、`s///w` 均拒绝；`awk` 中的 `system()`、重定向写入、管道输出等执行或写入形式均拒绝。
 
-注册流程见 `main.py` 的 `_register_classify_companions()`。
+注册流程见 `tool_catalog.py` 的 `_register_classify_companions()`。
 
 ## 工具输出控制
 
-LLM 通过 prompt 指示词要求只获取必要信息（使用过滤参数如 `grep`、`since`、`top_n`）。工具层同时设置默认截断安全上限，防止大输出直接注入 LLM 上下文：
+LLM 通过 prompt 指示词要求只获取必要信息（使用限制参数如 `lines`、`top_n`）。工具层同时设置默认截断安全上限，防止大输出直接注入 LLM 上下文：
 
 | 工具 | 默认上限 | 可调参数 |
 |------|----------|----------|
-| `read_logs` | 1000 行 | `max_lines`, `grep`, `since` |
-| `get_process_list` | 50 个进程 | `top_n` |
+| `get_tool_server_logs` | 200 行，最大 1000 行 | `filename`, `lines` |
+| `get_process_list` | 50 个进程，最大 200 个 | `top_n` |
 
-LLM 发现输出被截断时，可调整参数重新获取。
+`get_process_list` 会返回 `processes`、`limit`、`max_limit`、`total_seen` 和 `truncated`，调用方可据此判断是否需要调整 `top_n` 重新获取。
 
 ## 安全校验
 
@@ -112,13 +113,35 @@ tool-server 收到 tool_call 时执行防御性校验（不查询 web-server 状
 
 | 校验项 | 规则 |
 |--------|------|
+| `auth_token` | 配置 `TOOLSERVER_SHARED_SECRET` 时必须匹配共享密钥 |
 | `approval_status` | 必须为 `APPROVED` |
 | 只读工具 | `isReadOnly=true` 可不携带 `request_id` |
 | 高风险工具 | `isReadOnly=false` 必须携带非空 UUID 格式 `request_id` |
 
 未通过 → 返回 `SECURITY_VIOLATION`（CRITICAL），拒绝执行。
 
+可变工具只能在 `execute_tool` 生命周期内部执行；直接 MCP 调用 `bash` 会返回 `SECURITY_VIOLATION`，避免绕过审批链路。`approval_status` 和 `request_id` 来自 web-server 的受控调用上下文，`auth_token` 使用 `TOOLSERVER_SHARED_SECRET` 做跨服务认证。tool-server 绑定非 loopback 地址时必须配置 `TOOLSERVER_SHARED_SECRET`；生产 Compose 仅使用 `expose` 给 web-server 访问，不能直接对用户网络或宿主机公网开放。
+
+`request_id` 幂等缓存会绑定 `chat_id`、`tool_name` 和参数指纹；同一 `request_id` 被复用于不同工具或参数时会返回 `SECURITY_VIOLATION`，不会返回旧执行结果。
+
 PostgreSQL 只读查询工具额外做 SQL 白名单校验：仅允许单条 `SELECT`/`WITH` 查询，拒绝多语句、事务控制、DDL/DML、`COPY`、`DO`、`CALL`、`NOTIFY`、大对象导入导出、服务端程序执行、`pg_read_file` / `pg_read_binary_file` / `pg_stat_file`、`pg_ls_dir` 和 `pg_ls_*dir` 系列文件系统访问函数。
+
+## eBPF 订阅状态
+
+持续订阅探针通过后台 `bpftrace` daemon 维护环形事件缓冲区，`watch_*` 工具返回 `events` 和 `probe_status`。`probe_status` 的取值如下：
+
+| 状态 | 含义 |
+|------|------|
+| `not_initialized` | eBPF runtime 尚未初始化 |
+| `not_registered` | 指定探针未被订阅管理器注册 |
+| `not_started` | daemon 已创建但尚未启动进程 |
+| `running` | daemon 进程运行中，或退出后正等待 watchdog 重启 |
+| `permanent_failure` | 缺少探针变体、脚本不存在、权限或语法等不可恢复错误 |
+| `stopped` | 已显式调用 shutdown/stop 停止 daemon |
+
+`stop()` 会显式进入 `stopped` 状态；后续重新 `start()` 会清除该状态并重新报告运行或失败状态。
+
+按需 eBPF 探针（`trace_*`）的 `duration` 表示请求采样时长；实际进程超时会取脚本固定采样窗口和请求时长的较大值，并增加 5 秒宽限，避免脚本默认窗口尚未结束就被 timeout 杀掉。
 
 ## 依赖注入
 
@@ -135,6 +158,7 @@ class ToolServerConfig:
     postgres_dsn: str | None             # 未配置时 PostgreSQL 工具返回 FAILED
     postgres_statement_timeout_ms: int
     postgres_max_rows: int
+    shared_secret: str                   # TOOLSERVER_SHARED_SECRET，非 loopback 绑定时必填
 ```
 
-生产 Compose 会把 `/app/sandbox` 挂载为 64 MiB tmpfs，避免 bash 工具默认工作目录落到镜像层或持久化卷。
+生产 Compose 会把 `/app/sandbox` 挂载为 64 MiB tmpfs。`host_exec=direct` 时，bash 工具默认工作目录位于该沙箱，避免临时文件写入镜像层或持久化卷。`host_exec=nsenter` / `chroot` 时，工作目录由对应宿主执行适配器接管，不承诺 `/app/sandbox` cwd 语义。

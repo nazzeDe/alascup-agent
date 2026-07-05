@@ -176,7 +176,7 @@ paths:
   /tool-requests/{request_id}/approval:
     post:
       summary: 审批工具请求
-      description: 前端对 tool_approval_required 事件中的 request_id 做出批准或拒绝决策。后端通过内存 ApprovalBridge 唤醒原 SSE 连接中的 AgentLoop；过期由服务端内部超时产生，不能由客户端提交。
+      description: 前端对 tool_approval_required 事件中的 request_id 做出批准或拒绝决策，请求体必须携带同一事件中的 chat_id；后端会校验 chat_id 与待审批请求归属一致。后端通过内存 ApprovalBridge 唤醒原 SSE 连接中的 AgentLoop；过期由服务端内部超时产生，不能由客户端提交。
       parameters:
         - in: path
           name: request_id
@@ -199,6 +199,8 @@ paths:
                 $ref: "#/components/schemas/ToolApprovalResult"
         "400":
           description: approval_status 非法；请求值必须为 APPROVED 或 REJECTED。
+        "403":
+          description: chat_id 与待审批请求归属不一致。
         "404":
           description: 请求不存在、已处理或已过期。
 
@@ -365,9 +367,12 @@ components:
 
     ToolApproval:
       type: object
-      required: [approval_status]
+      required: [chat_id, approval_status]
       additionalProperties: false
       properties:
+        chat_id:
+          type: string
+          format: uuid
         approval_status:
           type: string
           enum: [APPROVED, REJECTED]

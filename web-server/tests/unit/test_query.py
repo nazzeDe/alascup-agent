@@ -417,7 +417,7 @@ class TestChatTurnHighRisk:
             events.append((e["event"], e["data"]))
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         event_types = [e[0] for e in events]
         assert event_types[0] == "session_init"
@@ -607,7 +607,7 @@ class TestChatTurnConcurrent:
             events.append((e["event"], e["data"]))
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         event_types = [e[0] for e in events]
         assert "tool_approval_required" in event_types
@@ -965,7 +965,7 @@ class TestChatTurnFullChainAudit:
         async for e in stream:
             if e["event"] == "tool_approval_required":
                 data = json.loads(e["data"])
-                bridge.complete(data["request_id"], "APPROVED")
+                bridge.complete(data["request_id"], "APPROVED", chat_id=data["chat_id"])
 
         audit_events = [e.event for e in audit.events]
         assert "TOOL_REQUEST_CREATED" in audit_events

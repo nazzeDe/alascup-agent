@@ -11,6 +11,7 @@ router = APIRouter()
 
 
 class ToolApprovalRequest(BaseModel):
+    chat_id: UUID
     approval_status: str
     reason: str | None = None
 
@@ -48,8 +49,16 @@ async def approve_tool_request(
         raise HTTPException(
             status_code=404, detail="request not found or already handled"
         )
+    if str(body.chat_id) != chat_id:
+        raise HTTPException(status_code=403, detail="approval chat_id mismatch")
 
-    bridge.complete(str(request_id), status.value, body.reason)
+    completed = bridge.complete(
+        str(request_id), status.value, body.reason, chat_id=chat_id
+    )
+    if not completed:
+        raise HTTPException(
+            status_code=404, detail="request not found or already handled"
+        )
 
     return {
         "request_id": str(request_id),
