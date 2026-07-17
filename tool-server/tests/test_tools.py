@@ -521,6 +521,7 @@ class TestOperationTools:
     def test_bash_timeout(self, sandbox):
         result = self._run_bash(sandbox, command="sleep 10", timeout=1)
         assert result["execution_status"] == "FAILED"
+        assert result["error"]["code"] == 504
 
     def test_bash_file_not_found(self, sandbox):
         from unittest.mock import patch

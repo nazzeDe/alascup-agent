@@ -7,7 +7,7 @@ import subprocess
 from loguru import logger
 
 from src.config import ToolServerConfig
-from src.error.types import security_violation
+from src.error.types import security_violation, tool_timeout
 from src.security.execution_context import is_controlled_execution
 from src.tool_result import failed, succeeded
 from src.tool_result import failed_error
@@ -100,6 +100,7 @@ def _run_host_command(
             "stderr": stderr
             or getattr(exc, "stderr", "")
             or f"command timed out after {timeout}s",
+            "error": tool_timeout(timeout).to_jsonrpc(),
         }
 
 
