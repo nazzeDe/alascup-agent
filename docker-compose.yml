@@ -75,7 +75,7 @@ services:
     container_name: tool-server
     restart: unless-stopped
     environment:
-      - TOOLSERVER_HOST_EXEC=nsenter
+      - TOOLSERVER_HOST_EXEC=${TOOLSERVER_HOST_EXEC:-nsenter}
       - TOOLSERVER_HOST=0.0.0.0
       - TOOLSERVER_LOG_DIR=/app/logs
       - TOOLSERVER_SHARED_SECRET=${TOOLSERVER_SHARED_SECRET:?TOOLSERVER_SHARED_SECRET required}
@@ -112,6 +112,7 @@ services:
       - DAC_READ_SEARCH # 读取宿主机只读挂载（/proc, /sys, /var/log）
       # --- 系统服务管理 ---
       - SYS_ADMIN       # systemctl start/stop/restart/daemon-reload（注释即禁用）
+      - SYS_CHROOT      # chroot host execution mode on Kylin/LoongArch
       # --- 内核诊断 ---
       - SYSLOG          # dmesg
       - BPF             # bpftrace 等 BPF 程序加载

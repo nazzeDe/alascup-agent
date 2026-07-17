@@ -14,7 +14,23 @@ source "$SCRIPT_DIR/build-config.sh"
 TAG="${TAG:-latest}"
 NETWORK="${NETWORK:-alascup-net}"
 RESTART="${RESTART:-unless-stopped}"
-FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-80}"
+FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-18080}"
+
+# Kylin/LoongArch may reject setns on nsfs files from inside a container.
+# Keep nsenter on other architectures, while allowing an explicit override.
+if [ -z "${TOOLSERVER_HOST_EXEC:-}" ]; then
+    case "$(uname -m)" in
+        loongarch64) TOOLSERVER_HOST_EXEC="chroot" ;;
+        *) TOOLSERVER_HOST_EXEC="nsenter" ;;
+    esac
+fi
+case "$TOOLSERVER_HOST_EXEC" in
+    direct|chroot|nsenter) ;;
+    *)
+        echo "[ERROR] TOOLSERVER_HOST_EXEC must be direct, chroot, or nsenter"
+        exit 1
+        ;;
+esac
 
 if [ -z "${TOOLSERVER_SHARED_SECRET:-}" ]; then
     if ! command -v openssl &>/dev/null; then
@@ -35,6 +51,20 @@ TOOL_SERVER_CONTAINER="tool-server"
 WEB_SERVER_CONTAINER="web-server"
 FRONTEND_CONTAINER="alascup-frontend"
 
+TOOLSERVER_CAP_ARGS=(
+    --cap-drop ALL
+    --cap-add SYS_PTRACE
+    --cap-add KILL
+    --cap-add NET_ADMIN
+    --cap-add NET_RAW
+    --cap-add DAC_READ_SEARCH
+    --cap-add SYS_ADMIN
+    --cap-add SYSLOG
+)
+if [ "$TOOLSERVER_HOST_EXEC" = "chroot" ]; then
+    TOOLSERVER_CAP_ARGS+=(--cap-add SYS_CHROOT)
+fi
+
 # ---------- 清理旧容器 (可选) ----------
 cleanup_old() {
     local containers=("$POSTGRES_CONTAINER" "$TOOL_SERVER_CONTAINER" "$WEB_SERVER_CONTAINER" "$FRONTEND_CONTAINER")
@@ -46,14 +76,13 @@ cleanup_old() {
     done
 }
 
-if [ "${CLEAN:-1}" = "1" ]; then
-    cleanup_old
-    # 数据卷默认保留；需要重置 PostgreSQL 时显式设置 CLEAN_VOLUME=1。
-    if [ "${CLEAN_VOLUME:-0}" = "1" ]; then
-        if docker volume inspect pgdata &>/dev/null; then
-            echo "==> 移除旧卷: pgdata"
-            docker volume rm pgdata 2>/dev/null || true
-        fi
+# 每次运行都先移除旧容器，确保使用当前镜像创建全新容器。
+cleanup_old
+# 数据卷默认保留；需要重置 PostgreSQL 时显式设置 CLEAN_VOLUME=1。
+if [ "${CLEAN_VOLUME:-0}" = "1" ]; then
+    if docker volume inspect pgdata &>/dev/null; then
+        echo "==> 移除旧卷: pgdata"
+        docker volume rm pgdata 2>/dev/null || true
     fi
 fi
 
@@ -120,7 +149,7 @@ docker run -d \
     --name "$TOOL_SERVER_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    -e TOOLSERVER_HOST_EXEC=nsenter \
+    -e "TOOLSERVER_HOST_EXEC=$TOOLSERVER_HOST_EXEC" \
     -e TOOLSERVER_HOST=0.0.0.0 \
     -e TOOLSERVER_SHARED_SECRET="$TOOLSERVER_SHARED_SECRET" \
     -e TOOLSERVER_LOG_DIR=/app/logs \
@@ -137,14 +166,7 @@ docker run -d \
     --tmpfs /app/sandbox:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
     --ulimit memlock=-1:-1 \
-    --cap-drop ALL \
-    --cap-add SYS_PTRACE \
-    --cap-add KILL \
-    --cap-add NET_ADMIN \
-    --cap-add NET_RAW \
-    --cap-add DAC_READ_SEARCH \
-    --cap-add SYS_ADMIN \
-    --cap-add SYSLOG \
+    "${TOOLSERVER_CAP_ARGS[@]}" \
     --pid host \
     --pids-limit 512 \
     --memory 768m \
@@ -231,7 +253,7 @@ for i in $(seq 1 15); do
 done
 
 # ---------- 启动 frontend ----------
-echo "==> 启动前端..."
+echo "==> 启动前端 (宿主机端口: ${FRONTEND_HOST_PORT})..."
 docker run -d \
     --name "$FRONTEND_CONTAINER" \
     --network "$NETWORK" \
