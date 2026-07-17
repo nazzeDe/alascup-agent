@@ -166,7 +166,7 @@ describe('ChatStreamInterpreter', () => {
     })
   })
 
-  it('does not downgrade a pending approval tool call on duplicate tool_call', () => {
+  it('moves an approved tool call through pending, running, and done', () => {
     const interpreter = makeInterpreter()
 
     interpreter.apply({
@@ -184,12 +184,25 @@ describe('ChatStreamInterpreter', () => {
         call_id: 'tc-1',
       },
     })
+    const statuses = [chatStore.toolCalls.value.get('tc-1')!.execution_status]
+
     interpreter.apply({
       type: 'tool_call',
       data: { call_id: 'tc-1', tool_name: 'bash', params: { cmd: 'ls' }, is_read_only: false },
     })
+    statuses.push(chatStore.toolCalls.value.get('tc-1')!.execution_status)
 
-    expect(chatStore.toolCalls.value.get('tc-1')!.execution_status).toBe('PENDING_APPROVAL')
+    interpreter.apply({
+      type: 'tool_result',
+      data: { call_id: 'tc-1', execution_status: 'SUCCEEDED', output: { ok: true } },
+    })
+    statuses.push(chatStore.toolCalls.value.get('tc-1')!.execution_status)
+
+    expect(statuses).toEqual(['PENDING_APPROVAL', 'RUNNING', 'SUCCEEDED'])
+    expect(chatStore.toolCalls.value.get('tc-1')).toMatchObject({
+      request_id: 'req-1',
+      approval_status: 'APPROVED',
+    })
   })
 
   it('moves slow tool calls to waiting_for_tool', async () => {

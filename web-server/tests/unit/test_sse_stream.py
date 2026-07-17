@@ -838,9 +838,16 @@ class TestSSEStreamApproval:
         )
         assert "tool_call" in event_types, f"Missing tool_call: {event_types}"
         assert "tool_result" in event_types, f"Missing tool_result: {event_types}"
-        assert event_types.count("tool_call") == 1
+        assert event_types.count("tool_call") == 2
         assert event_types.count("tool_result") == 1
-        assert event_types.index("tool_call") < event_types.index("tool_result")
+        tool_call_indexes = [
+            index for index, event_type in enumerate(event_types)
+            if event_type == "tool_call"
+        ]
+        approval_index = event_types.index("tool_approval_required")
+        result_index = event_types.index("tool_result")
+        assert tool_call_indexes[0] < approval_index < tool_call_indexes[1]
+        assert tool_call_indexes[1] < result_index
         assert event_types.index("tool_result") < event_types.index("assistant")
         assert event_types[-1] == "done", (
             f"Last event should be done, got: {event_types[-1]}"

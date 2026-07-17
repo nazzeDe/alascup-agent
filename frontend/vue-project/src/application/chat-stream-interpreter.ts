@@ -149,7 +149,17 @@ export class ChatStreamInterpreter {
     }
 
     store.setPhase('calling_tool')
-    store.setToolCall(data.call_id, this.runningToolCall(data))
+    if (existing) {
+      this.refreshToolMetadata(data)
+      store.updateToolCall(data.call_id, {
+        execution_status: 'RUNNING',
+        ...(existing.execution_status === 'PENDING_APPROVAL'
+          ? { approval_status: 'APPROVED' as const }
+          : {}),
+      })
+    } else {
+      store.setToolCall(data.call_id, this.runningToolCall(data))
+    }
 
     this.clearToolTimeout()
     this.toolTimeout = setTimeout(() => {
@@ -193,12 +203,17 @@ export class ChatStreamInterpreter {
     if (!existing) {
       store.setToolCall(data.call_id, this.pendingApprovalToolCall(data))
     } else if (existing.execution_status === 'RUNNING') {
-      store.updateToolCall(data.call_id, { execution_status: 'PENDING_APPROVAL' })
+      store.updateToolCall(data.call_id, {
+        request_id: data.request_id,
+        approval_status: 'PENDING',
+        execution_status: 'PENDING_APPROVAL',
+      })
     }
   }
 
   private shouldIgnoreRunningDowngrade(toolCall: ToolCallInfo): boolean {
     return toolCall.execution_status !== 'RUNNING'
+      && toolCall.execution_status !== 'PENDING_APPROVAL'
   }
 
   private refreshToolMetadata(data: Extract<ChatStreamEvent, { type: 'tool_call' }>['data']): void {

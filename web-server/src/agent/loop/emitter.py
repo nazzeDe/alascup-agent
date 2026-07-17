@@ -44,9 +44,9 @@ class EventEmitter:
 
     # ── Tool call lifecycle ──
 
-    def emit_tool_started(self, tc: AgentToolCall) -> None:
+    def emit_tool_started(self, tc: AgentToolCall, *, force: bool = False) -> None:
         call_id = self._stable_call_id(tc)
-        if call_id in self._started_call_ids:
+        if call_id in self._started_call_ids and not force:
             return
         self._started_call_ids.add(call_id)
         debug_log("DEBUG", tp.EMIT_TOOL_STARTED, id=call_id, tool=tc.function.name)
@@ -129,14 +129,18 @@ class EventEmitter:
     # ── Batch helpers used by orchestrator ──
 
     def emit_tools_started(
-        self, tool_calls: list[AgentToolCall], *, skip_ids: set | None = None
+        self,
+        tool_calls: list[AgentToolCall],
+        *,
+        skip_ids: set | None = None,
+        force: bool = False,
     ) -> None:
         """Emit ToolCallStarted for each tool call, skipping pending approval IDs."""
         skip = skip_ids or set()
         for tc in tool_calls:
             if tc.id in skip:
                 continue
-            self.emit_tool_started(tc)
+            self.emit_tool_started(tc, force=force)
 
     def emit_tools_finished(self, results: list[AgentToolResult]) -> None:
         """Emit ToolCallFinished for each result."""

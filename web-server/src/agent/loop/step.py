@@ -113,7 +113,7 @@ class AgentStep:
             approved_count=len(approved),
             approved_ids=[tc.id for tc in approved],
         )
-        emitter.emit_tools_started(approved)
+        emitter.emit_tools_started(approved, force=True)
         exec_out = await self._act(state, ctx)
         state.tool_results = exec_out.results
         state.approved_tool_calls = []
