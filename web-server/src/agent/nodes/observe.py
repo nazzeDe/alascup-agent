@@ -1,5 +1,5 @@
 from src.agent.results import ObserveOutput
-from src.agent.shared import error_message
+from src.agent.shared import approval_result_error, error_message
 from src.agent.state import Transition
 from src.agent.domain import AgentToolResult
 from src.agent.mappers import tool_message_from_result, tool_result_from_wire
@@ -19,7 +19,7 @@ def observe_node(state, *, tool_results=None):
     for tc in state.rejected_tool_calls:
         result = {
             "execution_status": "REJECTED",
-            "error": {"message": "Tool was rejected by human. Do NOT retry."},
+            "error": approval_result_error(tc.approval_status),
         }
         reason = tc.rejection_reason
         if reason:

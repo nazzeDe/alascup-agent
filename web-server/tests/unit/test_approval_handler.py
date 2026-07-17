@@ -13,6 +13,7 @@ from src.agent.loop.approval import (
     _apply_decisions,
     _format_rejection_message,
     _inject_rejection_messages,
+    _rejection_tool_result,
 )
 from src.agent.loop.emitter import EventEmitter
 from src.agent.state import AgentState, Transition, TurnScratch
@@ -235,6 +236,20 @@ class TestFormatRejectionMessage:
         assert "[get_cpu] execution_status=REJECTED" in msg
         assert "rejection_reason=" not in msg
         assert "error=Tool was rejected by human. Do NOT retry." in msg
+
+    def test_expired_tool_result_has_expiration_outcome(self):
+        tc = _call(
+            "bash",
+            id="tc-expired-result",
+            approval_status=ApprovalStatus.EXPIRED,
+            rejection_reason="timeout",
+        )
+
+        result = _rejection_tool_result(tc).result
+
+        assert result["execution_status"] == "REJECTED"
+        assert result["rejection_reason"] == "timeout"
+        assert result["error"]["data"] == "approval_expired"
 
     def test_unknown_tool_name(self):
         tc = _call(id="bare")

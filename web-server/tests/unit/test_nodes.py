@@ -615,6 +615,24 @@ class TestStreamingThink:
 class TestObserveNode:
     """对应 tests/README.md AG-001 后半段：tool_result → assistant message 流转。"""
 
+    def test_expired_approval_result_preserves_expiration_outcome(self):
+        state = _state_with_tools()
+        state.rejected_tool_calls = [
+            _call(
+                "bash",
+                id="tc-expired",
+                approval_status="EXPIRED",
+                rejection_reason="timeout",
+            )
+        ]
+
+        result = observe_node(state)
+
+        tool_result = result.emitted_results[0].result
+        assert tool_result["execution_status"] == "REJECTED"
+        assert tool_result["rejection_reason"] == "timeout"
+        assert tool_result["error"]["data"] == "approval_expired"
+
     def test_appends_tool_results_as_messages(self):
         state = _state_with_tools()
         result = observe_node(

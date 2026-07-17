@@ -6,6 +6,7 @@ from uuid import uuid4
 from src.agent.loop.emitter import EventEmitter
 from src.agent.state import AgentState, Transition, TurnScratch
 from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
+from src.agent.shared import approval_result_error
 from src.agent.turn_context import TurnContext, Auditor, _safe_uuid
 from src.models.audit import AuditActor, AuditLevel
 from src.observability.debug_log import log as debug_log
@@ -50,14 +51,14 @@ def _format_rejection_message(tc: AgentToolCall) -> str:
     parts = [f"[{name}] execution_status=REJECTED"]
     if reason:
         parts.append(f"rejection_reason={reason}")
-    parts.append("error=Tool was rejected by human. Do NOT retry.")
+    parts.append(f"error={approval_result_error(tc.approval_status)['message']}")
     return "\n".join(parts)
 
 
 def _rejection_tool_result(tc: AgentToolCall) -> AgentToolResult:
     result = {
         "execution_status": "REJECTED",
-        "error": {"message": "Tool was rejected by human. Do NOT retry."},
+        "error": approval_result_error(tc.approval_status),
     }
     if tc.rejection_reason:
         result["rejection_reason"] = tc.rejection_reason

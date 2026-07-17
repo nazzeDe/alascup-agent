@@ -36,6 +36,19 @@ def error_message(error: Any) -> str:
     return str(error) if error else ""
 
 
+def approval_result_error(approval_status: str | None) -> dict[str, str]:
+    """Build a stable error category and message for an approval outcome."""
+    if approval_status == "EXPIRED":
+        return {
+            "data": "approval_expired",
+            "message": "Tool approval expired before a decision was received. Do NOT retry.",
+        }
+    return {
+        "data": "human_rejected",
+        "message": "Tool was rejected by human. Do NOT retry.",
+    }
+
+
 def normalize_tool_result(value: Any) -> dict[str, Any]:
     """Normalize structured tool results before they enter agent state."""
     if not isinstance(value, dict):
