@@ -21,13 +21,16 @@ _ENV_TO_FIELD: dict[str, str] = {
     "TOOLSERVER_SHARED_SECRET": "shared_secret",
 }
 
+DEFAULT_BASH_TIMEOUT_SECONDS = 300
+MAX_BASH_TIMEOUT_SECONDS = 600
+
 
 class ToolServerConfig(BaseModel):
     proc_path: str = "/proc"
     log_dir: str = "/app/logs"
     sandbox_root: str = "/app/sandbox"
     cache_ttl: int = 600
-    bash_timeout: int = 30
+    bash_timeout: int = DEFAULT_BASH_TIMEOUT_SECONDS
     host_exec: str = "direct"
     host: str = "127.0.0.1"
     port: int = 11451

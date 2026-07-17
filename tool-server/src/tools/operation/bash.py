@@ -6,7 +6,7 @@ import subprocess
 
 from loguru import logger
 
-from src.config import ToolServerConfig
+from src.config import MAX_BASH_TIMEOUT_SECONDS, ToolServerConfig
 from src.error.types import security_violation, tool_timeout
 from src.security.execution_context import is_controlled_execution
 from src.tool_result import failed, succeeded
@@ -23,7 +23,8 @@ def run_bash(
             security_violation("mutable tools must be called through execute_tool")
         )
 
-    effective_timeout = timeout if timeout is not None else config.bash_timeout
+    requested_timeout = timeout if timeout is not None else config.bash_timeout
+    effective_timeout = min(max(requested_timeout, 1), MAX_BASH_TIMEOUT_SECONDS)
     host_command = prepare_host_command(["bash", "-c", command], config)
     logger.debug(
         "bash_exec cmd={c!r} timeout={t} cwd={w}",

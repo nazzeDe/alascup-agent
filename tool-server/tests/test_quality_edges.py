@@ -41,6 +41,7 @@ class TestConfigLoading:
         config = load_config()
 
         assert config.port == 11451
+        assert config.bash_timeout == 300
         assert config.postgres_dsn is None
 
     def test_non_loopback_host_requires_shared_secret(self) -> None:

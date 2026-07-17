@@ -127,7 +127,7 @@ class TestToolExecutorExecute:
                 request_id="req-1",
             )
 
-            MockClient.assert_called_once_with("http://my:8001")
+            MockClient.assert_called_once_with("http://my:8001", timeout=660.0)
             mock_client.call_tool.assert_called_once_with("get_cpu_info", None)
             assert result["execution_status"] == "SUCCEEDED"
 

@@ -3,7 +3,7 @@
     "log_dir": "/app/logs",
     "sandbox_root": "/app/sandbox",
     "cache_ttl": 600,
-    "bash_timeout": 30,
+    "bash_timeout": 300,
     "host_exec": "direct",
     "port": 11451,
     "postgres_statement_timeout_ms": 5000,

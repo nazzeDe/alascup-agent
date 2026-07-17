@@ -6,6 +6,8 @@ from src.agent.shared import normalize_tool_result
 from src.mcp_client.registry import ServerRegistry
 from src.models.tool import ExecutionStatus
 
+MCP_TOOL_TIMEOUT_SECONDS = 660.0
+
 
 class ToolExecutor:
     """Execute and classify tool calls via MCP servers.
@@ -19,10 +21,12 @@ class ToolExecutor:
         registry: ServerRegistry,
         max_retries: int = 2,
         toolserver_auth_token: str = "",
+        mcp_timeout_seconds: float = MCP_TOOL_TIMEOUT_SECONDS,
     ) -> None:
         self._registry = registry
         self._max_retries = max_retries
         self._toolserver_auth_token = toolserver_auth_token
+        self._mcp_timeout_seconds = mcp_timeout_seconds
 
     # ── tool discovery (delegated to registry) ──────────────────────────
 
@@ -94,7 +98,10 @@ class ToolExecutor:
         url = self._registry.url_for(server_name)
         for attempt in range(self._max_retries + 1):
             try:
-                async with Client(url) as client:
+                # Keep the MCP transport open longer than the tool-server's
+                # 600-second execution cap so its structured timeout result
+                # can reach the agent instead of becoming a client timeout.
+                async with Client(url, timeout=self._mcp_timeout_seconds) as client:
                     call_name, args = self._call_payload(
                         tool_name,
                         arguments,

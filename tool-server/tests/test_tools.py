@@ -523,6 +523,17 @@ class TestOperationTools:
         assert result["execution_status"] == "FAILED"
         assert result["error"]["code"] == 504
 
+    def test_bash_timeout_is_capped_at_release_limit(self, sandbox):
+        from unittest.mock import MagicMock, patch
+
+        process = MagicMock(returncode=0)
+        process.communicate.return_value = ("ok", "")
+        with patch("src.tools.operation.bash.subprocess.Popen", return_value=process):
+            result = self._run_bash(sandbox, command="echo ok", timeout=900)
+
+        assert result["execution_status"] == "SUCCEEDED"
+        process.communicate.assert_called_once_with(timeout=600)
+
     def test_bash_file_not_found(self, sandbox):
         from unittest.mock import patch
 
