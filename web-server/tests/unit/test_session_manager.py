@@ -712,6 +712,39 @@ class TestToolCallLifecycleRegister:
             result=result,
         )
 
+    @pytest.mark.asyncio
+    async def test_register_normalizes_string_error_from_pre_executed_tool(self):
+        from src.agent.domain import AgentToolResult
+        from src.models.tool import ExecutionStatus
+        from src.services.tool_lifecycle import ToolCallLifecycle
+
+        sm = MagicMock()
+        call_id = uuid.uuid4()
+        sm.add_tool_call = AsyncMock(return_value=call_id)
+        sm.update_tool_call = AsyncMock()
+        lifecycle = ToolCallLifecycle(sm)
+        chat_id = uuid.uuid4()
+        pre_executed = [
+            AgentToolResult(
+                tool_name="get_tool_server_logs",
+                tool_call_id="llm-call-1",
+                result={
+                    "execution_status": "SUCCEEDED",
+                    "error": "log file not found",
+                },
+                is_read_only=True,
+            )
+        ]
+
+        await lifecycle.register(chat_id, [], pre_executed, llm_trace_id=None)
+
+        normalized = pre_executed[0].result
+        assert normalized["execution_status"] == "FAILED"
+        assert normalized["error"] == {"message": "log file not found"}
+        persisted = sm.add_tool_call.call_args.args[1]
+        assert persisted.execution_status == ExecutionStatus.FAILED
+        assert persisted.error == {"message": "log file not found"}
+
 
 class TestToolCallLifecycleUpdate:
     @pytest.mark.asyncio

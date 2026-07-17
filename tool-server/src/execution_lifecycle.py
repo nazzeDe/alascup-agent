@@ -13,7 +13,7 @@ from src.cache import ToolCache
 from src.error.types import execution_failed, security_violation, tool_not_found
 from src.security.execution_context import controlled_execution
 from src.security.validate import validate_execution
-from src.tool_result import failed_error, succeeded
+from src.tool_result import failed_error, normalize_result
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ def _record_successful_result(
     tool_name: str,
     chat_id: str,
 ) -> dict:
-    result = succeeded(result)
+    result = normalize_result(result)
     status = result.get("execution_status", "?")
     logger.info(
         "tool_result tool={name} status={s} chat_id={cid}",

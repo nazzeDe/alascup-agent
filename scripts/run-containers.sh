@@ -14,6 +14,15 @@ source "$SCRIPT_DIR/build-config.sh"
 TAG="${TAG:-latest}"
 NETWORK="${NETWORK:-alascup-net}"
 RESTART="${RESTART:-unless-stopped}"
+FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-80}"
+
+if [ -z "${TOOLSERVER_SHARED_SECRET:-}" ]; then
+    if ! command -v openssl &>/dev/null; then
+        echo "[ERROR] 未提供 TOOLSERVER_SHARED_SECRET，且系统没有 openssl"
+        exit 1
+    fi
+    TOOLSERVER_SHARED_SECRET="$(openssl rand -hex 32)"
+fi
 
 # 镜像 (build-config.sh 提供 BASE_POSTGRES / *IMAGE 变量)
 FRONTEND_IMAGE="alascup-frontend:${TAG}"
@@ -39,10 +48,12 @@ cleanup_old() {
 
 if [ "${CLEAN:-1}" = "1" ]; then
     cleanup_old
-    # 同时清理旧卷（PG18 需要空卷，否则旧格式数据会导致启动失败）
-    if docker volume inspect pgdata &>/dev/null; then
-        echo "==> 移除旧卷: pgdata"
-        docker volume rm pgdata 2>/dev/null || true
+    # 数据卷默认保留；需要重置 PostgreSQL 时显式设置 CLEAN_VOLUME=1。
+    if [ "${CLEAN_VOLUME:-0}" = "1" ]; then
+        if docker volume inspect pgdata &>/dev/null; then
+            echo "==> 移除旧卷: pgdata"
+            docker volume rm pgdata 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -110,16 +121,20 @@ docker run -d \
     --network "$NETWORK" \
     --restart "$RESTART" \
     -e TOOLSERVER_HOST_EXEC=nsenter \
+    -e TOOLSERVER_HOST=0.0.0.0 \
+    -e TOOLSERVER_SHARED_SECRET="$TOOLSERVER_SHARED_SECRET" \
     -e TOOLSERVER_LOG_DIR=/app/logs \
     -e POSTGRES_DSN=postgresql://alascup:alascup@postgres:5432/alascup \
     -v "/var/log:/host/var/log:ro" \
     -v "/proc:/host/proc:ro" \
     -v "/sys:/host/sys:ro" \
     -v "/:/host_root:ro" \
+    -v "/sys/kernel/btf:/sys/kernel/btf:ro" \
     -v "/sys/kernel/tracing:/sys/kernel/tracing:ro" \
     -v "$PROJECT_DIR/logs/tool-server:/app/logs" \
     --read-only \
     --tmpfs /tmp:size=128m,mode=1777 \
+    --tmpfs /app/sandbox:size=64m,mode=1777 \
     --security-opt no-new-privileges:true \
     --ulimit memlock=-1:-1 \
     --cap-drop ALL \
@@ -187,6 +202,7 @@ docker run -d \
     -e ALASCUP_LOG_LEVEL=DEBUG \
     -e ALASCUP_AGENT_TRACE=1 \
     -e ALASCUP_AGENT_TRACE_LEVEL=DEBUG \
+    -e TOOLSERVER_SHARED_SECRET="$TOOLSERVER_SHARED_SECRET" \
     -e DATABASE_URL=postgresql://alascup:alascup@postgres:5432/alascup \
     -v "$PROJECT_DIR/web-server/config:/app/config:ro" \
     -v "$PROJECT_DIR/logs/web-server:/app/logs" \
@@ -204,7 +220,7 @@ docker run -d \
 # ---------- 等待 web-server 就绪 ----------
 echo "==> 等待 Web Server 就绪..."
 for i in $(seq 1 15); do
-    if docker exec "$WEB_SERVER_CONTAINER" curl -sf http://localhost:11450/health &>/dev/null; then
+    if docker exec "$WEB_SERVER_CONTAINER" curl -sf http://localhost:11450/api/health &>/dev/null; then
         echo "    Web Server 就绪"
         break
     fi
@@ -220,7 +236,7 @@ docker run -d \
     --name "$FRONTEND_CONTAINER" \
     --network "$NETWORK" \
     --restart "$RESTART" \
-    -p 80:8080 \
+    -p "${FRONTEND_HOST_PORT}:8080" \
     "$FRONTEND_IMAGE"
 
 echo ""

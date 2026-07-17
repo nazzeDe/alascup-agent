@@ -14,6 +14,39 @@ class FakeRegistry:
 
 
 class TestToolExecutorConstruction:
+    def test_tool_server_structured_data_is_wrapped_as_output(self):
+        from src.mcp_client.executor import ToolExecutor
+
+        result = MagicMock()
+        result.data = {
+            "execution_status": "SUCCEEDED",
+            "disk_usage_percent": 65.1,
+        }
+
+        normalized = ToolExecutor._tool_server_result(result, "tool-server")
+
+        assert normalized == {
+            "execution_status": "SUCCEEDED",
+            "disk_usage_percent": 65.1,
+            "output": {"disk_usage_percent": 65.1},
+        }
+
+    def test_tool_server_string_error_is_normalized(self):
+        from src.mcp_client.executor import ToolExecutor
+
+        result = MagicMock()
+        result.data = {
+            "execution_status": "SUCCEEDED",
+            "error": "log file not found",
+            "lines": [],
+        }
+
+        normalized = ToolExecutor._tool_server_result(result, "tool-server")
+
+        assert normalized["execution_status"] == "FAILED"
+        assert normalized["error"] == {"message": "log file not found"}
+        assert normalized["output"] == {"lines": []}
+
     def test_resolve_status_from_data_execution_status(self):
         """data.execution_status 优先于 isError"""
         from src.mcp_client.executor import ToolExecutor

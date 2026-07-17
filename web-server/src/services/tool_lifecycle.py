@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 from src.models.message import Message, MessageType
 from src.models.tool import ApprovalStatus, ExecutionStatus, ServerName, ToolCall
 from src.agent.domain import AgentMessage, AgentToolCall, AgentToolResult
+from src.agent.shared import normalize_tool_result
 
 
 class ToolCallLifecycle:
@@ -114,7 +115,8 @@ class ToolCallLifecycle:
 
         for pe in pre_executed:
             tc_id_str = pe.tool_call_id
-            result = pe.result
+            result = normalize_tool_result(pe.result)
+            pe.result = result
             exec_status_str = result.get("execution_status", "SUCCEEDED")
 
             call = ToolCall(
@@ -220,6 +222,7 @@ class ToolCallLifecycle:
         call_id,
         result: dict,
     ) -> None:
+        result = normalize_tool_result(result)
         exec_status_str = result.get("execution_status", "UNKNOWN")
         try:
             exec_status = ExecutionStatus(exec_status_str)

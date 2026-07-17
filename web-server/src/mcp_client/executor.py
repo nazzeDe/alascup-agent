@@ -2,6 +2,7 @@ import asyncio
 
 from fastmcp import Client
 
+from src.agent.shared import normalize_tool_result
 from src.mcp_client.registry import ServerRegistry
 from src.models.tool import ExecutionStatus
 
@@ -176,10 +177,10 @@ class ToolExecutor:
             return None
         data = getattr(result, "data", None)
         if isinstance(data, dict):
-            return data
+            return normalize_tool_result(data)
         structured = getattr(result, "structured_content", None)
         if isinstance(structured, dict):
-            return structured
+            return normalize_tool_result(structured)
         return None
 
     @staticmethod

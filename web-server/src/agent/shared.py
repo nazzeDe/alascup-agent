@@ -34,3 +34,35 @@ def error_message(error: Any) -> str:
     if isinstance(error, dict):
         return error.get("message", "")
     return str(error) if error else ""
+
+
+def normalize_tool_result(value: Any) -> dict[str, Any]:
+    """Normalize structured tool results before they enter agent state."""
+    if not isinstance(value, dict):
+        return {
+            "execution_status": "FAILED",
+            "error": {"message": str(value)},
+        }
+
+    result = dict(value)
+    if result.get("error") is not None:
+        result["error"] = _normalize_error(result["error"])
+        result["execution_status"] = "FAILED"
+    else:
+        result.setdefault("execution_status", "SUCCEEDED")
+
+    if "output" not in result:
+        output = {
+            key: item
+            for key, item in result.items()
+            if key not in {"execution_status", "error"}
+        }
+        if output:
+            result["output"] = output
+    return result
+
+
+def _normalize_error(error: Any) -> dict[str, Any]:
+    if isinstance(error, dict):
+        return error
+    return {"message": str(error)}

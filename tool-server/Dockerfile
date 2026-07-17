@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
-RUN pip install uv --no-cache-dir .
+RUN pip install --no-cache-dir .
 
 COPY src/ src/
 COPY config.json ./

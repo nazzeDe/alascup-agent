@@ -712,6 +712,37 @@ class TestToolResultNormalization:
             "error": {"code": 500, "message": "EXECUTION_FAILED", "data": "boom"},
         }
 
+    def test_normalize_result_wraps_structured_payload_as_output(self):
+        from src.tool_result import normalize_result
+
+        result = normalize_result(
+            {
+                "disk_used_gb": 80.0,
+                "disk_free_gb": 20.0,
+            }
+        )
+
+        assert result["execution_status"] == "SUCCEEDED"
+        assert result["output"] == {
+            "disk_used_gb": 80.0,
+            "disk_free_gb": 20.0,
+        }
+
+    def test_normalize_result_converts_string_error_to_failed_object(self):
+        from src.tool_result import normalize_result
+
+        result = normalize_result(
+            {
+                "filename": "missing.log",
+                "lines": [],
+                "error": "log file not found",
+            }
+        )
+
+        assert result["execution_status"] == "FAILED"
+        assert result["error"] == {"message": "log file not found"}
+        assert result["output"] == {"filename": "missing.log", "lines": []}
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Handle Execute Tool (dispatch pipeline, now async via FastMCP get_tool)
@@ -771,6 +802,56 @@ class TestHandleExecuteTool:
             cache=cache,
         )
         assert "error" not in result
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_normalizes_missing_log_error(self, tmp_path):
+        from src.cache import create_cache
+        from src.config import ToolServerConfig
+        from src.handlers.dispatch import handle_execute_tool
+        from src.main import create_server
+
+        server = await create_server(ToolServerConfig(log_dir=str(tmp_path)))
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="get_tool_server_logs",
+            chat_id="chat-1",
+            params={"filename": "../secret"},
+            request_id="550e8400-e29b-41d4-a716-446655440010",
+            approval_status="APPROVED",
+            cache=create_cache(ttl=600),
+        )
+
+        assert result["execution_status"] == "FAILED"
+        assert result["error"] == {"message": "log file not found"}
+        assert result["output"] == {
+            "log_dir": str(tmp_path),
+            "filename": "../secret",
+            "lines": [],
+            "available_files": [],
+        }
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_exposes_structured_readonly_output(self, config):
+        from src.cache import create_cache
+        from src.handlers.dispatch import handle_execute_tool
+        from src.main import create_server
+
+        server = await create_server(config)
+        result = await handle_execute_tool(
+            server=server,
+            tool_name="get_disk_usage",
+            chat_id="chat-1",
+            params={"path": "/"},
+            request_id="550e8400-e29b-41d4-a716-446655440011",
+            approval_status="APPROVED",
+            cache=create_cache(ttl=600),
+        )
+
+        assert result["execution_status"] == "SUCCEEDED"
+        assert result["output"]["partition"] == "/"
+        assert result["output"]["disk_usage_percent"] == result[
+            "disk_usage_percent"
+        ]
 
     @pytest.mark.asyncio
     async def test_cache_hit(self, config, cache):
@@ -916,7 +997,11 @@ class TestHandleExecuteTool:
 
         assert calls == 1
         assert first_result == second_result
-        assert first_result == {"value": "ok", "execution_status": "SUCCEEDED"}
+        assert first_result == {
+            "value": "ok",
+            "execution_status": "SUCCEEDED",
+            "output": {"value": "ok"},
+        }
 
     @pytest.mark.asyncio
     async def test_inflight_future_unblocks_when_owner_cancelled(self, cache):
@@ -1023,7 +1108,11 @@ class TestHandleExecuteTool:
             cache=cache,
         )
 
-        assert result == {"value": "ok", "execution_status": "SUCCEEDED"}
+        assert result == {
+            "value": "ok",
+            "execution_status": "SUCCEEDED",
+            "output": {"value": "ok"},
+        }
 
     @pytest.mark.asyncio
     async def test_execute_exception_normalizes_error(self, config, cache):
