@@ -17,6 +17,7 @@ from src.models.message import Message
 from src.models.session import ChatSession
 from src.models.tool import ToolCall
 from src.security.pending import ApprovalBridge
+from src.security.input_safety import InputSafetyGate
 from src.security.rule_engine import RuleEngine
 from src.services.context_manager import ContextManager
 from src.services.error_recovery import ErrorRecovery
@@ -61,6 +62,7 @@ class Services:
     prompt_manager: PromptManager
     context_manager: ContextManager
     rule_engine: RuleEngine
+    input_safety_gate: InputSafetyGate
     tool_executor: ToolExecutor
     audit_logger: AuditLogger
     approval_bridge: ApprovalBridge
@@ -96,6 +98,10 @@ async def context_manager(request: Request) -> ContextManager:
 
 async def rule_engine(request: Request) -> RuleEngine:
     return _services(request).rule_engine
+
+
+async def input_safety_gate(request: Request) -> InputSafetyGate:
+    return _services(request).input_safety_gate
 
 
 async def tool_executor(request: Request) -> ToolExecutor:

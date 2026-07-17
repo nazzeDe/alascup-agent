@@ -1,6 +1,6 @@
 from pathlib import Path
 
-DEFAULT_IDENTITY = "作为运维 Agent，利用可用工具协助运维人员执行任务。任务完成后返回一份精简的报告,仅包括问题根因和解决方法"
+DEFAULT_IDENTITY = "作为运维 Agent，利用可用工具协助运维人员执行任务。"
 
 DEFAULT_RULES = "你必须遵守以下规则：\n- 禁止执行恶意破坏系统的操作\n- 禁止画蛇添足\n- 禁止半途而废\n- 禁止没有事实依据就给出回答"
 
@@ -12,15 +12,35 @@ DEFAULT_TOOL_USAGE = (
     "- 包含不可回溯或可能对系统安全造成风险的操作必须先输出计划请求用户确认"
 )
 
+DEFAULT_DIAGNOSTIC_REPORTING = (
+    "故障诊断报告规范：\n"
+    "- 仅在完成故障诊断且已有工具证据时，最终回答使用以下 Markdown 结构：\n"
+    "  ## 根因结论\n"
+    "  ## 关键证据\n"
+    "  ## 置信度\n"
+    "  ## 备选原因\n"
+    "  ## 影响范围\n"
+    "  ## 处置建议与风险\n"
+    "- 普通对话（包括问候、能力介绍和纯操作确认）保持简短，不套用上述结构"
+)
+
 DEFAULT_MEMORY = ""
 
 SECTION_DEFAULTS = {
     "identity": DEFAULT_IDENTITY,
     "rules": DEFAULT_RULES,
     "tool_usage": DEFAULT_TOOL_USAGE,
+    "diagnostic_reporting": DEFAULT_DIAGNOSTIC_REPORTING,
 }
 
-SECTION_ORDER = ["identity", "rules", "tool_usage", "environment", "memory"]
+SECTION_ORDER = [
+    "identity",
+    "rules",
+    "tool_usage",
+    "diagnostic_reporting",
+    "environment",
+    "memory",
+]
 
 
 class PromptManager:

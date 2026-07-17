@@ -8,6 +8,7 @@ import pytest
 
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
+from src.security.input_safety import InputSafetyGate
 
 pytestmark = pytest.mark.asyncio
 
@@ -204,6 +205,8 @@ class TestDrainQueueIntegration:
             prompt_manager=prompt_mgr,
             orchestrator_builder=orch_builder,
             tool_executor=executor,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         from src.sse_stream import SSEStream

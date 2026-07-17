@@ -9,6 +9,7 @@ def test_fastapi_dependency_providers_are_async():
         container.session_manager,
         container.prompt_manager,
         container.context_manager,
+        container.input_safety_gate,
         container.rule_engine,
         container.tool_executor,
         container.audit_logger,

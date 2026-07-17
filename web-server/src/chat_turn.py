@@ -18,8 +18,10 @@ from src.agent.state import AgentState
 from src.agent.mappers import messages_from_wire
 from src.agent.shared import is_disconnected
 from src.models.message import Message, MessageType
+from src.models.audit import AuditActor, AuditEvent, AuditLevel
 from src.observability.debug_log import log as debug_log
 from src.observability import trace_points as tp
+from src.security.input_safety import InputSafetyGate, SafetyAssessment, SafetyDecision
 from src.services.history_projection import build_llm_history
 
 
@@ -39,6 +41,8 @@ class ChatTurn:
         prompt_manager,
         orchestrator_builder,
         tool_executor,
+        input_safety_gate: InputSafetyGate,
+        audit_logger,
         disconnect_check=None,
     ):
         self._user_message = user_message
@@ -47,6 +51,8 @@ class ChatTurn:
         self._prompt_manager = prompt_manager
         self._orchestrator_builder = orchestrator_builder
         self._tool_executor = tool_executor
+        self._input_safety_gate = input_safety_gate
+        self._audit_logger = audit_logger
         self._disconnect_check = disconnect_check
 
     async def _is_disconnected(self) -> bool:
@@ -65,7 +71,17 @@ class ChatTurn:
         if await self._is_disconnected():
             return
 
-        state = await self._build_initial_state(session)
+        history = await self._persist_user_message(session)
+        assessment = self._input_safety_gate.assess(self._user_message)
+        if assessment.decision is SafetyDecision.BLOCK:
+            await self._audit_rejection(chat_id_uuid, assessment)
+            yield TurnFailed(
+                code="PROMPT_INJECTION_BLOCKED",
+                message=assessment.reason or "Prompt injection blocked",
+            )
+            return
+
+        state = self._build_agent_state(history)
         orchestrator = self._orchestrator_builder()
         orchestrator._chat_id = str(chat_id_uuid)
 
@@ -94,7 +110,7 @@ class ChatTurn:
             return await self._session_manager.create_session()
         return await self._session_manager.get_session(UUID(self._chat_id))
 
-    async def _build_initial_state(self, session) -> AgentState:
+    async def _persist_user_message(self, session) -> list[dict]:
         history: list[dict] = build_llm_history(session)
         if not session.title and self._user_message:
             title = self._user_message.split("\n")[0][:20]
@@ -108,13 +124,33 @@ class ChatTurn:
             content=self._user_message,
         )
         await self._session_manager.add_message(session.id, user_msg)
+        return history
 
+    def _build_agent_state(self, history: list[dict]) -> AgentState:
         return AgentState(
             messages=messages_from_wire(
                 history + [{"role": "user", "content": self._user_message}]
             ),
             available_tools=self._tool_executor.list_tools(),
             system=self._prompt_manager.build_system_prompt(),
+        )
+
+    async def _audit_rejection(
+        self, chat_id: UUID, assessment: SafetyAssessment
+    ) -> None:
+        await self._audit_logger.log(
+            AuditEvent(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                chat_id=chat_id,
+                level=AuditLevel.WARN,
+                actor=AuditActor.POLICY,
+                event="INPUT_REJECTED",
+                decision=assessment.decision,
+                error={
+                    "rule_id": assessment.rule_id,
+                    "reason": assessment.reason,
+                },
+            )
         )
 
     async def _receive_event(self, channel: EventChannel, orch_task: asyncio.Task):

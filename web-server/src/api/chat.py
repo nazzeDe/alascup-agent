@@ -13,6 +13,7 @@ from src.services.container import (
     error_recovery,
     lifecycle,
     llm_adapter,
+    input_safety_gate,
     prompt_manager,
     rule_engine as rule_engine_dep,
     session_manager,
@@ -45,6 +46,7 @@ async def chat_turn(
     max_iter=Depends(agent_max_iterations),
     token_ratio=Depends(agent_token_ceiling_ratio),
     rules=Depends(rule_engine_dep),
+    safety_gate=Depends(input_safety_gate),
 ):
     """Frontend-facing SSE endpoint. Creates session if chat_id not provided."""
 
@@ -70,6 +72,8 @@ async def chat_turn(
         prompt_manager=prompt_mgr,
         orchestrator_builder=orchestrator_builder,
         tool_executor=executor,
+        input_safety_gate=safety_gate,
+        audit_logger=audit_logger,
         disconnect_check=lambda: request.is_disconnected(),
     )
 

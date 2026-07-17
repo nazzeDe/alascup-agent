@@ -96,6 +96,45 @@ test.describe("E2E-006 会话管理", () => {
     await expect(page.getByText("查看 CPU")).not.toBeVisible();
   });
 
+  test("reopening a session keeps its persisted tool evidence expandable", async ({ page }) => {
+    const session = {
+      chat_id: CHAT_ID_1,
+      title: "CPU 诊断",
+      messages: [],
+      executed_tool_list: [
+        {
+          call_id: "tool-call-1",
+          chat_id: CHAT_ID_1,
+          tool_name: "get_cpu_usage",
+          server: "tool-server",
+          is_read_only: true,
+          is_rollbackable: false,
+          params: {},
+          approval_status: "APPROVED",
+          execution_status: "SUCCEEDED",
+          result: {
+            execution_status: "SUCCEEDED",
+            output: "CPU usage: 42%",
+          },
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      timestamp: new Date().toISOString(),
+    };
+
+    await mockSessions(page, [session]);
+    await mockApproval(page);
+    await mockSessionDetail(page, session);
+
+    await page.goto("/");
+    await page.locator(SEL.sessionItem).click();
+
+    const evidence = page.locator(SEL.toolCard);
+    await evidence.getByRole("button", { name: /execution evidence/ }).click();
+
+    await expect(evidence.getByTestId("tool-result")).toHaveText("CPU usage: 42%");
+  });
+
   test("new session button works", async ({ page }) => {
     await mockSessions(page);
     await mockApproval(page);

@@ -6,5 +6,43 @@
   "blacklist": [
     {"tool_name": "shutdown_system", "description": "禁止关机操作"},
     {"tool_name": "drop_database", "description": "禁止删除数据库"}
+  ],
+  "input_safety": [
+    {
+      "id": "override_safety_instructions",
+      "patterns": [
+        "(?<!do not )(?<!never )\\b(?:ignore|disregard|override)\\b.{0,80}\\b(?:previous|prior|system|safety)\\b.{0,40}\\b(?:instructions?|rules?)\\b",
+        "(?<!不要)(?<!禁止)(?:忽略|无视|覆盖).{0,40}(?:之前|先前|系统|安全).{0,20}(?:指令|提示|规则|限制)"
+      ],
+      "reason": "检测到试图覆盖系统安全规则的提示注入"
+    },
+    {
+      "id": "extract_system_instructions",
+      "patterns": [
+        "(?<!do not )(?<!never )\\b(?:reveal|show|print|display|expose|repeat|return)\\b.{0,80}(?:(?:hidden )?(?:system|developer)\\b.{0,30}\\b(?:prompts?|instructions?)\\b|(?:hidden )?developer\\b.{0,30}\\bmessages?\\b)",
+        "\\b(?:what is|give me)\\b.{0,60}\\b(?:hidden )?(?:system|developer)\\b.{0,30}\\b(?:prompts?|instructions?)\\b",
+        "(?<!不要)(?<!禁止)(?:泄露|显示|输出|打印|展示|复述|告诉我).{0,40}(?:(?:系统|开发者).{0,20}(?:提示词|提示|指令)|开发者.{0,20}消息)"
+      ],
+      "reason": "检测到试图获取系统或开发者指令的提示注入"
+    },
+    {
+      "id": "extract_credentials",
+      "patterns": [
+        "(?<!do not )(?<!never )\\b(?:reveal|show|print|display|expose|return|dump|read|retrieve|send|give)\\b.{0,80}\\b(?:credentials?|passwords?|api[ _-]?keys?|(?:access|auth|bearer)[ _-]?tokens?|secrets?|private keys?)\\b",
+        "(?<!不要)(?<!禁止)(?:泄露|显示|输出|打印|读取|获取|导出|发送|发给我).{0,50}(?:凭据|密码|api[ _-]?密钥|访问令牌|认证令牌|bearer[ _-]?令牌|密钥|私钥)"
+      ],
+      "reason": "检测到试图获取凭据或密钥的提示注入"
+    },
+    {
+      "id": "bypass_approval_controls",
+      "patterns": [
+        "(?<!do not )(?<!never )\\b(?:bypass|skip|disable|avoid|circumvent)\\b.{0,60}\\b(?:approval|confirmation|safety|security|permission|policy|guardrails?|restrictions?|checks?)\\b",
+        "\\b(?:execute|run|proceed)\\b.{0,60}\\bwithout\\b.{0,30}\\b(?:approval|confirmation|permission)\\b",
+        "(?<!不要)(?<!禁止)(?:绕过|跳过|禁用|关闭|规避).{0,40}(?:人工)?(?:审批|确认|安全|权限|策略|限制|检查)",
+        "(?:直接执行|立即执行).{0,20}(?:不用|无需|不经).{0,10}(?:审批|确认|许可)",
+        "(?:不用|无需|不经).{0,10}(?:审批|确认|许可).{0,20}(?:直接|立即)执行"
+      ],
+      "reason": "检测到试图绕过审批或安全控制的提示注入"
+    }
   ]
 }

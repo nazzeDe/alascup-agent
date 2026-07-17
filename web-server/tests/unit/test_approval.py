@@ -12,6 +12,7 @@ def app_with_bridge():
     """Build app with a real ApprovalBridge but mock everything else."""
     from src.config.models import RulesConfig
     from src.observability.audit_logger import InMemoryAuditLogger
+    from src.security.input_safety import InputSafetyGate
     from src.security.pending import ApprovalBridge
     from src.security.rule_engine import RuleEngine
     from src.services.container import Services
@@ -60,6 +61,7 @@ def app_with_bridge():
         prompt_manager=PromptManager(),
         context_manager=ContextManager(),
         rule_engine=RuleEngine(RulesConfig()),
+        input_safety_gate=InputSafetyGate([]),
         tool_executor=_MockExecutor(),
         audit_logger=InMemoryAuditLogger(),
         approval_bridge=bridge,

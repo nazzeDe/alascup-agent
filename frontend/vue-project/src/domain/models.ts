@@ -27,6 +27,20 @@ export type ExecutionStatus =
   | "FAILED"
   | "REJECTED";
 
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export interface ToolError {
+  code?: string | number;
+  message: string;
+  data?: JsonValue;
+}
+
 export interface ToolCallInfo {
   call_id: string;
   chat_id: string;
@@ -39,8 +53,8 @@ export interface ToolCallInfo {
   approval_status?: ApprovalStatus;
   execution_status: ExecutionStatus;
   execution_time_ms?: number;
-  output?: Record<string, unknown>;
-  error?: { code?: number; message: string; data?: string };
+  output?: JsonValue;
+  error?: ToolError;
   timestamp: string;
 }
 

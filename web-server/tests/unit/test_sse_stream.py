@@ -10,6 +10,7 @@ import pytest
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
 from src.models.message import Message
+from src.security.input_safety import InputSafetyGate
 from src.sse_stream import SSEStream
 
 
@@ -246,6 +247,8 @@ def _build_stream(
         prompt_manager=prompt_mgr,
         orchestrator_builder=orch_builder,
         tool_executor=executor,
+        input_safety_gate=InputSafetyGate([]),
+        audit_logger=audit,
     )
 
     return SSEStream(turn=turn)

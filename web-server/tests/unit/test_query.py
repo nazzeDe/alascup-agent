@@ -9,6 +9,7 @@ import pytest
 from src.agent.loop.orchestrator import LoopOrchestrator
 from src.chat_turn import ChatTurn
 from src.models.message import Message, MessageType
+from src.security.input_safety import InputSafetyGate
 
 
 class MockLLM:
@@ -246,6 +247,8 @@ async def _run_turn_and_collect(
         prompt_manager=prompt_mgr,
         orchestrator_builder=orchestrator_builder,
         tool_executor=executor,
+        input_safety_gate=InputSafetyGate([]),
+        audit_logger=audit,
     )
 
     from src.sse_stream import SSEStream
@@ -401,12 +404,14 @@ class TestChatTurnHighRisk:
             )
 
         turn = ChatTurn(
-            user_message="restart",
+            user_message="Restart nginx.",
             chat_id=None,
             session_manager=MockSessionManager(),
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
             tool_executor=risky,
+            input_safety_gate=self._configured_input_safety_gate(),
+            audit_logger=audit,
         )
 
         from src.sse_stream import SSEStream
@@ -425,6 +430,15 @@ class TestChatTurnHighRisk:
         assert "assistant" in event_types
         assert event_types[-1] == "done"
         assert risky.calls
+
+    @staticmethod
+    def _configured_input_safety_gate():
+        from pathlib import Path
+
+        from src.config.loader import load_rules_config
+
+        rules_path = Path(__file__).parents[2] / "config" / "rules.json"
+        return InputSafetyGate(load_rules_config(rules_path).input_safety)
 
 
 class TestChatTurnTransitionTracking:
@@ -597,6 +611,8 @@ class TestChatTurnConcurrent:
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
             tool_executor=risky,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         from src.sse_stream import SSEStream
@@ -703,6 +719,8 @@ class TestChatTurnErrorRecovery:
             prompt_manager=prompt_mgr,
             orchestrator_builder=orch_builder,
             tool_executor=executor,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         from src.sse_stream import SSEStream
@@ -830,6 +848,8 @@ class TestAgentCrashSendsDone:
             prompt_manager=prompt_mgr,
             orchestrator_builder=orch_builder,
             tool_executor=executor,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         stream = SSEStream(turn=turn)
@@ -877,6 +897,8 @@ class TestAgentCrashSendsDone:
             prompt_manager=prompt_mgr,
             orchestrator_builder=orch_builder,
             tool_executor=executor,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         stream = SSEStream(turn=turn)
@@ -957,6 +979,8 @@ class TestChatTurnFullChainAudit:
             prompt_manager=MockPromptManager(),
             orchestrator_builder=orch_builder,
             tool_executor=risky,
+            input_safety_gate=InputSafetyGate([]),
+            audit_logger=audit,
         )
 
         from src.sse_stream import SSEStream

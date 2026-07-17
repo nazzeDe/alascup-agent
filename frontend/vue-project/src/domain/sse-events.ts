@@ -1,5 +1,7 @@
 // SSE event payloads (wire format DTOs — sent by the backend over EventSource)
 
+import type { JsonValue, ToolError } from '@/domain/models'
+
 export interface AssistantEvent {
   delta: string;
 }
@@ -25,8 +27,8 @@ export interface ToolCallEvent {
 export interface ToolResultEvent {
   call_id: string;
   execution_status: "SUCCEEDED" | "FAILED" | "REJECTED";
-  output?: Record<string, unknown>;
-  error?: { code?: number; message: string; data?: string };
+  output?: JsonValue;
+  error?: ToolError;
   execution_time_ms?: number;
 }
 

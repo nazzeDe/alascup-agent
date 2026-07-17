@@ -13,6 +13,7 @@ from src.mcp_client.registry import ServerRegistry
 from src.observability.audit_logger import PostgresAuditLogger
 from src.observability.tracer import PostgresTracer
 from src.security.pending import ApprovalBridge
+from src.security.input_safety import InputSafetyGate
 from src.security.rule_engine import RuleEngine
 from src.services.context_manager import ContextManager
 from src.services.db import Database
@@ -57,6 +58,7 @@ def _build_services(settings: Settings) -> Services:
     )
 
     rule_engine = RuleEngine(rules_config)
+    input_safety_gate = InputSafetyGate(rules_config.input_safety)
 
     lifecycle = ToolCallLifecycle(session_mgr)
 
@@ -70,6 +72,7 @@ def _build_services(settings: Settings) -> Services:
             summarizer=llm_adapter.summarize,
         ),
         rule_engine=rule_engine,
+        input_safety_gate=input_safety_gate,
         tool_executor=tool_executor,
         audit_logger=audit_logger,
         approval_bridge=ApprovalBridge(),

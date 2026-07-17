@@ -9,9 +9,16 @@ class RuleEntry(BaseModel):
     description: str = ""
 
 
+class InputSafetyRule(BaseModel):
+    id: str
+    patterns: list[str]
+    reason: str
+
+
 class RulesConfig(BaseModel):
     whitelist: list[RuleEntry] = Field(default_factory=list)
     blacklist: list[RuleEntry] = Field(default_factory=list)
+    input_safety: list[InputSafetyRule] = Field(default_factory=list)
 
 
 class ServerEntry(BaseModel):

@@ -156,6 +156,224 @@ describe('ToastContainer', () => {
 })
 
 describe('ToolCallInline', () => {
+  it('keeps evidence details collapsed behind a scannable execution summary', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-summary',
+          chat_id: 'chat-1',
+          tool_name: 'get_cpu_usage',
+          is_read_only: true,
+          approval_status: 'APPROVED',
+          execution_status: 'SUCCEEDED',
+          execution_time_ms: 1500,
+          output: 'CPU usage: 42%',
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    expect({
+      readWrite: wrapper.get('[data-testid="tool-read-write"]').text(),
+      name: wrapper.get('[data-testid="tool-name"]').text(),
+      approval: wrapper.get('[data-testid="tool-approval-status"]').text(),
+      status: wrapper.get('[data-testid="tool-execution-status"]').text(),
+      duration: wrapper.get('[data-testid="tool-duration"]').text(),
+      detailsVisible: wrapper.find('[data-testid="tool-evidence-details"]').exists(),
+    }).toEqual({
+      readWrite: 'R',
+      name: 'get_cpu_usage',
+      approval: 'Approved',
+      status: 'Done',
+      duration: '1.5s',
+      detailsVisible: false,
+    })
+  })
+
+  it('reveals complete generic execution evidence when expanded', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-details',
+          chat_id: 'chat-1',
+          tool_name: 'restart_service',
+          server: 'tool-server',
+          is_read_only: false,
+          is_rollbackable: true,
+          params: { service: 'nginx', options: { wait: true } },
+          approval_status: 'APPROVED',
+          execution_status: 'FAILED',
+          output: { attempted: true },
+          error: { code: 503, message: 'Service unavailable', data: 'timeout' },
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+
+    expect({
+      server: wrapper.get('[data-testid="tool-server"]').text(),
+      rollback: wrapper.get('[data-testid="tool-rollback"]').text(),
+      parameters: wrapper.get('[data-testid="tool-parameters"]').text(),
+      result: wrapper.get('[data-testid="tool-result"]').text(),
+      error: wrapper.get('[data-testid="tool-error"]').text(),
+    }).toEqual({
+      server: 'tool-server',
+      rollback: 'Rollbackable',
+      parameters: JSON.stringify({ service: 'nginx', options: { wait: true } }, null, 2),
+      result: JSON.stringify({ attempted: true }, null, 2),
+      error: JSON.stringify({ code: 503, message: 'Service unavailable', data: 'timeout' }, null, 2),
+    })
+  })
+
+  it('omits rollback evidence when the backend did not provide it', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-live',
+          chat_id: 'chat-1',
+          tool_name: 'get_cpu_usage',
+          server: 'tool-server',
+          is_read_only: true,
+          execution_status: 'SUCCEEDED',
+          output: 'CPU usage: 42%',
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="tool-rollback"]').exists()).toBe(false)
+  })
+
+  it.each([
+    [
+      '20 lines',
+      Array.from({ length: 21 }, (_, index) => `line ${index + 1}`).join('\n'),
+      'line 20',
+      'line 21',
+    ],
+    ['16 KiB', `${'x'.repeat(16 * 1024)}OVER_LIMIT`, 'xxxx', 'OVER_LIMIT'],
+  ])('caps the visible result preview at %s', async (_limit, output, included, excluded) => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-preview',
+          chat_id: 'chat-1',
+          tool_name: 'read_logs',
+          is_read_only: true,
+          execution_status: 'SUCCEEDED',
+          output,
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+    const preview = wrapper.get('[data-testid="tool-result"]').text()
+
+    expect({
+      includesAllowedContent: preview.includes(included),
+      excludesOverflow: !preview.includes(excluded),
+      showsTruncationNotice: wrapper.find('[data-testid="tool-result-truncated"]').exists(),
+    }).toEqual({
+      includesAllowedContent: true,
+      excludesOverflow: true,
+      showsTruncationNotice: true,
+    })
+  })
+
+  it('copies the complete result when the visible preview is truncated', async () => {
+    let copiedText = ''
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => { copiedText = text },
+      },
+    })
+    const completeOutput = `${'x'.repeat(16 * 1024)}COPY_THIS_ENDING`
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-copy',
+          chat_id: 'chat-1',
+          tool_name: 'read_logs',
+          is_read_only: true,
+          execution_status: 'SUCCEEDED',
+          output: completeOutput,
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+    await wrapper.get('[data-testid="tool-result-copy"]').trigger('click')
+
+    expect(copiedText).toBe(completeOutput)
+  })
+
+  it('resets copy feedback when the card receives a different result', async () => {
+    let copiedText = ''
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => { copiedText = text },
+      },
+    })
+    const firstToolCall = {
+      call_id: 'tc-first',
+      chat_id: 'chat-1',
+      tool_name: 'read_logs',
+      is_read_only: true,
+      execution_status: 'SUCCEEDED' as const,
+      output: 'first result',
+      timestamp: '2026-06-17T00:00:00.000Z',
+    }
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, { props: { tool_call: firstToolCall } })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+    await wrapper.get('[data-testid="tool-result-copy"]').trigger('click')
+    await wrapper.setProps({
+      tool_call: { ...firstToolCall, call_id: 'tc-second', output: 'second result' },
+    })
+    const feedbackAfterChange = wrapper.get('[data-testid="tool-result-copy"]').text()
+    await wrapper.get('[data-testid="tool-result-copy"]').trigger('click')
+
+    expect({ feedbackAfterChange, copiedText }).toEqual({
+      feedbackAfterChange: 'Copy result',
+      copiedText: 'second result',
+    })
+  })
+
+  it('presents a null result instead of treating it as missing', async () => {
+    const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
+    const wrapper = mount(ToolCallInline, {
+      props: {
+        tool_call: {
+          call_id: 'tc-null',
+          chat_id: 'chat-1',
+          tool_name: 'lookup_value',
+          is_read_only: true,
+          execution_status: 'SUCCEEDED',
+          output: null,
+          timestamp: '2026-06-17T00:00:00.000Z',
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="tool-result"]').text()).toBe('null')
+  })
+
   it('renders rejected tool results with the backend rejection message', async () => {
     const { default: ToolCallInline } = await import('@/components/ToolCallInline.vue')
     const wrapper = mount(ToolCallInline, {
@@ -171,6 +389,8 @@ describe('ToolCallInline', () => {
         },
       },
     })
+
+    await wrapper.get('[data-testid="tool-evidence-summary"]').trigger('click')
 
     expect(wrapper.text()).toContain('Rejected')
     expect(wrapper.text()).toContain('Tool was rejected by human. Do NOT retry.')

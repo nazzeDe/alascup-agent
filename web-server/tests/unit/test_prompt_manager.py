@@ -7,6 +7,27 @@ pytestmark = pytest.mark.unit
 
 
 class TestPromptManager:
+    def test_default_prompt_defines_conditional_rca_report_contract(self):
+        from src.services.prompt_manager import PromptManager
+
+        prompt = PromptManager().build_system_prompt()
+        rca_concepts = (
+            "根因",
+            "关键证据",
+            "置信度",
+            "备选原因",
+            "影响范围",
+            "处置建议",
+            "风险",
+        )
+
+        assert (
+            "仅在完成故障诊断且已有工具证据时" in prompt
+            and all(concept in prompt for concept in rca_concepts)
+            and "普通对话" in prompt
+            and "简短" in prompt
+        )
+
     def test_override_single_section_from_file(self):
         from src.services.prompt_manager import PromptManager
 
