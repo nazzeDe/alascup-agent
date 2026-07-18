@@ -164,6 +164,9 @@ class AgentLoop:
                 act=self._act,
                 observe=self._observe,
                 lifecycle=self._lifecycle,
+                before_think=lambda current_state: self._prepare_before_think(
+                    current_state, auditor, channel
+                ),
             )
             await step.run(state, ctx, emitter, phase="main")
 
@@ -216,6 +219,14 @@ class AgentLoop:
             )
             return True
         self._breaker.inject_hint(state, it)
+        if not await self._prepare_before_think(state, auditor, channel):
+            return True
+        return False
+
+    async def _prepare_before_think(
+        self, state: AgentState, auditor: Auditor, channel: EventChannel
+    ) -> bool:
+        """Keep every LLM call behind the same context safety gate."""
         await self._compress_context(state, auditor)
         if await self._check_token_ceiling(state, auditor):
             await channel.send(
@@ -224,8 +235,9 @@ class AgentLoop:
                     message="Context too large even after compression. Start a new session or narrow the task scope.",
                 )
             )
-            return True
-        return False
+            state.transition = Transition.TOKEN_BUDGET_EXCEEDED
+            return False
+        return True
 
     async def _handle_terminal_state(
         self, state: AgentState, scratch: TurnScratch, auditor: Auditor

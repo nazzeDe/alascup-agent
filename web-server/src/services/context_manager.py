@@ -49,11 +49,11 @@ class ContextManager:
         return result
 
     async def compress(self, messages: list) -> list:
-        if len(messages) < 8:
-            return list(messages)
-
         # Layer 1: Truncate long tool results
         truncated = self._truncate_tool_results(messages)
+        if len(truncated) < 8:
+            return truncated
+
         if not self.needs_compression(self.count_tokens(truncated)):
             return truncated
 

@@ -46,3 +46,22 @@ class TestCountTokens:
         cm = ContextManager(window_size=1000, threshold=0.7)
         assert not cm.needs_compression(10)
         assert cm.needs_compression(700)
+
+
+class TestContextManagerCompression:
+    @pytest.mark.asyncio
+    async def test_compress_truncates_tool_results_in_short_history(self):
+        from src.services.context_manager import ContextManager
+
+        cm = ContextManager(max_result_chars=20)
+        messages = [
+            {"role": "user", "content": "check"},
+            {"role": "assistant", "content": "running"},
+            {"role": "tool", "content": "x" * 1_000},
+        ]
+
+        result = await cm.compress(messages)
+
+        assert len(result) == len(messages)
+        assert len(result[-1]["content"]) <= 20 + len("...[truncated]")
+        assert result[-1]["content"].endswith("...[truncated]")

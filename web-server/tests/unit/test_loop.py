@@ -148,6 +148,78 @@ class TestOrchestratorTermination:
         assert channel.is_closed()
 
     @pytest.mark.asyncio
+    async def test_compresses_tool_results_before_inner_think(self):
+        from src.agent.loop.orchestrator import LoopOrchestrator
+        from src.agent.results import ExecuteOutput, ReviewOutput, ThinkOutput
+        from src.services.context_manager import ContextManager
+
+        context_manager = ContextManager(
+            window_size=100,
+            threshold=0.7,
+            max_result_chars=20,
+        )
+        think_count = 0
+        observed_tool_lengths: list[int] = []
+
+        async def mock_think(state, ctx=None):
+            nonlocal think_count
+            think_count += 1
+            if think_count == 1:
+                return ThinkOutput(
+                    assistant_message=_msg("assistant", "checking"),
+                    tool_calls=[_call("trace_slow_syscalls", id="trace-1")],
+                    is_done=False,
+                )
+
+            observed_tool_lengths.extend(
+                len(message.content)
+                for message in state.messages
+                if message.role == "tool"
+            )
+            return ThinkOutput(
+                assistant_message=_msg("assistant", "done"),
+                is_done=True,
+            )
+
+        async def mock_review(state, ctx=None):
+            return ReviewOutput(approved=state.tool_calls)
+
+        async def mock_act(state, ctx=None):
+            return ExecuteOutput(
+                results=[
+                    _result(
+                        "trace_slow_syscalls",
+                        "trace-1",
+                        {
+                            "execution_status": "SUCCEEDED",
+                            "output": "x" * 1_000,
+                        },
+                    )
+                ]
+            )
+
+        orch = LoopOrchestrator(
+            context_manager=context_manager,
+            bridge=None,
+            audit_logger=MockAuditLogger(),
+            error_recovery=None,
+            llm=None,
+            chat_id="test-inner-context",
+            think_fn=mock_think,
+            review_fn=mock_review,
+            act_fn=mock_act,
+        )
+
+        await orch.run(
+            AgentState(messages=[_msg("user", "check system")]),
+            channel=EventChannel(),
+        )
+
+        assert think_count == 2
+        assert observed_tool_lengths
+        assert observed_tool_lengths[0] <= 20 + len("...[truncated]")
+
+    @pytest.mark.asyncio
     async def test_continues_when_transition_is_tool_results(self):
         from src.agent.loop.orchestrator import LoopOrchestrator
         from src.agent.results import ThinkOutput, ExecuteOutput

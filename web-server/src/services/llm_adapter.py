@@ -49,6 +49,16 @@ def classify_error(
 
 def _classify_bad_request(response_text: str) -> str:
     lower = response_text.lower()
+    if any(
+        marker in lower
+        for marker in (
+            "maximum context length",
+            "context length exceeded",
+            "context window",
+            "prompt too long",
+        )
+    ):
+        return "prompt_too_long"
     if "max_tokens" in lower or "invalid" in lower:
         return "unknown"
     if any(kw in lower for kw in ("too large", "too long", "context", "token")):

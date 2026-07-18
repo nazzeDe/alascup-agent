@@ -10,18 +10,24 @@ from src.observability.debug_log import log as debug_log
 class AgentStep:
     """Run one bounded think/review/act/observe pass against state."""
 
-    def __init__(self, *, think, review, act, observe, lifecycle=None):
+    def __init__(
+        self, *, think, review, act, observe, lifecycle=None, before_think=None
+    ):
         self._think = think
         self._review = review
         self._act = act
         self._observe = observe
         self._lifecycle = lifecycle
+        self._before_think = before_think
 
     async def run(
         self, state: AgentState, ctx, emitter, *, phase: str = "main"
     ) -> None:
         state.emitted_results = []
         for _ in range(25):
+            if self._before_think is not None and not await self._before_think(state):
+                break
+
             think_out = await self._think(state, ctx)
             self._apply_think_output(state, think_out)
 

@@ -73,6 +73,17 @@ class TestLLMErrorClassification:
         error_type = classify_error(400, "max_tokens must be positive")
         assert error_type == "unknown"
 
+    def test_classify_invalid_request_context_length_as_prompt_too_long(self):
+        """Provider error envelopes may contain invalid_request_error for context overflow."""
+        from src.services.llm_adapter import classify_error
+
+        response = (
+            '{"error":{"message":"maximum context length exceeded",'
+            '"type":"invalid_request_error"}}'
+        )
+
+        assert classify_error(400, response) == "prompt_too_long"
+
 
 class TestErrorRecovery:
     def test_prompt_too_long_compress_recovery(self):
