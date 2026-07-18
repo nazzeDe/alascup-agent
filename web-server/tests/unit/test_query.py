@@ -627,7 +627,12 @@ class TestChatTurnConcurrent:
 
         event_types = [e[0] for e in events]
         assert "tool_approval_required" in event_types
-        assert "tool_result" in event_types
+        tool_result_ids = {
+            json.loads(data)["call_id"]
+            for event_type, data in events
+            if event_type == "tool_result"
+        }
+        assert tool_result_ids == {"tc-1", "tc-2"}
         assert events[-1][0] == "done"
         assert len(risky.calls) == 2
 

@@ -18,7 +18,7 @@ async def think_node(
     state, ctx: TurnContext | None = None, *, llm, executor=None, lifecycle=None
 ):
     if state.approved_tool_calls:
-        return ThinkOutput()
+        return ThinkOutput(pre_executed=state.streaming_tool_results)
 
     available_tools = state.available_tools
     tools = _format_tools(available_tools)
