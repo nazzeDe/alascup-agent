@@ -16,6 +16,12 @@ class _DummyEbpfRuntime:
     async def shutdown(self) -> None:
         return None
 
+    def watch(self, probe) -> dict:
+        return {"events": [], "probe_status": "not_registered"}
+
+    async def capture(self, probe, duration=None) -> dict:
+        return {"events": []}
+
 
 @pytest_asyncio.fixture
 async def mcp_client(tmp_path: Path):

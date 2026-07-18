@@ -344,7 +344,9 @@ class TestBashExecutionEdges:
         assert result["execution_status"] == "FAILED"
         assert result["stderr"] == "denied"
 
-    def test_timeout_kills_process_group(self, sandbox, monkeypatch: pytest.MonkeyPatch):
+    def test_timeout_kills_process_group(
+        self, sandbox, monkeypatch: pytest.MonkeyPatch
+    ):
         from subprocess import TimeoutExpired
 
         from src.security.execution_context import controlled_execution
@@ -368,7 +370,10 @@ class TestBashExecutionEdges:
             def kill(self):
                 calls.append(("kill", self.pid))
 
-        monkeypatch.setattr(bash.subprocess, "Popen", lambda *_args, **_kwargs: HangingProcess())
+        monkeypatch.setattr(
+            bash.subprocess, "Popen", lambda *_args, **_kwargs: HangingProcess()
+        )
+
         def record_killpg(pid: int, _signal: int) -> None:
             calls.append(("killpg", pid))
 
@@ -430,6 +435,8 @@ class _FakeProcess:
         self.hang = hang
         self.terminated = False
         self.killed = False
+        self.stdout = _ReadableStream(stdout)
+        self.stderr = _ReadableStream(stderr)
 
     async def communicate(self):
         if self.hang:
@@ -443,6 +450,8 @@ class _FakeProcess:
         self.killed = True
 
     async def wait(self) -> int:
+        if self.hang and not self.terminated:
+            await asyncio.sleep(1)
         self.returncode = -15 if self.terminated else self.returncode
         return self.returncode
 
@@ -454,6 +463,18 @@ def _fake_subprocess_factory(proc: _FakeProcess):
     return fake_create_subprocess_exec
 
 
+class _ReadableStream:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0 or size >= len(self._data):
+            chunk, self._data = self._data, b""
+            return chunk
+        chunk, self._data = self._data[:size], self._data[size:]
+        return chunk
+
+
 class TestBpftraceRunnerEdges:
     def test_on_demand_timeout_uses_script_window_with_grace(self) -> None:
         from src.tools.perception.ebpf.runner import on_demand_timeout
@@ -462,7 +483,7 @@ class TestBpftraceRunnerEdges:
         assert on_demand_timeout("syscount.bt", requested_duration=20) == 25.0
 
     @pytest.mark.asyncio
-    async def test_run_on_demand_parses_json_and_skips_console_lines(
+    async def test_probe_executor_parses_json_and_skips_console_lines(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -479,14 +500,65 @@ class TestBpftraceRunnerEdges:
             runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
         )
 
-        result = await runner.run_on_demand(
-            "syscount.bt", timeout=1, resolve_fn=lambda _name: script
-        )
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        result = await executor.execute("syscount.bt", timeout=1)
 
         assert result == [{"type": "map", "data": {"open": 2}}]
 
     @pytest.mark.asyncio
-    async def test_run_on_demand_reports_nonzero_exit(
+    async def test_probe_executor_terminates_when_output_exceeds_limit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "noisy.bt"
+        script.write_text("// probe", encoding="utf-8")
+        proc = _FakeProcess(stdout=b"x" * 64)
+        monkeypatch.setattr(runner, "MAX_OUTPUT_BYTES", 32, raising=False)
+        monkeypatch.setattr(
+            runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
+        )
+
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        result = await executor.execute("noisy.bt", timeout=1)
+
+        assert result == [
+            {
+                "error": "output_limit_exceeded",
+                "script": "noisy.bt",
+                "max_output_bytes": 32,
+                "stream": "stdout",
+            }
+        ]
+        assert proc.terminated is True
+
+    @pytest.mark.asyncio
+    async def test_probe_executor_reports_spawn_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.tools.perception.ebpf import runner
+
+        script = tmp_path / "missing-bpftrace.bt"
+        script.write_text("// probe", encoding="utf-8")
+
+        async def fail_to_spawn(*_args, **_kwargs):
+            raise FileNotFoundError("bpftrace not found")
+
+        monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", fail_to_spawn)
+
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        result = await executor.execute("missing-bpftrace.bt", timeout=1)
+
+        assert result == [
+            {
+                "error": "spawn_failed",
+                "script": "missing-bpftrace.bt",
+                "message": "bpftrace not found",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_probe_executor_reports_nonzero_exit(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from src.tools.perception.ebpf import runner
@@ -498,16 +570,15 @@ class TestBpftraceRunnerEdges:
             runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
         )
 
-        result = await runner.run_on_demand(
-            "bad.bt", timeout=1, resolve_fn=lambda _name: script
-        )
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        result = await executor.execute("bad.bt", timeout=1)
 
         assert result == [
             {"error": "syntax error", "script": "bad.bt", "returncode": 2}
         ]
 
     @pytest.mark.asyncio
-    async def test_run_on_demand_terminates_on_timeout(
+    async def test_probe_executor_terminates_on_timeout(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from src.tools.perception.ebpf import runner
@@ -519,15 +590,14 @@ class TestBpftraceRunnerEdges:
             runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
         )
 
-        result = await runner.run_on_demand(
-            "slow.bt", timeout=0.001, resolve_fn=lambda _name: script
-        )
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        result = await executor.execute("slow.bt", timeout=0.001)
 
         assert result == [{"error": "timeout", "script": "slow.bt", "timeout_s": 0.001}]
         assert proc.terminated is True
 
     @pytest.mark.asyncio
-    async def test_run_on_demand_terminates_on_cancellation(
+    async def test_probe_executor_terminates_on_cancellation(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from src.tools.perception.ebpf import runner
@@ -539,9 +609,8 @@ class TestBpftraceRunnerEdges:
             runner.asyncio, "create_subprocess_exec", _fake_subprocess_factory(proc)
         )
 
-        task = asyncio.create_task(
-            runner.run_on_demand("slow.bt", timeout=10, resolve_fn=lambda _name: script)
-        )
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: script)
+        task = asyncio.create_task(executor.execute("slow.bt", timeout=10))
         await asyncio.sleep(0)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -550,10 +619,11 @@ class TestBpftraceRunnerEdges:
         assert proc.terminated is True
 
     @pytest.mark.asyncio
-    async def test_run_on_demand_reports_missing_probe(self) -> None:
-        from src.tools.perception.ebpf.runner import run_on_demand
+    async def test_probe_executor_reports_missing_probe(self) -> None:
+        from src.tools.perception.ebpf import runner
 
-        result = await run_on_demand("missing.bt", resolve_fn=lambda _name: None)
+        executor = runner.BpftraceProbeExecutor(resolve_fn=lambda _name: None)
+        result = await executor.execute("missing.bt", timeout=15)
 
         assert result == [
             {

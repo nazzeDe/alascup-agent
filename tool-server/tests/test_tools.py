@@ -861,9 +861,7 @@ class TestHandleExecuteTool:
 
         assert result["execution_status"] == "SUCCEEDED"
         assert result["output"]["partition"] == "/"
-        assert result["output"]["disk_usage_percent"] == result[
-            "disk_usage_percent"
-        ]
+        assert result["output"]["disk_usage_percent"] == result["disk_usage_percent"]
 
     @pytest.mark.asyncio
     async def test_cache_hit(self, config, cache):
@@ -1183,14 +1181,14 @@ class TestServerCreation:
             async def shutdown(self) -> None:
                 return None
 
-            def watch(self, script_name: str) -> dict:
+            def watch(self, probe) -> dict:
                 return {
-                    "events": [{"runtime": self.label, "script": script_name}],
+                    "events": [{"runtime": self.label, "probe": str(probe)}],
                     "probe_status": "running",
                 }
 
-            async def trace(self, script_name: str, duration: int) -> dict:
-                return {"events": [{"runtime": self.label, "script": script_name}]}
+            async def capture(self, probe, duration: int | None = None) -> dict:
+                return {"events": [{"runtime": self.label, "probe": str(probe)}]}
 
         first = await create_server(config, ebpf_runtime=FakeRuntime("first"))
         second = await create_server(config, ebpf_runtime=FakeRuntime("second"))

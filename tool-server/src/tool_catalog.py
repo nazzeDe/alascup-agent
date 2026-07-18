@@ -18,7 +18,7 @@ from src.tools.perception import (
     get_network_info,
     get_process_list,
 )
-from src.tools.perception.ebpf.runtime import EbpfRuntime
+from src.tools.perception.ebpf.runtime import EbpfRuntime, ProbeKind, WatchKind
 from src.tools.runtime import get_tool_server_logs, get_tool_server_status
 
 _ANY_OBJECT: dict[str, Any] = {"type": "object"}
@@ -186,7 +186,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_process_exec() -> dict:
-        return ebpf_runtime.watch("execsnoop.bt")
+        return ebpf_runtime.watch(WatchKind.PROCESS_EXEC)
 
     @server.tool(
         name="watch_process_exit",
@@ -195,7 +195,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_process_exit() -> dict:
-        return ebpf_runtime.watch("proc_exit.bt")
+        return ebpf_runtime.watch(WatchKind.PROCESS_EXIT)
 
     @server.tool(
         name="watch_tcp_connections",
@@ -204,7 +204,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     def _watch_tcp_connections() -> dict:
-        return ebpf_runtime.watch("tcpconn.bt")
+        return ebpf_runtime.watch(WatchKind.TCP_CONNECTIONS)
 
     @server.tool(
         name="trace_syscall_stats",
@@ -213,7 +213,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_syscall_stats(duration: int = 5) -> dict:
-        return await ebpf_runtime.trace("syscount.bt", duration)
+        return await ebpf_runtime.capture(ProbeKind.SYSCALL_STATS, duration)
 
     @server.tool(
         name="trace_slow_syscalls",
@@ -222,7 +222,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_slow_syscalls(duration: int = 5) -> dict:
-        return await ebpf_runtime.trace("syscall_slow.bt", duration)
+        return await ebpf_runtime.capture(ProbeKind.SLOW_SYSCALLS, duration)
 
     @server.tool(
         name="trace_tcp_drops",
@@ -231,7 +231,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_tcp_drops(duration: int = 10) -> dict:
-        return await ebpf_runtime.trace("tcpdrop.bt", duration)
+        return await ebpf_runtime.capture(ProbeKind.TCP_DROPS, duration)
 
     @server.tool(
         name="trace_io_latency",
@@ -240,7 +240,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_io_latency(duration: int = 10) -> dict:
-        return await ebpf_runtime.trace("biolatency.bt", duration)
+        return await ebpf_runtime.capture(ProbeKind.IO_LATENCY, duration)
 
     @server.tool(
         name="trace_oom_events",
@@ -249,7 +249,7 @@ def _register_ebpf_tools(server: FastMCP, ebpf_runtime: EbpfRuntime) -> None:
         meta={"is_read_only": True, "is_rollbackable": True, "mutable": False},
     )
     async def _trace_oom_events(duration: int = 30) -> dict:
-        return await ebpf_runtime.trace("oomkill.bt", duration)
+        return await ebpf_runtime.capture(ProbeKind.OOM_EVENTS, duration)
 
 
 def _register_health_tool(server: FastMCP) -> None:

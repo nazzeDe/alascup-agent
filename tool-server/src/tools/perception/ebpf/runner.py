@@ -10,6 +10,7 @@ import asyncio
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from loguru import logger
 
@@ -25,6 +26,51 @@ _SCRIPT_WINDOWS: dict[str, float] = {
 }
 _DEFAULT_WINDOW_FALLBACK: float = 10.0
 _TIMEOUT_GRACE_SECONDS: float = 5.0
+MAX_OUTPUT_BYTES: int = 1 * 1024 * 1024
+_MAX_READ_CHUNK_BYTES: int = 64 * 1024
+_MAX_ERROR_TEXT_CHARS: int = 4096
+
+
+class ProbeExecutor(Protocol):
+    """Internal port for executing one resolved bpftrace probe."""
+
+    async def execute(self, script_name: str, timeout: float) -> list[dict]: ...
+
+
+class BpftraceProbeExecutor:
+    """Production adapter for the bpftrace process boundary."""
+
+    def __init__(self, resolve_fn: Callable[[str], Path | None] = resolve) -> None:
+        self._resolve_fn = resolve_fn
+
+    async def execute(self, script_name: str, timeout: float) -> list[dict]:
+        return await run_on_demand(
+            script_name,
+            timeout=timeout,
+            resolve_fn=self._resolve_fn,
+        )
+
+
+class _OutputLimitExceeded(Exception):
+    def __init__(self, stream: str, max_output_bytes: int) -> None:
+        self.stream = stream
+        self.max_output_bytes = max_output_bytes
+        super().__init__(f"bpftrace {stream} output exceeded {max_output_bytes} bytes")
+
+
+class _OutputBudget:
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._used = 0
+
+    @property
+    def remaining(self) -> int:
+        return self._limit - self._used
+
+    def consume(self, size: int, stream: str) -> None:
+        if self._used + size > self._limit:
+            raise _OutputLimitExceeded(stream, self._limit)
+        self._used += size
 
 
 async def run_on_demand(
@@ -53,12 +99,29 @@ async def run_on_demand(
     stdout, stderr, returncode = await _run_bpftrace(
         script_path, script_name, effective_timeout, args
     )
+    if returncode == "spawn_failed":
+        return [
+            {
+                "error": "spawn_failed",
+                "script": script_name,
+                "message": _decode_error(stderr),
+            }
+        ]
+    if returncode == "output_limit_exceeded":
+        return [
+            {
+                "error": "output_limit_exceeded",
+                "script": script_name,
+                "max_output_bytes": MAX_OUTPUT_BYTES,
+                "stream": _decode_error(stderr),
+            }
+        ]
     if returncode == "timeout":
         return [
             {"error": "timeout", "script": script_name, "timeout_s": effective_timeout}
         ]
     if returncode != 0:
-        stderr_text = stderr.decode(errors="replace").strip() if stderr else ""
+        stderr_text = _decode_error(stderr)
         logger.error(
             "bpftrace failed script={} returncode={} stderr={}",
             script_name,
@@ -104,28 +167,84 @@ async def _run_bpftrace(
     env = {f"BPFTRACE_ARG_{k.upper()}": v for k, v in (args or {}).items()}
 
     logger.debug("bpftrace start script={} timeout={}s", script_name, effective_timeout)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env={**env} if env else None,
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**env} if env else None,
+        )
+    except OSError as exc:
+        logger.error("bpftrace spawn failed script={} error={}", script_name, exc)
+        return b"", str(exc).encode(errors="replace"), "spawn_failed"
+
+    if proc.stdout is None or proc.stderr is None:
+        await _terminate_bpftrace(proc)
+        message = "bpftrace process pipes were not created"
+        logger.error("bpftrace spawn failed script={} error={}", script_name, message)
+        return b"", message.encode(), "spawn_failed"
+
+    budget = _OutputBudget(MAX_OUTPUT_BYTES)
+    stdout_task = asyncio.create_task(_read_bounded(proc.stdout, budget, "stdout"))
+    stderr_task = asyncio.create_task(_read_bounded(proc.stderr, budget, "stderr"))
+    wait_task = asyncio.create_task(proc.wait())
+    tasks = (stdout_task, stderr_task, wait_task)
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=effective_timeout
+        await asyncio.wait_for(
+            asyncio.gather(stdout_task, stderr_task, wait_task),
+            timeout=effective_timeout,
         )
+    except _OutputLimitExceeded as exc:
+        logger.error(
+            "bpftrace output limit exceeded script={} stream={} max_bytes={}",
+            script_name,
+            exc.stream,
+            exc.max_output_bytes,
+        )
+        await _cancel_tasks(tasks)
+        await _terminate_bpftrace(proc)
+        return b"", exc.stream.encode(), "output_limit_exceeded"
     except asyncio.TimeoutError:
         logger.warning(
             "bpftrace timeout script={} timeout={}s", script_name, effective_timeout
         )
+        await _cancel_tasks(tasks)
         await _terminate_bpftrace(proc)
         return b"", b"", "timeout"
     except asyncio.CancelledError:
         logger.warning("bpftrace cancelled script={}", script_name)
+        await _cancel_tasks(tasks)
         await _terminate_bpftrace(proc)
         raise
-    return stdout, stderr, proc.returncode or 0
+    finally:
+        await _cancel_tasks(tasks)
+
+    return stdout_task.result(), stderr_task.result(), proc.returncode or 0
+
+
+async def _read_bounded(stream, budget: _OutputBudget, stream_name: str) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = await stream.read(min(_MAX_READ_CHUNK_BYTES, budget.remaining + 1))
+        if not chunk:
+            return b"".join(chunks)
+        budget.consume(len(chunk), stream_name)
+        chunks.append(chunk)
+
+
+async def _cancel_tasks(tasks: tuple[asyncio.Task, ...]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _decode_error(data: bytes) -> str:
+    text = data.decode(errors="replace").strip() if data else ""
+    if len(text) > _MAX_ERROR_TEXT_CHARS:
+        return text[:_MAX_ERROR_TEXT_CHARS] + "..."
+    return text
 
 
 async def _terminate_bpftrace(proc) -> None:
